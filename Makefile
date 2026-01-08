@@ -26,6 +26,8 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/syscall.c \
            $(SRC_DIR)/kernel/time.c \
            $(SRC_DIR)/kernel/timer.c \
+           $(SRC_DIR)/kernel/irq/irq.c \
+           $(SRC_DIR)/kernel/irq/gic.c \
            $(SRC_DIR)/kernel/mm/page.c \
            $(SRC_DIR)/kernel/mm/kheap.c \
            $(SRC_DIR)/lib/printk.c \
@@ -64,6 +66,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)/arch/arm64/boot
 	mkdir -p $(BUILD_DIR)/kernel
 	mkdir -p $(BUILD_DIR)/kernel/mm
+	mkdir -p $(BUILD_DIR)/kernel/irq
 	mkdir -p $(BUILD_DIR)/lib
 	mkdir -p $(BUILD_DIR)/lib/sync
 	mkdir -p $(BUILD_DIR)/drivers/uart

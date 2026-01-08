@@ -30,6 +30,9 @@ extern int kheap_init(void *start, uint64_t size);
 /* 时间管理 */
 extern int time_init(void);
 
+/* 中断管理 */
+extern int irq_init_subsystem(void);
+
 /**
  * @brief 系统配置
  */
@@ -133,12 +136,16 @@ void kernel_main(void) {
     }
     printk("OK\n");
 
+    /* 初始化中断管理 */
+    printk("[INIT] Interrupt controller... ");
+    if (irq_init_subsystem() != 0) {
+        printk("FAILED\n");
+        goto kernel_halt;
+    }
+    printk("OK\n");
+
     /* TODO: 初始化调度器 */
     printk("[INIT] Scheduler... ");
-    printk("NOT IMPLEMENTED\n");
-
-    /* TODO: 初始化中断管理 */
-    printk("[INIT] Interrupt controller... ");
     printk("NOT IMPLEMENTED\n");
 
     /* TODO: 初始化系统调用 */
