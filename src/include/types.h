@@ -36,6 +36,9 @@ typedef int32_t ErrorCode_t;
 #define ERROR_BUSY            (-5)
 #define ERROR_NOT_SUPPORTED   (-6)
 #define ERROR_NOT_FOUND       (-7)
+#define ERROR_INVALID_STATE   (-8)
+#define ERROR_WOULD_BLOCK     (-9)
+#define ERROR_OVERFLOW        (-10)
 
 /**
  * @brief NULL指针定义

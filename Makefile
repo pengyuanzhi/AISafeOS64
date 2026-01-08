@@ -27,6 +27,9 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/mm/page.c \
            $(SRC_DIR)/kernel/mm/kheap.c \
            $(SRC_DIR)/lib/printk.c \
+           $(SRC_DIR)/lib/sync/spinlock.c \
+           $(SRC_DIR)/lib/sync/mutex.c \
+           $(SRC_DIR)/lib/sync/semaphore.c \
            $(SRC_DIR)/drivers/uart/uart.c
 
 # 目标文件
@@ -60,6 +63,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)/kernel
 	mkdir -p $(BUILD_DIR)/kernel/mm
 	mkdir -p $(BUILD_DIR)/lib
+	mkdir -p $(BUILD_DIR)/lib/sync
 	mkdir -p $(BUILD_DIR)/drivers/uart
 
 # 编译汇编文件

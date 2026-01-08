@@ -1,0 +1,192 @@
+/**
+ * @file sync.h
+ * @brief AISafe64 RTOS - 同步原语接口
+ * @author AISafe64 Team
+ * @date 2025-01-08
+ * @version 1.0
+ *
+ * @details 同步原语接口定义
+ *          - 自旋锁（Spinlock）
+ *          - 互斥锁（Mutex）
+ *          - 信号量（Semaphore）
+ *
+ * @note ARMv8-A原子操作（LDXR/STXR）
+ * @note MISRA-C:2012合规
+ */
+
+#ifndef SYNC_H
+#define SYNC_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief 自旋锁结构
+ * @details Ticket Lock算法
+ */
+typedef struct {
+    volatile uint32_t next_ticket;    /**< 下一个票据 */
+    volatile uint32_t serving_ticket; /**< 当前服务的票据 */
+} spinlock_t;
+
+/**
+ * @brief 互斥锁结构
+ * @details 支持优先级继承
+ */
+typedef struct {
+    volatile uint32_t locked;         /**< 锁状态 */
+    void *owner;                      /**< 持有者任务 */
+    uint32_t owner_priority;          /**< 持有者优先级 */
+    uint32_t ceiling_priority;        /**< 优先级天花板 */
+    uint32_t lock_count;              /**< 递归锁计数 */
+} mutex_t;
+
+/**
+ * @brief 信号量结构
+ * @details 支持二值信号量和计数信号量
+ */
+typedef struct {
+    volatile int32_t count;           /**< 计数 */
+    uint32_t max_count;               /**< 最大计数 */
+} semaphore_t;
+
+/**
+ * @brief 自旋锁初始化
+ * @param lock 自旋锁指针
+ */
+void spinlock_init(spinlock_t *lock);
+
+/**
+ * @brief 自旋锁加锁
+ * @param lock 自旋锁指针
+ *
+ * @details Ticket Lock算法，忙等待
+ */
+void spinlock_lock(spinlock_t *lock);
+
+/**
+ * @brief 自旋锁尝试加锁
+ * @param lock 自旋锁指针
+ * @return 成功返回true，失败返回false
+ */
+bool spinlock_trylock(spinlock_t *lock);
+
+/**
+ * @brief 自旋锁解锁
+ * @param lock 自旋锁指针
+ */
+void spinlock_unlock(spinlock_t *lock);
+
+/**
+ * @brief 互斥锁初始化
+ * @param mutex 互斥锁指针
+ * @param ceiling_priority 优先级天花板（0表示不使用）
+ */
+void mutex_init(mutex_t *mutex, uint32_t ceiling_priority);
+
+/**
+ * @brief 互斥锁加锁
+ * @param mutex 互斥锁指针
+ * @return 成功返回0，失败返回负错误码
+ *
+ * @details 支持递归锁和优先级继承
+ */
+int mutex_lock(mutex_t *mutex);
+
+/**
+ * @brief 互斥锁尝试加锁
+ * @param mutex 互斥锁指针
+ * @return 成功返回0，失败返回负错误码
+ */
+int mutex_trylock(mutex_t *mutex);
+
+/**
+ * @brief 互斥锁解锁
+ * @param mutex 互斥锁指针
+ * @return 成功返回0，失败返回负错误码
+ */
+int mutex_unlock(mutex_t *mutex);
+
+/**
+ * @brief 互斥锁持有者检查
+ * @param mutex 互斥锁指针
+ * @return 当前任务持有返回true
+ */
+bool mutex_is_held(mutex_t *mutex);
+
+/**
+ * @brief 信号量初始化
+ * @param sem 信号量指针
+ * @param initial_count 初始计数
+ * @param max_count 最大计数
+ * @return 成功返回0，失败返回负错误码
+ */
+int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count);
+
+/**
+ * @brief 信号量等待（P操作）
+ * @param sem 信号量指针
+ * @return 成功返回0，失败返回负错误码
+ *
+ * @details 如果计数为0，阻塞当前任务
+ */
+int semaphore_wait(semaphore_t *sem);
+
+/**
+ * @brief 信号量尝试等待
+ * @param sem 信号量指针
+ * @return 成功返回0，失败返回负错误码
+ *
+ * @details 非阻塞模式
+ */
+int semaphore_trywait(semaphore_t *sem);
+
+/**
+ * @brief 信号量释放（V操作）
+ * @param sem 信号量指针
+ * @return 成功返回0，失败返回负错误码
+ */
+int semaphore_post(semaphore_t *sem);
+
+/**
+ * @brief 获取信号量计数
+ * @param sem 信号量指针
+ * @return 当前计数
+ */
+int32_t semaphore_getcount(semaphore_t *sem);
+
+/**
+ * @brief 临界区保护宏（自旋锁）
+ */
+#define CRITICAL_ENTER(lock) \
+    spinlock_lock(lock)
+
+#define CRITICAL_EXIT(lock) \
+    spinlock_unlock(lock)
+
+/**
+ * @brief RAII风格的自旋锁（需要编译器支持cleanup属性）
+ */
+#define SCOPE_SPINLOCK(lock) \
+    spinlock_t *__scope_lock __attribute__((cleanup(spinlock_cleanup))) = &(lock); \
+    spinlock_lock(__scope_lock)
+
+/**
+ * @brief 自旋锁清理函数（用于RAII）
+ */
+static inline void spinlock_cleanup(spinlock_t **lock) {
+    if (lock != NULL && *lock != NULL) {
+        spinlock_unlock(*lock);
+    }
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SYNC_H */
