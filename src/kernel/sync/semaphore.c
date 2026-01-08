@@ -17,6 +17,7 @@
 #include "sync.h"
 #include "types.h"
 #include "sched.h"
+#include "irq.h"
 #include <limits.h>
 #include <stddef.h>
 
@@ -177,14 +178,21 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
         break;
     }
 
-    /* 获取当前任务 */
-    TCB_t *current = get_current_task();
-
     /* 运行时检查：确保不在中断上下文中调用 */
-    if (current == NULL)
+    if (in_interrupt())
     {
         /* 在中断上下文中调用 semaphore_wait 是编程错误 */
         /* 根据使用约束：只能在中断中释放，不能在中断中获取 */
+        return -ERROR_INVALID_STATE;
+    }
+
+    /* 获取当前任务（确保在任务上下文） */
+    TCB_t *current = get_current_task();
+
+    /* 双重检查：确保 current 非空 */
+    if (current == NULL)
+    {
+        /* 系统错误：不在中断中但也没有当前任务 */
         return -ERROR_INVALID_STATE;
     }
 

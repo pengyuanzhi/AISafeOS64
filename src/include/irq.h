@@ -174,6 +174,30 @@ extern "C"
     void irq_handler(void);
 
     /**
+     * @brief 检查是否在中断上下文中
+     * @return 在中断中返回true，否则返回false
+     *
+     * @details 检查当前CPU是否正在处理中断
+     *          - 包括硬中断（IRQ）
+     *          - 支持中断嵌套检测
+     *          - per-CPU 计数器保证多核安全
+     *
+     * @note 比 get_current_task() == NULL 更可靠
+     * @note 典型用途：信号量/锁函数检查调用上下文
+     */
+    bool in_interrupt(void);
+
+    /**
+     * @brief 获取当前中断嵌套深度
+     * @return 中断嵌套深度（0表示不在中断中）
+     *
+     * @details per-CPU 计数器，支持多核
+     *          - irq_handler 入口：depth++
+     *          - irq_handler 出口：depth--
+     */
+    uint32_t irq_get_depth(void);
+
+    /**
      * @brief 全局中断使能（ARMv8-A）
      */
     static inline void irq_enable_global(void)

@@ -18,6 +18,7 @@
 #include "printk.h"
 #include "types.h"
 #include "mm.h"
+#include "sched.h"
 #include <stddef.h>
 
 /**
@@ -25,6 +26,30 @@
  * @details 索引对应中断号
  */
 static irq_desc_t *g_irq_table[1020] = {NULL};
+
+/**
+ * @brief Per-CPU 中断嵌套深度
+ * @details 每个CPU维护独立的中断深度计数器
+ *
+ * @note 简单实现：使用数组支持多核（MAX_CPUS=8）
+ * @note 未来可优化为真正的 per-CPU 变量
+ */
+static uint32_t irq_depth_per_cpu[8] = {0};
+
+/**
+ * @brief 获取当前CPU的中断深度指针
+ * @return 指向当前CPU中断深度的指针
+ */
+static inline uint32_t *this_cpu_irq_depth(void)
+{
+    uint32_t cpu = smp_processor_id();
+    if (cpu >= 8U)
+    {
+        /* 不应该发生：CPU ID 超出范围 */
+        return &irq_depth_per_cpu[0];
+    }
+    return &irq_depth_per_cpu[cpu];
+}
 
 /**
  * @brief GIC CPU Interface寄存器地址（System Register访问）
@@ -179,6 +204,10 @@ int irq_unregister_handler(uint32_t irq)
  */
 void irq_handler(void)
 {
+    /* 增加中断深度（进入中断上下文） */
+    uint32_t *depth_ptr = this_cpu_irq_depth();
+    (*depth_ptr)++;
+
     /* 读取中断确认寄存器 */
     uint32_t iar = gic_read_iar();
     uint32_t irq = iar & 0x3FF;
@@ -188,6 +217,7 @@ void irq_handler(void)
     {
         /* 伪中断，直接结束 */
         gic_write_eoir(iar);
+        (*depth_ptr)--;
         return;
     }
 
@@ -216,6 +246,38 @@ void irq_handler(void)
         uint32_t mask = 1U << (irq % 32);
         *(volatile uint32_t *)(0x08000000UL + offset) = mask;
     }
+
+    /* 减少中断深度（退出中断上下文） */
+    (*depth_ptr)--;
+}
+
+/**
+ * @brief 检查是否在中断上下文中
+ * @return 在中断中返回true，否则返回false
+ *
+ * @details 通过检查 per-CPU 中断深度计数器判断
+ *          - 深度 > 0：在中断上下文中
+ *          - 深度 = 0：在进程上下文中
+ */
+bool in_interrupt(void)
+{
+    uint32_t *depth_ptr = this_cpu_irq_depth();
+    return (*depth_ptr) > 0U;
+}
+
+/**
+ * @brief 获取当前中断嵌套深度
+ * @return 中断嵌套深度（0表示不在中断中）
+ *
+ * @details 返回 per-CPU 中断深度计数器的当前值
+ *          - 0：不在中断中
+ *          - 1：在一层中断中
+ *          - >1：在中断嵌套中
+ */
+uint32_t irq_get_depth(void)
+{
+    uint32_t *depth_ptr = this_cpu_irq_depth();
+    return *depth_ptr;
 }
 
 /**
