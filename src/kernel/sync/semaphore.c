@@ -255,9 +255,6 @@ int semaphore_post(semaphore_t *sem)
             /* 内存屏障 */
             MEMORY_BARRIER();
 
-            /* 唤醒等待的任务 */
-            SEVL();
-
             /* 检查是否有任务在等待 */
             if (!list_empty(&sem->wait_queue))
             {
