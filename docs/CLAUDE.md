@@ -864,7 +864,47 @@ typedef struct StructureName
 } StructureName_t;
 ```
 
-#### 4.2.3 行长度
+#### 4.2.3 无限循环规范
+```c
+/* 无限循环必须使用 for (;;) 而不是 while (1) 或 while (true) */
+for (;;)
+{
+    /* 无限循环体 */
+    do_something();
+}
+
+/* ❌ 错误：使用 while (1) */
+while (1)
+{
+    /* 不推荐的做法 */
+    do_something();
+}
+
+/* ❌ 错误：使用 while (true) */
+while (true)
+{
+    /* 不推荐的做法 */
+    do_something();
+}
+
+/* ✅ 正确：for (;;) 是标准的无限循环写法 */
+/* 理由：
+ * 1. for (;;) 是明确表达"无限循环"的惯用写法
+ * 2. 避免魔法数字（1）或布尔值（true）
+ * 3. 更好的编译器优化
+ * 4. MISRA-C:2012 规则 15.1 推荐做法
+ */
+void idle_task(void)
+{
+    for (;;)
+    {
+        /* 等待中断或执行空闲任务 */
+        __asm__ volatile("wfe");
+    }
+}
+```
+
+#### 4.2.4 行长度
 ```c
 /* 每行最多120个字符 */
 uint32_t result = function_with_very_long_name(argument1, argument2, argument3, argument4);
