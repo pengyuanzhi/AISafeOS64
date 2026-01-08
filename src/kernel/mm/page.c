@@ -57,25 +57,25 @@ int page_allocator_init(uint64_t base_addr, uint64_t size)
     /* 参数验证 */
     if (base_addr == 0UL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (size < PAGE_SIZE)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 检查对齐 */
     if ((base_addr & (PAGE_SIZE - 1UL)) != 0UL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 计算页数 */
     uint64_t pages = size / PAGE_SIZE;
     if (pages > MAX_PAGES)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 初始化分配器结构 */
@@ -99,7 +99,7 @@ int page_allocator_init(uint64_t base_addr, uint64_t size)
         g_page_allocator.bitmap[bitmap_words - 1] = mask;
     }
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**

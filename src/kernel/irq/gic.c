@@ -164,7 +164,7 @@ int irq_enable(uint32_t irq)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (irq < 32)
@@ -190,7 +190,7 @@ int irq_disable(uint32_t irq)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (irq < 32)
@@ -217,12 +217,12 @@ int irq_set_priority(uint32_t irq, uint32_t priority)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (priority > 255)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* GIC优先级寄存器以字节为单位访问 */
@@ -256,13 +256,13 @@ int irq_set_trigger(uint32_t irq, irq_trigger_t trigger)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* SGI (0-15) 固定为电平触发，不能修改 */
     if (irq < 16)
     {
-        return -ERROR_NOT_SUPPORTED;
+        return -ENOTSUP;
     }
 
     uint32_t mask = (2U << ((irq % 16) * 2));
@@ -315,12 +315,12 @@ int irq_send_sgi(uint8_t target_cpu, uint8_t sgi)
 {
     if (sgi > 15)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (target_cpu == 0)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 发送SGI (使用GICD_SGIR寄存器，GICv3兼容模式) */

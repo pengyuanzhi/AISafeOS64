@@ -58,12 +58,12 @@ static int timer_remove(swtimer_t *timer)
 {
     if (timer == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (g_timer_list == NULL)
     {
-        return -ERROR_NOT_FOUND;
+        return -ENOENT;
     }
 
     /* 检查是否为链表头 */
@@ -71,7 +71,7 @@ static int timer_remove(swtimer_t *timer)
     {
         g_timer_list = timer->next;
         timer->next = NULL;
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 查找定时器在链表中的位置 */
@@ -85,14 +85,14 @@ static int timer_remove(swtimer_t *timer)
             /* 找到，移除 */
             prev->next = current->next;
             timer->next = NULL;
-            return ERROR_SUCCESS;
+            return 0;
         }
 
         prev = current;
         current = current->next;
     }
 
-    return -ERROR_NOT_FOUND;
+    return -ENOENT;
 }
 
 /**
@@ -137,12 +137,12 @@ static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t 
 {
     if (timer == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (timer->callback == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 如果定时器已激活，先停止 */
@@ -160,7 +160,7 @@ static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t 
     /* 插入定时器链表 */
     timer_insert(timer);
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -185,7 +185,7 @@ int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_
 {
     if (period_ms == 0UL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     return swtimer_start_internal(timer, delay_ms, period_ms);
@@ -200,12 +200,12 @@ int swtimer_stop(swtimer_t *timer)
 {
     if (timer == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (!timer->active)
     {
-        return -ERROR_INVALID_STATE;
+        return -EPERM;
     }
 
     /* 从链表中移除 */
@@ -214,7 +214,7 @@ int swtimer_stop(swtimer_t *timer)
     /* 标记为未激活 */
     timer->active = false;
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -226,7 +226,7 @@ int swtimer_delete(swtimer_t *timer)
 {
     if (timer == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 停止定时器（如果激活） */
@@ -244,7 +244,7 @@ int swtimer_delete(swtimer_t *timer)
     timer->arg = NULL;
     timer->next = NULL;
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -328,7 +328,7 @@ int msleep(uint64_t ms)
 {
     if (ms == 0UL)
     {
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 使用task_sleep实现阻塞睡眠 */

@@ -66,18 +66,18 @@ int kheap_init(void *start, uint64_t size)
     /* 参数验证 */
     if (start == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (size < HEAP_MIN_SIZE)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 检查对齐 */
     if (((uint64_t)start & (HEAP_MIN_ALIGN - 1UL)) != 0UL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 初始化堆管理器 */
@@ -94,7 +94,7 @@ int kheap_init(void *start, uint64_t size)
 
     g_heap.first_block = block;
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**

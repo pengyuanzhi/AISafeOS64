@@ -85,7 +85,7 @@ int mutex_lock(mutex_t *mutex)
 {
     if (mutex == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     void *current_task = get_current_task();
@@ -94,7 +94,7 @@ int mutex_lock(mutex_t *mutex)
     if ((mutex->owner == current_task) && (mutex->locked != 0U))
     {
         mutex->lock_count++;
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 尝试获取锁 */
@@ -149,7 +149,7 @@ int mutex_trylock(mutex_t *mutex)
 {
     if (mutex == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     void *current_task = get_current_task();
@@ -158,14 +158,14 @@ int mutex_trylock(mutex_t *mutex)
     if ((mutex->owner == current_task) && (mutex->locked != 0U))
     {
         mutex->lock_count++;
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 尝试获取锁（非阻塞，使用标准原子操作） */
     if (!atomic_cas_u32(&mutex->locked, 0U, 1U))
     {
         /* 锁已被其他任务持有 */
-        return -ERROR_BUSY;
+        return -EBUSY;
     }
 
     /* 成功获取锁 */
@@ -207,7 +207,7 @@ int mutex_unlock(mutex_t *mutex)
 {
     if (mutex == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     void *current_task = get_current_task();
@@ -216,7 +216,7 @@ int mutex_unlock(mutex_t *mutex)
     if (mutex->owner != current_task)
     {
         /* 当前任务未持有锁 */
-        return -ERROR_INVALID_STATE;
+        return -EPERM;
     }
 
     /* 递归锁计数减1 */
@@ -224,7 +224,7 @@ int mutex_unlock(mutex_t *mutex)
     if (mutex->lock_count != 0U)
     {
         /* 递归锁尚未完全释放 */
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 恢复原始优先级 */

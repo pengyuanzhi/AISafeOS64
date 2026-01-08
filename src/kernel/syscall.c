@@ -157,7 +157,7 @@ static int64_t sys_sleep_impl(uint64_t *params)
     /* 调用msleep实现任务睡眠 */
     int ret = msleep(ms);
 
-    if (ret != ERROR_SUCCESS)
+    if (ret != 0)
     {
         return -SYS_ERROR_INVAL;
     }

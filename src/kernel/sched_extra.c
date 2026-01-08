@@ -268,14 +268,14 @@ static int sleep_enqueue(TCB_t *task, uint64_t wakeup_ticks)
 
     if (task == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 分配睡眠节点 */
     node = (sleep_task_t *)kmalloc(sizeof(sleep_task_t));
     if (node == NULL)
     {
-        return -ERROR_OUT_OF_MEMORY;
+        return -ENOMEM;
     }
 
     /* 初始化节点 */
@@ -304,7 +304,7 @@ static int sleep_enqueue(TCB_t *task, uint64_t wakeup_ticks)
         current->next = node;
     }
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -330,14 +330,14 @@ int task_sleep(uint64_t ms)
     {
         /* 睡眠时间为0，直接yield */
         yield();
-        return ERROR_SUCCESS;
+        return 0;
     }
 
     /* 获取当前任务 */
     rq = this_rq();
     if (rq == NULL)
     {
-        return -ERROR_INVALID_STATE;
+        return -EPERM;
     }
 
     /* 获取锁 */
@@ -347,7 +347,7 @@ int task_sleep(uint64_t ms)
     if (current == NULL)
     {
         spin_unlock_irqrestore(&rq->lock, flags);
-        return -ERROR_INVALID_STATE;
+        return -EPERM;
     }
 
     /* 计算唤醒时间 */
@@ -358,7 +358,7 @@ int task_sleep(uint64_t ms)
     if (wrapper == NULL)
     {
         spin_unlock_irqrestore(&rq->lock, flags);
-        return -ERROR_OUT_OF_MEMORY;
+        return -ENOMEM;
     }
 
     wrapper->task = current;
@@ -368,7 +368,7 @@ int task_sleep(uint64_t ms)
 
     /* 启动定时器 */
     ret = swtimer_start(&wrapper->timer, ms);
-    if (ret != ERROR_SUCCESS)
+    if (ret != 0)
     {
         kfree(wrapper);
         spin_unlock_irqrestore(&rq->lock, flags);
@@ -390,7 +390,7 @@ int task_sleep(uint64_t ms)
     /* 触发调度 */
     schedule();
 
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**

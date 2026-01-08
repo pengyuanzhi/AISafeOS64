@@ -11,7 +11,6 @@
  *          - 原子操作保证线程安全
  *
  * @note MISRA-C:2012合规
- * @note 后续集成任务管理器实现阻塞等待
  */
 
 #include "sync.h"
@@ -36,23 +35,23 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
 {
     if (sem == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 参数验证 */
     if (initial_count < 0)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (max_count == 0U)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if ((uint32_t)initial_count > max_count)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 初始化信号量 */
@@ -65,11 +64,7 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
     /* 初始化自旋锁 */
     spinlock_init(&sem->lock);
 
-    /* 内存屏障确保初始化完成对其他CPU可见 */
-    /* 注意：spinlock_init 内部可能有屏障，这里额外屏障确保安全 */
-    MEMORY_BARRIER();
-
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -100,30 +95,34 @@ int semaphore_trywait(semaphore_t *sem)
 {
     if (sem == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
-    int32_t current_count = sem->count;
-
-    /* 检查是否有可用资源 */
-    if (current_count <= 0)
+    /* 快速路径：重试循环避免 TOCTOU race */
+    for (;;)
     {
-        /* 计数为0，立即返回失败 */
-        return -ERROR_WOULD_BLOCK;
+        int32_t current_count = sem->count;
+
+        /* 检查是否有可用资源 */
+        if (current_count <= 0)
+        {
+            /* 计数为0，立即返回失败 */
+            return -EAGAIN;
+        }
+
+        /* 尝试原子减1 */
+        uint32_t expected = (uint32_t)current_count;
+        uint32_t desired = (uint32_t)(current_count - 1);
+
+        if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected, desired))
+        {
+            /* 成功获取信号量 */
+            return 0;
+        }
+
+        /* CAS失败，重试（可能其他CPU刚释放）*/
+        cpu_relax();
     }
-
-    /* 尝试原子减1（使用标准原子操作） */
-    uint32_t expected = (uint32_t)current_count;
-    uint32_t desired = (uint32_t)(current_count - 1);
-
-    if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected, desired))
-    {
-        /* 成功获取信号量 */
-        return ERROR_SUCCESS;
-    }
-
-    /* CAS失败，返回错误 */
-    return -ERROR_WOULD_BLOCK;
 }
 
 /**
@@ -148,13 +147,31 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
 {
     if (sem == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 非阻塞模式：timeout_ms = 0 */
     if (timeout_ms == 0ULL)
     {
         return semaphore_trywait(sem);
+    }
+
+    /* 运行时检查：确保不在中断上下文中调用 */
+    if (in_interrupt())
+    {
+        /* 在中断上下文中调用 semaphore_wait 是编程错误 */
+        /* 根据使用约束：只能在中断中释放，不能在中断中获取 */
+        return -EPERM;
+    }
+
+    /* 获取当前任务（确保在任务上下文） */
+    TCB_t *current = get_current_task();
+
+    /* 双重检查：确保 current 非空 */
+    if (current == NULL)
+    {
+        /* 系统错误：不在中断中但也没有当前任务 */
+        return -EPERM;
     }
 
     /* 首先尝试快速路径：检查是否有可用资源 */
@@ -173,7 +190,7 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
                                                desired))
             {
                 /* 成功获取信号量 */
-                return ERROR_SUCCESS;
+                return 0;
             }
 
             /* CAS失败，重试 */
@@ -185,41 +202,23 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
         break;
     }
 
-    /* 运行时检查：确保不在中断上下文中调用 */
-    if (in_interrupt())
-    {
-        /* 在中断上下文中调用 semaphore_wait 是编程错误 */
-        /* 根据使用约束：只能在中断中释放，不能在中断中获取 */
-        return -ERROR_INVALID_STATE;
-    }
-
-    /* 获取当前任务（确保在任务上下文） */
-    TCB_t *current = get_current_task();
-
-    /* 双重检查：确保 current 非空 */
-    if (current == NULL)
-    {
-        /* 系统错误：不在中断中但也没有当前任务 */
-        return -ERROR_INVALID_STATE;
-    }
-
     /* 任务上下文：使用调度器阻塞 */
-    semaphore_wait_node_t wait_node;
-    wait_node.task = current;
-    wait_node.timeout = (timeout_ms == UINT64_MAX) ? 0 : (sched_clock() + timeout_ms * 1000000ULL);
+    /* 使用 TCB 中嵌入的 wait_node，避免栈上的 lifetime 问题 */
+    current->sem_wait_node.task = current;
+    current->sem_wait_node.timeout =
+        (timeout_ms == UINT64_MAX) ? 0 : (sched_clock() + timeout_ms * 1000000ULL);
 
-    /* ======== 关键区开始：使用自旋锁保护等待队列 ======== */
+    /* 使用自旋锁保护等待队列 */
     spinlock_lock(&sem->lock);
 
     /* 将当前任务添加到等待队列（锁保护） */
-    list_add_tail(&wait_node.wait_list, &sem->wait_queue);
+    list_add_tail(&current->sem_wait_node.wait_list, &sem->wait_queue);
 
     /* 阻塞当前任务（状态转换需要锁保护） */
     current->state = TASK_BLOCKED;
 
     /* 释放锁，准备调度 */
     spinlock_unlock(&sem->lock);
-    /* ======== 关键区结束 ======== */
 
     /*
      * schedule() 调用契约：
@@ -236,7 +235,7 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
      *
      * 3. 返回后保证：
      *    - 重新调度到当前任务
-     *    - current 指针仍然有效
+     *    - current 指针仍然有效（使用 TCB 中嵌入的 wait_node）
      *    - 任务状态可能已改变（被 semaphore_post 设置为 TASK_READY）
      *
      * 4. 注意事项：
@@ -246,25 +245,26 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
      */
     schedule();
 
-    /* ======== 唤醒后重新获取锁 ======== */
+    /* 唤醒后重新获取锁 */
     spinlock_lock(&sem->lock);
 
-    /* 从等待队列中删除（总是执行，避免内存泄漏和UAF） */
-    list_del(&wait_node.wait_list);
+    /* 从等待队列中删除（总是执行，避免内存泄漏和UAF）*/
+    list_del(&current->sem_wait_node.wait_list);
 
     /* 释放锁 */
     spinlock_unlock(&sem->lock);
-    /* ======== 退出关键区 ======== */
 
     /* 检查任务状态判断是否成功获取信号量 */
     if (current->state == TASK_BLOCKED)
     {
         /* 超时或被中断，任务仍然是阻塞状态 */
-        return -ERROR_TIMEOUT;
+        /* 修复状态泄漏：恢复为 READY，避免后续调度器错误 */
+        current->state = TASK_READY;
+        return -ETIMEDOUT;
     }
 
     /* 成功获取信号量（semaphore_post中已设置state为TASK_READY） */
-    return ERROR_SUCCESS;
+    return 0;
 }
 
 /**
@@ -287,7 +287,7 @@ int semaphore_post(semaphore_t *sem)
 {
     if (sem == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     for (;;)
@@ -298,7 +298,7 @@ int semaphore_post(semaphore_t *sem)
         if ((uint32_t)current_count >= sem->max_count)
         {
             /* 计数已达到上限 */
-            return -ERROR_OVERFLOW;
+            return -EOVERFLOW;
         }
 
         /* 尝试原子加1（使用标准原子操作） */
@@ -333,7 +333,7 @@ int semaphore_post(semaphore_t *sem)
 
             spinlock_unlock(&sem->lock);
 
-            return ERROR_SUCCESS;
+            return 0;
         }
 
         /* CAS失败，立即重试 */

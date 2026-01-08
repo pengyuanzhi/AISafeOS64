@@ -120,26 +120,26 @@ int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     if (handler == NULL)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     /* 检查是否已注册 */
     if (g_irq_table[irq] != NULL)
     {
         printk("[IRQ] Warning: IRQ %u already registered\n", irq);
-        return -ERROR_BUSY;
+        return -EBUSY;
     }
 
     /* 分配中断描述符 */
     irq_desc_t *desc = (irq_desc_t *)kmalloc(sizeof(irq_desc_t));
     if (desc == NULL)
     {
-        return -ERROR_OUT_OF_MEMORY;
+        return -ENOMEM;
     }
 
     /* 填充描述符 */
@@ -184,13 +184,13 @@ int irq_unregister_handler(uint32_t irq)
 {
     if (irq >= 1020)
     {
-        return -ERROR_INVALID_PARAM;
+        return -EINVAL;
     }
 
     irq_desc_t *desc = g_irq_table[irq];
     if (desc == NULL)
     {
-        return -ERROR_NOT_FOUND;
+        return -ENOENT;
     }
 
     /* 禁用中断 */
