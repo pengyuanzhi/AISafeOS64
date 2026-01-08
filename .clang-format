@@ -7,7 +7,7 @@ Language: Cpp
 Standard: c++11  # C11/C++11 标准
 
 # 换行选项
-BreakBeforeBraces: Custom
+BreakBeforeBraces: Allman
 BraceWrapping:
   AfterClass:      true
   AfterControlStatement: Never
