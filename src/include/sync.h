@@ -21,6 +21,9 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* 架构特定的内存屏障和原子操作 */
+#include "barrier.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

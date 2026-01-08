@@ -51,6 +51,7 @@ LINKER_SCRIPT = $(SRC_DIR)/arch/arm64/boot/linker.ld
 CFLAGS = -Wall -Wextra -Werror -nostdlib -nostartfiles -ffreestanding
 CFLAGS += -march=armv8-a -mtune=cortex-a53
 CFLAGS += -I$(INCLUDE_DIR)
+CFLAGS += -I$(SRC_DIR)/arch/arm64/include
 CFLAGS += -O2 -g
 
 # 汇编选项
@@ -67,6 +68,7 @@ all: $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).bin $(BUILD_DIR)/$(PROJ
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/arch/arm64/boot
+	mkdir -p $(BUILD_DIR)/arch/arm64/include
 	mkdir -p $(BUILD_DIR)/kernel
 	mkdir -p $(BUILD_DIR)/kernel/mm
 	mkdir -p $(BUILD_DIR)/kernel/irq

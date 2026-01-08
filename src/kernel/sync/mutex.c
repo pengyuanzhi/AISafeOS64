@@ -116,7 +116,7 @@ int mutex_lock(mutex_t *mutex) {
         }
 
         /* 失败，等待（TODO: 阻塞当前任务） */
-        __asm__ volatile("wfe");
+        WFE();
     }
 
     /* 设置锁持有者 */
@@ -241,14 +241,14 @@ int mutex_unlock(mutex_t *mutex) {
     }
 
     /* 内存屏障确保临界区操作完成 */
-    __asm__ volatile("dmb sy" ::: "memory");
+    MEMORY_BARRIER();
 
     /* 释放锁 */
     mutex->locked = 0U;
     mutex->owner = NULL;
 
     /* 唤醒等待的任务 */
-    __asm__ volatile("sevl");
+    SEVL();
 
     return ERROR_SUCCESS;
 }

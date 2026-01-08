@@ -17,12 +17,6 @@
 #include "sync.h"
 
 /**
- * @brief 内存屏障宏
- * @details ARMv8-A内存屏障指令
- */
-#define MEMORY_BARRIER() __asm__ volatile("dmb sy" ::: "memory")
-
-/**
  * @brief 自旋锁初始化
  * @param lock 自旋锁指针
  *
@@ -84,7 +78,7 @@ void spinlock_lock(spinlock_t *lock) {
     /* 忙等待直到轮到自己 */
     while (lock->serving_ticket != ticket) {
         /* 降低功耗的等待循环 */
-        __asm__ volatile("wfe");
+        WFE();
     }
 }
 
@@ -156,5 +150,5 @@ void spinlock_unlock(spinlock_t *lock) {
     lock->serving_ticket++;
 
     /* 发送事件唤醒等待的核心 */
-    __asm__ volatile("sevl");
+    SEVL();
 }

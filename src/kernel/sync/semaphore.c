@@ -51,7 +51,7 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count) 
     sem->max_count = max_count;
 
     /* 内存屏障 */
-    __asm__ volatile("dmb sy" ::: "memory");
+    MEMORY_BARRIER();
 
     return ERROR_SUCCESS;
 }
@@ -76,7 +76,7 @@ int semaphore_wait(semaphore_t *sem) {
         /* 检查是否有可用资源 */
         if (current_count <= 0) {
             /* 计数为0，阻塞等待（TODO: 阻塞当前任务） */
-            __asm__ volatile("wfe");
+            WFE();
             continue;
         }
 
@@ -102,7 +102,7 @@ int semaphore_wait(semaphore_t *sem) {
         }
 
         /* CAS失败，重试 */
-        __asm__ volatile("wfe");
+        WFE();
     }
 }
 
@@ -196,16 +196,16 @@ int semaphore_post(semaphore_t *sem) {
             /* 成功释放信号量 */
 
             /* 内存屏障 */
-            __asm__ volatile("dmb sy" ::: "memory");
+            MEMORY_BARRIER();
 
             /* 唤醒等待的任务 */
-            __asm__ volatile("sevl");
+            SEVL();
 
             return ERROR_SUCCESS;
         }
 
         /* CAS失败，重试 */
-        __asm__ volatile("wfe");
+        WFE();
     }
 }
 
@@ -220,7 +220,7 @@ int32_t semaphore_getcount(semaphore_t *sem) {
     }
 
     /* 内存屏障确保读取最新值 */
-    __asm__ volatile("dmb sy" ::: "memory");
+    MEMORY_BARRIER();
 
     return sem->count;
 }
