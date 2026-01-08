@@ -12375,7 +12375,270 @@ static int task_create_hook(void *ctx) {
 
 ---
 
-**文档版本**: 1.7
+## 30. 代码格式化规范 (clang-format)
+
+### 30.1 概述
+
+AISafe64 项目使用 clang-format 自动化代码格式化工具，确保所有源代码保持一致的代码风格。格式化规则基于项目现有的代码风格和 MISRA-C:2012 标准制定。
+
+### 30.2 配置文件
+
+项目根目录下的 `.clang-format` 文件定义了代码格式化规则：
+
+```yaml
+# 主要配置项
+- IndentWidth: 4                    # 使用4空格缩进
+- UseTab: Never                     # 使用空格而非Tab
+- ColumnLimit: 100                  # 行宽限制100字符
+- PointerAlignment: Right           # 指针星号靠右对齐
+- BreakBeforeBraces: Custom         # 自定义大括号换行规则
+```
+
+### 30.3 格式化规则说明
+
+#### 30.3.1 缩进和空格
+
+```c
+/* ✅ 正确: 4空格缩进 */
+void function(void) {
+    if (condition) {
+        do_something();
+    }
+}
+
+/* ❌ 错误: 使用Tab或2空格缩进 */
+void function(void) {
+	  if (condition) {
+		    do_something();
+	  }
+}
+```
+
+#### 30.3.2 大括号位置
+
+```c
+/* ✅ 正确: 函数定义左大括号换行 */
+static inline uint32_t atomic_inc_u32(volatile uint32_t *addr)
+{
+    uint32_t old_val;
+    uint32_t new_val;
+    /* ... */
+}
+
+/* ✅ 正确: 控制语句左大括号不换行 */
+if (condition) {
+    do_something();
+} else {
+    do_other();
+}
+```
+
+#### 30.3.3 指针对齐
+
+```c
+/* ✅ 正确: 星号靠右 */
+volatile uint32_t *addr;
+const char *str;
+
+/* ❌ 错误: 星号靠左或中间 */
+volatile uint32_t* addr;
+volatile uint32_t * addr;
+```
+
+#### 30.3.4 行宽限制
+
+```c
+/* ✅ 正确: 单行不超过100字符 */
+static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr,
+                                                  uint32_t *expected,
+                                                  uint32_t desired)
+
+/* ❌ 错误: 超过100字符 */
+static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr, uint32_t *expected, uint32_t desired)
+```
+
+#### 30.3.5 函数参数换行
+
+```c
+/* ✅ 正确: 参数过多时换行对齐 */
+static inline uint32_t atomic_add_u32(volatile uint32_t *addr,
+                                      uint32_t value)
+{
+    return old_val;
+}
+
+/* ✅ 正确: 每个参数一行（参数很多时） */
+void complex_function(type1_t param1,
+                      type2_t param2,
+                      type3_t param3,
+                      type4_t param4)
+{
+    /* ... */
+}
+```
+
+#### 30.3.6 注释风格
+
+```c
+/* ✅ 正确: Doxygen风格文档注释 */
+/**
+ * @brief 原子比较并交换
+ * @details 如果*addr == expected，则将desired写入*addr
+ *
+ * @param addr 地址指针
+ * @param expected 期望值
+ * @param desired 新值
+ * @return 成功返回true，失败返回false
+ */
+
+/* ✅ 正确: 单行注释使用 // 或 /* */ */
+// 这是一个单行注释
+/* 这也是单行注释 */
+```
+
+### 30.4 使用方法
+
+#### 30.4.1 手动格式化单个文件
+
+```bash
+clang-format -i file.c
+```
+
+#### 30.4.2 批量格式化所有文件
+
+```bash
+# 格式化所有C/C++源文件
+find . -name "*.c" -o -name "*.h" | xargs clang-format -i
+
+# 或使用特定命令
+clang-format -i src/**/*.c src/**/*.h
+```
+
+#### 30.4.3 检查文件是否符合格式（不修改）
+
+```bash
+clang-format --dry-run --Werror file.c
+```
+
+### 30.5 Git Pre-commit Hook
+
+项目配置了自动化的 pre-commit hook，在每次提交前自动格式化暂存的文件：
+
+#### 30.5.1 工作原理
+
+1. 检测暂存的 C/C++ 文件
+2. 使用 clang-format 自动格式化
+3. 将格式化后的文件重新添加到暂存区
+4. 如果格式化失败，阻止提交
+
+#### 30.5.2 Hook 脚本位置
+
+- Linux/Mac: `.git/hooks/pre-commit`
+- Windows: `.git/hooks/pre-commit.ps1`
+
+#### 30.5.3 禁用 Hook（不推荐）
+
+如果临时需要跳过自动格式化：
+
+```bash
+git commit --no-verify -m "commit message"
+```
+
+**注意**: 不建议禁用 pre-commit hook，这可能导致代码风格不一致。
+
+### 30.6 IDE 集成
+
+#### 30.6.1 VS Code
+
+在 `.vscode/settings.json` 中添加：
+
+```json
+{
+    "editor.formatOnSave": true,
+    "C_Cpp.clang_format_style": "file",
+    "C_Cpp.clang_format_fallbackStyle": "none",
+    "[c]": {
+        "editor.defaultFormatter": "xaver.clang-format"
+    },
+    "[cpp]": {
+        "editor.defaultFormatter": "xaver.clang-format"
+    }
+}
+```
+
+#### 30.6.2 Vim/Neovim
+
+在 `.vimrc` 或 `init.vim` 中添加：
+
+```vim
+" 保存时自动格式化
+autocmd BufWritePre *.c,*.h,*.cpp,*.hpp :clang-format -i %
+
+" 手动格式化快捷键
+map <C-K> :clang-format<CR>
+imap <C-K> <c-o>:clang-format<CR>
+```
+
+#### 30.6.3 Emacs
+
+在 `.emacs` 或 `init.el` 中添加：
+
+```elisp
+(require 'clang-format)
+
+;; 保存前自动格式化
+(add-hook 'c-mode-common-hook
+          (lambda ()
+            (add-hook 'before-save-hook
+                      'clang-format-buffer
+                      nil t)))
+```
+
+### 30.7 CI/CD 集成
+
+在 CI 流水线中检查代码格式：
+
+```yaml
+# 示例 GitHub Actions
+- name: Check code formatting
+  run: |
+    find . -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+```
+
+### 30.8 常见问题
+
+#### Q: clang-format 改变了我不想改的地方怎么办？
+
+A: 可以在特定代码块使用 clang-format off/on 注释：
+
+```c
+/* clang-format off */
+int    a    =    1;  // 保持原样
+/* clang-format on */
+```
+
+#### Q: 如何自定义格式化规则？
+
+A: 编辑项目根目录的 `.clang-format` 文件，修改相应的配置项。
+
+#### Q: 为什么 pre-commit hook 没有生效？
+
+A: 检查以下几点：
+1. 确认 hook 文件有可执行权限（Linux/Mac）
+2. 确认系统已安装 clang-format
+3. 查看是否有错误信息输出
+
+### 30.9 最佳实践
+
+1. **提交前格式化**: 确保所有提交的代码都符合格式规范
+2. **IDE 自动格式化**: 配置 IDE 保存时自动格式化
+3. **定期检查**: 在 CI 流水线中集成格式检查
+4. **团队协作**: 所有团队成员使用相同的 `.clang-format` 配置
+5. **持续改进**: 根据团队反馈调整格式化规则
+
+---
+
+**文档版本**: 1.8
 **最后更新**: 2025-01-08
 **适用标准**: MISRA-C:2012, ARMv8-A, ISO 26262 ASIL-D
 **项目**: AISafe64 - AI-Generated, Safety-Certifiable, Native 64-bit RTOS

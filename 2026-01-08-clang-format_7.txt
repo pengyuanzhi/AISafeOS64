@@ -1,0 +1,616 @@
+
+╭─── Claude Code v2.0.76 ──────────────────────────────────────────────────────╮
+│                                          │ Tips for getting started          │
+│               Welcome back!              │ Run /init to create a CLAUDE.md … │
+│                                          │ ───────────────────────────────── │
+│                * ▐▛███▜▌ *               │ Recent activity                   │
+│               * ▝▜█████▛▘ *              │ No recent activity                │
+│                *  ▘▘ ▝▝  *               │                                   │
+│                                          │                                   │
+│      Sonnet 4.5 · API Usage Billing      │                                   │
+│   D:\AI\homework\ClaudeCode\AISafeOS64   │                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  /model to try Opus 4.5
+
+> 配置 clang-format 自动格式化
+提交前自动修正风格（可加 pre-commit hook）生成规则到CLAUDE.md 
+
+● 我来帮你配置 clang-format 自动格式化。让我先创建待办事项列表来跟踪这个任务。
+
+● Search(pattern: "**/.clang-format")
+  ⎿  Found 0 files 
+
+● Search(pattern: "**/.clang-format-ignore")
+  ⎿  Found 0 files 
+
+● Search(pattern: "**/.git/hooks/pre-commit*")
+  ⎿  Found 1 file (ctrl+o to expand)
+
+● Read(src\arch\arm64\include\barrier.h)
+  ⎿  Read 1117 lines
+
+● Search(pattern: "**/*.c")
+  ⎿  Found 25 files (ctrl+o to expand)
+
+● Search(pattern: "**/*.h")
+  ⎿  Found 17 files (ctrl+o to expand)
+
+● Read(src\kernel\main.c)
+  ⎿  Read 50 lines
+
+● Write(.clang-format)
+  ⎿  Wrote 1 lines to .clang-format        
+     ---
+     # AISafe64 RTOS - clang-format 配置
+     # 基于 MISRA-C:2012 和项目现有代码风格
+     # 语言选项
+     Language: Cpp
+     Standard: c++11  # C11/C++11 标准
+     # 换行选项
+     BreakBeforeBraces: Custom
+
+● Bash(ls -la "D:\AI\homework\ClaudeCode\AISafeOS64\.git\hooks")
+  ⎿  total 57                                        
+     drwxr-xr-x 1 pengyz 197121    0  1月  8 11:51 .
+     drwxr-xr-x 1 pengyz 197121    0  1月  8 22:01 ..
+     … +14 lines (ctrl+o to expand)
+
+● Write(.git\hooks\pre-commit)
+  ⎿  Wrote 1 lines to .git\hooks\pre-commit           
+     #!/bin/bash
+     #
+     # AISafe64 RTOS - Git pre-commit hook
+     # 自动运行 clang-format 格式化暂存的 C/C++ 源文件
+     #
+     # 颜色输出
+     RED='\033[0;31m'
+     GREEN='\033[0;32m'
+     YELLOW='\033[1;33m'
+
+● Bash(chmod +x "D:\AI\homework\ClaudeCode\AISafeOS64\.git\hooks\pre-commit")
+  ⎿  (No content)
+
+● Write(.git\hooks\pre-commit.ps1)
+  ⎿  Wrote 1 lines to .git\hooks\pre-commit.ps1                            
+     # AISafe64 RTOS - Git pre-commit hook (PowerShell version)
+     # 自动运行 clang-format 格式化暂存的 C/C++ 源文件
+     # 检查 clang-format 是否可用
+     $clangFormat = Get-Command clang-format -ErrorAction SilentlyContinue
+     if (-not $clangFormat) {
+         Write-Host "Warning: clang-format not found. Skipping 
+     auto-formatting." -ForegroundColor Yellow
+         Write-Host "Install clang-format to enable automatic code 
+     formatting." -ForegroundColor Yellow
+         exit 0
+
+● Search(pattern: "**/CLAUDE.md")
+  ⎿  Found 1 file (ctrl+o to expand)
+
+● Read(docs\CLAUDE.md)
+  ⎿  Error reading file
+
+● Read(docs\CLAUDE.md)
+  ⎿  Read 100 lines
+
+● Bash(wc -l "D:\AI\homework\ClaudeCode\AISafeOS64\docs\CLAUDE.md")
+  ⎿  12381 D:\AI\homework\ClaudeCode\AISafeOS64\docs\CLAUDE.md
+
+● Read(docs\CLAUDE.md)
+  ⎿  Read 31 lines
+
+● Update(docs\CLAUDE.md)
+  ⎿  Added 264 lines, removed 1 line                                       
+      12375                                                              
+      12376  ---                                                         
+      12377                                                              
+      12378 -**文档版本**: 1.7                                              
+      
+
+      12378 +## 30. 代码格式化规范 (clang-format)                           
+         
+
+      12379 +                                                            
+      12380 +### 30.1 概述                                                 
+      12381 +                                                            
+      12382 +AISafe64 项目使用 clang-format                                 
+      
+
+            +自动化代码格式化工具，确保所有源代码保持一致的代码风格。格     
+                               
+
+            +式化规则基于项目现有的代码风格和 MISRA-C:2012 标准制定。       
+                       
+
+      12383 +                                                            
+      12384 +### 30.2 配置文件                                              
+      
+
+      12385 +                                                            
+      12386 +项目根目录下的 `.clang-format` 文件定义了代码格式化规则：      
+                      
+
+      12387 +                                                            
+      12388 +```yaml                                                     
+      12389 +# 主要配置项                                                   
+       
+
+      12390 +- IndentWidth: 4                    # 使用4空格缩进            
+        
+
+      12391 +- UseTab: Never                     # 使用空格而非Tab          
+        
+
+      12392 +- ColumnLimit: 100                  # 行宽限制100字符          
+        
+
+      12393 +- PointerAlignment: Right           # 指针星号靠右对齐         
+          
+
+      12394 +- BreakBeforeBraces: Custom         # 自定义大括号换行规则     
+            
+
+      12395 +```                                                         
+      12396 +                                                            
+      12397 +### 30.3 格式化规则说明                                        
+         
+
+      12398 +                                                            
+      12399 +#### 30.3.1 缩进和空格                                         
+       
+
+      12400 +                                                            
+      12401 +```c                                                        
+      12402 +/* ✅ 正确: 4空格缩进 */                                       
+         
+
+      12403 +void function(void) {                                       
+      12404 +    if (condition) {                                        
+      12405 +        do_something();                                     
+      12406 +    }                                                       
+      12407 +}                                                           
+      12408 +                                                            
+      12409 +/* ❌ 错误: 使用Tab或2空格缩进 */                              
+            
+
+      12410 +void function(void) {                                       
+      12411 +    if (condition) {                                        
+      12412 +        do_something();                                     
+      12413 +    }                                                       
+      12414 +}                                                           
+      12415 +```                                                         
+      12416 +                                                            
+      12417 +#### 30.3.2 大括号位置                                         
+       
+
+      12418 +                                                            
+      12419 +```c                                                        
+      12420 +/* ✅ 正确: 函数定义左大括号换行 */                            
+               
+
+      12421 +static inline uint32_t atomic_inc_u32(volatile uint32_t     
+            +*addr)                                                      
+      12422 +{                                                           
+      12423 +    uint32_t old_val;                                       
+      12424 +    uint32_t new_val;                                       
+      12425 +    /* ... */                                               
+      12426 +}                                                           
+      12427 +                                                            
+      12428 +/* ✅ 正确: 控制语句左大括号不换行 */                          
+                
+
+      12429 +if (condition) {                                            
+      12430 +    do_something();                                         
+      12431 +} else {                                                    
+      12432 +    do_other();                                             
+      12433 +}                                                           
+      12434 +```                                                         
+      12435 +                                                            
+      12436 +#### 30.3.3 指针对齐                                           
+      
+
+      12437 +                                                            
+      12438 +```c                                                        
+      12439 +/* ✅ 正确: 星号靠右 */                                        
+         
+
+      12440 +volatile uint32_t *addr;                                    
+      12441 +const char *str;                                            
+      12442 +                                                            
+      12443 +/* ❌ 错误: 星号靠左或中间 */                                  
+            
+
+      12444 +volatile uint32_t* addr;                                    
+      12445 +volatile uint32_t * addr;                                   
+      12446 +```                                                         
+      12447 +                                                            
+      12448 +#### 30.3.4 行宽限制                                           
+      
+
+      12449 +                                                            
+      12450 +```c                                                        
+      12451 +/* ✅ 正确: 单行不超过100字符 */                               
+            
+
+      12452 +static inline bool atomic_compare_exchange_strong(volatile  
+            +uint32_t *addr,                                             
+      12453 +                                                  uint32_t  
+            +*expected,                                                  
+      12454 +                                                  uint32_t  
+            +desired)                                                    
+      12455 +                                                            
+      12456 +/* ❌ 错误: 超过100字符 */                                     
+         
+
+      12457 +static inline bool atomic_compare_exchange_strong(volatile  
+            +uint32_t *addr, uint32_t *expected, uint32_t desired)       
+      12458 +```                                                         
+      12459 +                                                            
+      12460 +#### 30.3.5 函数参数换行                                       
+        
+
+      12461 +                                                            
+      12462 +```c                                                        
+      12463 +/* ✅ 正确: 参数过多时换行对齐 */                              
+              
+
+      12464 +static inline uint32_t atomic_add_u32(volatile uint32_t     
+            +*addr,                                                      
+      12465 +                                      uint32_t value)       
+      12466 +{                                                           
+      12467 +    return old_val;                                         
+      12468 +}                                                           
+      12469 +                                                            
+      12470 +/* ✅ 正确: 每个参数一行（参数很多时） */                      
+                  
+
+      12471 +void complex_function(type1_t param1,                       
+      12472 +                      type2_t param2,                       
+      12473 +                      type3_t param3,                       
+      12474 +                      type4_t param4)                       
+      12475 +{                                                           
+      12476 +    /* ... */                                               
+      12477 +}                                                           
+      12478 +```                                                         
+      12479 +                                                            
+      12480 +#### 30.3.6 注释风格                                           
+      
+
+      12481 +                                                            
+      12482 +```c                                                        
+      12483 +/* ✅ 正确: Doxygen风格文档注释 */                             
+           
+
+      12484 +/**                                                         
+      12485 + * @brief 原子比较并交换                                       
+         
+
+      12486 + * @details 如果*addr == expected，则将desired写入*addr        
+         
+
+      12487 + *                                                          
+      12488 + * @param addr 地址指针                                        
+      
+
+      12489 + * @param expected 期望值                                      
+
+      12490 + * @param desired 新值                                        
+      12491 + * @return 成功返回true，失败返回false                         
+           
+
+      12492 + */                                                         
+      12493 +                                                            
+      12494 +/* ✅ 正确: 单行注释使用 // 或 /* */ */                        
+            
+
+      12495 +// 这是一个单行注释                                            
+          
+
+      12496 +/* 这也是单行注释 */                                           
+         
+
+      12497 +```                                                         
+      12498 +                                                            
+      12499 +### 30.4 使用方法                                              
+      
+
+      12500 +                                                            
+      12501 +#### 30.4.1 手动格式化单个文件                                 
+           
+
+      12502 +                                                            
+      12503 +```bash                                                     
+      12504 +clang-format -i file.c                                      
+      12505 +```                                                         
+      12506 +                                                            
+      12507 +#### 30.4.2 批量格式化所有文件                                 
+           
+
+      12508 +                                                            
+      12509 +```bash                                                     
+      12510 +# 格式化所有C/C++源文件                                        
+          
+
+      12511 +find . -name "*.c" -o -name "*.h" | xargs clang-format -i   
+      12512 +                                                            
+      12513 +# 或使用特定命令                                               
+         
+
+      12514 +clang-format -i src/**/*.c src/**/*.h                       
+      12515 +```                                                         
+      12516 +                                                            
+      12517 +#### 30.4.3 检查文件是否符合格式（不修改）                     
+                 
+
+      12518 +                                                            
+      12519 +```bash                                                     
+      12520 +clang-format --dry-run --Werror file.c                      
+      12521 +```                                                         
+      12522 +                                                            
+      12523 +### 30.5 Git Pre-commit Hook                                
+      12524 +                                                            
+      12525 +项目配置了自动化的 pre-commit                                  
+           
+
+            +hook，在每次提交前自动格式化暂存的文件：                       
+                    
+
+      12526 +                                                            
+      12527 +#### 30.5.1 工作原理                                           
+      
+
+      12528 +                                                            
+      12529 +1. 检测暂存的 C/C++ 文件                                       
+         
+
+      12530 +2. 使用 clang-format 自动格式化                                
+         
+
+      12531 +3. 将格式化后的文件重新添加到暂存区                            
+                  
+
+      12532 +4. 如果格式化失败，阻止提交                                    
+              
+
+      12533 +                                                            
+      12534 +#### 30.5.2 Hook 脚本位置                                      
+      
+
+      12535 +                                                            
+      12536 +- Linux/Mac: `.git/hooks/pre-commit`                        
+      12537 +- Windows: `.git/hooks/pre-commit.ps1`                      
+      12538 +                                                            
+      12539 +#### 30.5.3 禁用 Hook（不推荐）                                
+         
+
+      12540 +                                                            
+      12541 +如果临时需要跳过自动格式化：                                   
+                
+
+      12542 +                                                            
+      12543 +```bash                                                     
+      12544 +git commit --no-verify -m "commit message"                  
+      12545 +```                                                         
+      12546 +                                                            
+      12547 +**注意**: 不建议禁用 pre-commit                                
+         
+
+            +hook，这可能导致代码风格不一致。                               
+                
+
+      12548 +                                                            
+      12549 +### 30.6 IDE 集成                                             
+      12550 +                                                            
+      12551 +#### 30.6.1 VS Code                                         
+      12552 +                                                            
+      12553 +在 `.vscode/settings.json` 中添加：                            
+       
+
+      12554 +                                                            
+      12555 +```json                                                     
+      12556 +{                                                           
+      12557 +    "editor.formatOnSave": true,                            
+      12558 +    "C_Cpp.clang_format_style": "file",                     
+      12559 +    "C_Cpp.clang_format_fallbackStyle": "none",             
+      12560 +    "[c]": {                                                
+      12561 +        "editor.defaultFormatter": "xaver.clang-format"     
+      12562 +    },                                                      
+      12563 +    "[cpp]": {                                              
+      12564 +        "editor.defaultFormatter": "xaver.clang-format"     
+      12565 +    }                                                       
+      12566 +}                                                           
+      12567 +```                                                         
+      12568 +                                                            
+      12569 +#### 30.6.2 Vim/Neovim                                      
+      12570 +                                                            
+      12571 +在 `.vimrc` 或 `init.vim` 中添加：                             
+        
+
+      12572 +                                                            
+      12573 +```vim                                                      
+      12574 +" 保存时自动格式化                                             
+          
+
+      12575 +autocmd BufWritePre *.c,*.h,*.cpp,*.hpp :clang-format -i %  
+      12576 +                                                            
+      12577 +" 手动格式化快捷键                                             
+          
+
+      12578 +map <C-K> :clang-format<CR>                                 
+      12579 +imap <C-K> <c-o>:clang-format<CR>                           
+      12580 +```                                                         
+      12581 +                                                            
+      12582 +#### 30.6.3 Emacs                                           
+      12583 +                                                            
+      12584 +在 `.emacs` 或 `init.el` 中添加：                              
+        
+
+      12585 +                                                            
+      12586 +```elisp                                                    
+      12587 +(require 'clang-format)                                     
+      12588 +                                                            
+      12589 +;; 保存前自动格式化                                            
+          
+
+      12590 +(add-hook 'c-mode-common-hook                               
+      12591 +          (lambda ()                                        
+      12592 +            (add-hook 'before-save-hook                     
+      12593 +                      'clang-format-buffer                  
+      12594 +                      nil t)))                              
+      12595 +```                                                         
+      12596 +                                                            
+      12597 +### 30.7 CI/CD 集成                                           
+      12598 +                                                            
+      12599 +在 CI 流水线中检查代码格式：                                   
+              
+
+      12600 +                                                            
+      12601 +```yaml                                                     
+      12602 +# 示例 GitHub Actions                                         
+      12603 +- name: Check code formatting                               
+      12604 +  run: |                                                    
+      12605 +    find . -name "*.c" -o -name "*.h" | xargs clang-format  
+            +--dry-run --Werror                                          
+      12606 +```                                                         
+      12607 +                                                            
+      12608 +### 30.8 常见问题                                              
+      
+
+      12609 +                                                            
+      12610 +#### Q: clang-format 改变了我不想改的地方怎么办？              
+                
+
+      12611 +                                                            
+      12612 +A: 可以在特定代码块使用 clang-format off/on 注释：             
+               
+
+      12613 +                                                            
+      12614 +```c                                                        
+      12615 +/* clang-format off */                                      
+      12616 +int    a    =    1;  // 保持原样                               
+      
+
+      12617 +/* clang-format on */                                       
+      12618 +```                                                         
+      12619 +                                                            
+      12620 +#### Q: 如何自定义格式化规则？                                 
+             
+
+      12621 +                                                            
+      12622 +A: 编辑项目根目录的 `.clang-format`                            
+          
+
+            +文件，修改相应的配置项。                                       
+              
+
+      12623 +                                                            
+      12624 +#### Q: 为什么 pre-commit hook 没有生效？                      
+          
+
+      12625 +                                                            
+      12626 +A: 检查以下几点：                                              
+         
+
+      12627 +1. 确认 hook 文件有可执行权限（Linux/Mac）                     
+              
+
+      12628 +2. 确认系统已安装 clang-format                                 
+         
+
+      12629 +3. 查看是否有错误信息输出                                      
+             
+
+      12630 +                                                            
+      12631 +### 30.9 最佳实践                                              
+      
+
+      12632 +                                                            
+      12633 +1. **提交前格式化**: 确保所有提交的代码都符合格式规范          
+                        
+
+      12634 +2. **IDE 自动格式化**: 配置 IDE 保存时自动格式化               
+                 
+
+      12635 +3. **定期检查**: 在 CI 流水线中集成格式检查                    
+                 
+
+      12636 +4. **团队协作**: 所有团队成员使用相同的 `.clang-format`        
+                 
+
+            +配置                                                          
+      12637 +5. **持续改进**: 根据团队反馈调整格式化规则                    
+                   
+
+      12638 +                                                            
+      12639 +---                                                         
+      12640 +                                                            
+      12641 +**文档版本**: 1.8                                              
+      
+
+      12642  **最后更新**: 2025-01-08                                       
+      
+
+      12643  **适用标准**: MISRA-C:2012, ARMv8-A, ISO 26262 ASIL-D          
+      
+
+      12644  **项目**: AISafe64 - AI-Generated, Safety-Certifiable,        
+             Native 64-bit RTOS                                          
+
+● 完成！我已经为你的项目配置了 clang-format 自动格式化。以下是完成的内容：
+
+  已创建的文件
+
+  1. .clang-format 配置文件
+
+  位于项目根目录，定义了代码格式化规则：
+  - 4空格缩进
+  - 指针星号靠右对齐
+  - 行宽限制100字符
+  - 函数定义左大括号换行
+  - 控制语句左大括号不换行
+
+  2. Git Pre-commit Hook
+
+  自动在提交前格式化代码：
+  - .git/hooks/pre-commit (Bash脚本)
+  - .git/hooks/pre-commit.ps1 (PowerShell脚本)
+
+  3. 文档更新
+
+  在 docs/CLAUDE.md 中添加了第30章"代码格式化规范"，包含：
+  - 配置说明
+  - 格式化规则示例
+  - 使用方法
+  - IDE集成指南
+  - 常见问题解答
+
+  使用方法
+
+  立即格式化所有文件
+
+  # 格式化所有C/C++源文件
+  find . -name "*.c" -o -name "*.h" | xargs clang-format -i
+
+  自动格式化
+
+  配置了 pre-commit hook 后，每次 git commit 时会自动格式化暂存的文件。
+
+  VS Code 集成
+
+  可以在 .vscode/settings.json 中添加：
+  {
+      "editor.formatOnSave": true,
+      "C_Cpp.clang_format_style": "file"
+  }
+
+  下一步建议
+
+  1. 安装 clang-format（如果还没安装）
+  2. 立即运行一次格式化命令，统一现有代码风格
+  3. 配置你的 IDE 启用保存时自动格式化
+  4. 提交时自动格式化会生效
+
+  需要我帮你立即格式化现有代码吗？
+
+
+

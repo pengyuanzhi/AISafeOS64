@@ -1,0 +1,45 @@
+# AISafe64 RTOS - Tests CMakeLists.txt
+
+# 测试可执行文件
+add_executable(test_atomic
+    test_atomic.c
+    test_framework.c
+)
+
+# 包含目录
+target_include_directories(test_atomic PRIVATE
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/include
+    ${CMAKE_SOURCE_DIR}/src/arch/arm64/include
+)
+
+# 编译定义
+target_compile_definitions(test_atomic PRIVATE
+    TEST_MODE=1
+)
+
+# 测试特定编译选项
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_atomic PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+        -O2
+        -g
+    )
+endif()
+
+# 如果是主机测试（非嵌入式）
+if(NOT CMAKE_CROSSCOMPILING)
+    # 主机测试不需要链接脚本
+    target_link_options(test_atomic PRIVATE
+        -Wl,--gc-sections
+    )
+
+    # 添加测试到CTest
+    add_test(NAME atomic_test COMMAND test_atomic)
+else()
+    # 嵌入式测试需要特殊处理
+    message(WARNING "Cross-compilation detected. Tests will be built but not run.")
+endif()
