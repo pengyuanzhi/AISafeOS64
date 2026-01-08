@@ -15,20 +15,21 @@
 #include <stdarg.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/**
- * @brief 内核打印初始化
- * @return 成功返回0，失败返回负错误码
- */
-int printk_init(void);
+    /**
+     * @brief 内核打印初始化
+     * @return 成功返回0，失败返回负错误码
+     */
+    int printk_init(void);
 
-/**
- * @brief 内核格式化打印函数
- * @param fmt 格式化字符串
- */
-void printk(const char *fmt, ...);
+    /**
+     * @brief 内核格式化打印函数
+     * @param fmt 格式化字符串
+     */
+    void printk(const char *fmt, ...);
 
 #ifdef __cplusplus
 }

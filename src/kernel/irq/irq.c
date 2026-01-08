@@ -85,23 +85,27 @@ static inline void gic_set_priority_mask(uint32_t mask)
  */
 int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (handler == NULL) {
+    if (handler == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 检查是否已注册 */
-    if (g_irq_table[irq] != NULL) {
+    if (g_irq_table[irq] != NULL)
+    {
         printk("[IRQ] Warning: IRQ %u already registered\n", irq);
         return -ERROR_BUSY;
     }
 
     /* 分配中断描述符 */
     irq_desc_t *desc = (irq_desc_t *)kmalloc(sizeof(irq_desc_t));
-    if (desc == NULL) {
+    if (desc == NULL)
+    {
         return -ERROR_OUT_OF_MEMORY;
     }
 
@@ -113,13 +117,18 @@ int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
     desc->next = NULL;
 
     /* 确定中断类型 */
-    if (irq < 16) {
+    if (irq < 16)
+    {
         desc->type = IRQ_TYPE_SGI;
         desc->priority = IRQ_PRIORITY_HIGHEST;
-    } else if (irq < 32) {
+    }
+    else if (irq < 32)
+    {
         desc->type = IRQ_TYPE_PPI;
         desc->priority = IRQ_PRIORITY_HIGH;
-    } else {
+    }
+    else
+    {
         desc->type = IRQ_TYPE_SPI;
         desc->priority = IRQ_PRIORITY_NORMAL;
     }
@@ -140,17 +149,20 @@ int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
  */
 int irq_unregister_handler(uint32_t irq)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     irq_desc_t *desc = g_irq_table[irq];
-    if (desc == NULL) {
+    if (desc == NULL)
+    {
         return -ERROR_NOT_FOUND;
     }
 
     /* 禁用中断 */
-    if (desc->enabled) {
+    if (desc->enabled)
+    {
         irq_disable(irq);
     }
 
@@ -172,7 +184,8 @@ void irq_handler(void)
     uint32_t irq = iar & 0x3FF;
 
     /* 检查是否为伪中断 */
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         /* 伪中断，直接结束 */
         gic_write_eoir(iar);
         return;
@@ -181,10 +194,13 @@ void irq_handler(void)
     /* 查找中断处理函数 */
     irq_desc_t *desc = g_irq_table[irq];
 
-    if (desc != NULL && desc->handler != NULL) {
+    if (desc != NULL && desc->handler != NULL)
+    {
         /* 调用中断处理函数 */
         desc->handler(irq, desc->arg);
-    } else {
+    }
+    else
+    {
         /* 未注册的处理函数，打印警告 */
         printk("[IRQ] Spurious IRQ: %u\n", irq);
     }
@@ -193,7 +209,8 @@ void irq_handler(void)
     gic_write_eoir(iar);
 
     /* 对于Level触发的SPI，还需要清除挂起位 */
-    if (irq >= 32) {
+    if (irq >= 32)
+    {
         /* 清除SPI挂起位 */
         uint32_t offset = 0x0280 + ((irq / 32) * 4);
         uint32_t mask = 1U << (irq % 32);
@@ -209,7 +226,8 @@ int irq_init_subsystem(void)
 {
     /* 初始化GIC */
     int ret = gic_init();
-    if (ret != 0) {
+    if (ret != 0)
+    {
         printk("[IRQ] GIC initialization failed: %d\n", ret);
         return ret;
     }

@@ -78,7 +78,8 @@ static const SystemInfo_t g_system_info = {
 void kernel_main(void)
 {
     /* 初始化串口 */
-    if (printk_init() != 0) {
+    if (printk_init() != 0)
+    {
         /* UART初始化失败，停止执行 */
         goto kernel_halt;
     }
@@ -103,13 +104,15 @@ void kernel_main(void)
     extern uint8_t __kernel_heap_end[];
     uint64_t heap_size = (uint64_t)(__kernel_heap_end - __kernel_heap_start);
 
-    if (kheap_init(__kernel_heap_start, heap_size) != 0) {
+    if (kheap_init(__kernel_heap_start, heap_size) != 0)
+    {
         printk("FAILED (kernel heap)\n");
         goto kernel_halt;
     }
 
     /* 初始化物理页分配器 */
-    if (page_allocator_init(0x40000000UL, 1024 * 1024 * 1024UL) != 0) {
+    if (page_allocator_init(0x40000000UL, 1024 * 1024 * 1024UL) != 0)
+    {
         printk("FAILED (page allocator)\n");
         goto kernel_halt;
     }
@@ -120,7 +123,8 @@ void kernel_main(void)
 
     /* 初始化调度器（必须在时间管理之前） */
     printk("[INIT] Scheduler... ");
-    if (scheduler_init() != 0) {
+    if (scheduler_init() != 0)
+    {
         printk("FAILED\n");
         goto kernel_halt;
     }
@@ -128,7 +132,8 @@ void kernel_main(void)
 
     /* 初始化时间管理 */
     printk("[INIT] Time management... ");
-    if (time_init() != 0) {
+    if (time_init() != 0)
+    {
         printk("FAILED\n");
         goto kernel_halt;
     }
@@ -136,7 +141,8 @@ void kernel_main(void)
 
     /* 初始化中断管理 */
     printk("[INIT] Interrupt controller... ");
-    if (irq_init_subsystem() != 0) {
+    if (irq_init_subsystem() != 0)
+    {
         printk("FAILED\n");
         goto kernel_halt;
     }
@@ -150,7 +156,8 @@ void kernel_main(void)
     scheduler_start();
 
     /* 进入主循环 */
-    while (true) {
+    while (true)
+    {
         /* TODO: 空闲任务或系统管理 */
         __asm__ volatile("wfe"); /* 等待中断 */
     }
@@ -159,7 +166,8 @@ kernel_halt:
     /* 内核停止 */
     printk("\n");
     printk("[FATAL] Kernel halted!\n");
-    while (true) {
+    while (true)
+    {
         __asm__ volatile("wfe");
     }
 }
@@ -176,7 +184,8 @@ void kernel_panic(void)
     printk("[FATAL] System halted.\n");
     printk("\n");
 
-    while (true) {
+    while (true)
+    {
         __asm__ volatile("wfe");
     }
 }

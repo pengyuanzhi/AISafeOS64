@@ -87,7 +87,8 @@ const SchedClass_t sched_class_rr = {.name = "RR",
  */
 static rr_rq_t *get_rr_rq(struct rq *rq)
 {
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
     return (rr_rq_t *)rq->rr_rq;
@@ -108,7 +109,8 @@ static int rr_sched_init(struct rq *rq)
 
     /* Allocate RR run queue */
     rr_rq = (rr_rq_t *)kmalloc((uint64_t)sizeof(rr_rq_t));
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return -1; /* ENOMEM */
     }
 
@@ -135,7 +137,8 @@ static void rr_sched_enqueue(struct rq *rq, TCB_t *task)
 
     /* Get RR run queue */
     rr_rq = get_rr_rq(rq);
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return;
     }
 
@@ -160,7 +163,8 @@ static void rr_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Get RR run queue */
     rr_rq = get_rr_rq(rq);
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return;
     }
 
@@ -168,7 +172,8 @@ static void rr_sched_dequeue(struct rq *rq, TCB_t *task)
     list_del_init(&task->run_list);
 
     /* Update statistics */
-    if (rr_rq->nr_running > 0U) {
+    if (rr_rq->nr_running > 0U)
+    {
         rr_rq->nr_running--;
     }
 }
@@ -185,17 +190,20 @@ static TCB_t *rr_sched_pick_next(struct rq *rq)
 
     /* Get RR run queue */
     rr_rq = get_rr_rq(rq);
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return NULL;
     }
 
     /* Check if any tasks are running */
-    if (rr_rq->nr_running == 0U) {
+    if (rr_rq->nr_running == 0U)
+    {
         return NULL;
     }
 
     /* Check if queue is empty */
-    if (list_empty(&rr_rq->queue)) {
+    if (list_empty(&rr_rq->queue))
+    {
         return NULL;
     }
 
@@ -216,7 +224,8 @@ static void rr_sched_tick(struct rq *rq, TCB_t *task)
 
     /* Get RR run queue */
     rr_rq = get_rr_rq(rq);
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return;
     }
 
@@ -224,7 +233,8 @@ static void rr_sched_tick(struct rq *rq, TCB_t *task)
     task->time_slice++;
 
     /* Check if time slice expired */
-    if (task->time_slice >= RR_TIME_SLICE) {
+    if (task->time_slice >= RR_TIME_SLICE)
+    {
         /* Reset time slice */
         task->time_slice = 0U;
 
@@ -248,7 +258,8 @@ static void rr_sched_update_curr(struct rq *rq)
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
@@ -276,7 +287,8 @@ static void rr_sched_yield(struct rq *rq, TCB_t *task)
 
     /* Get RR run queue */
     rr_rq = get_rr_rq(rq);
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return;
     }
 
@@ -299,12 +311,14 @@ static int rr_sched_can_preempt(const struct rq *rq, const TCB_t *task)
 
     /* Get RR run queue */
     rr_rq = (const rr_rq_t *)rq->rr_rq;
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return 0;
     }
 
     /* Check if there are other tasks */
-    if (rr_rq->nr_running > 1U) {
+    if (rr_rq->nr_running > 1U)
+    {
         return 1;
     }
 
@@ -327,8 +341,10 @@ static int rr_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClas
     task->sched_class = new_class;
 
     /* Enqueue to new scheduler */
-    if (new_class != NULL) {
-        if (new_class->enqueue != NULL) {
+    if (new_class != NULL)
+    {
+        if (new_class->enqueue != NULL)
+        {
             new_class->enqueue(rq, task);
         }
     }
@@ -347,13 +363,15 @@ static int rr_sched_get_stats(const struct rq *rq, void *stats)
     const rr_rq_t *rr_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
-    if ((rq == NULL) || (stats == NULL)) {
+    if ((rq == NULL) || (stats == NULL))
+    {
         return -1;
     }
 
     /* Get RR run queue */
     rr_rq = (const rr_rq_t *)rq->rr_rq;
-    if (rr_rq == NULL) {
+    if (rr_rq == NULL)
+    {
         return -1;
     }
 

@@ -50,12 +50,15 @@ static ShellCommand_t *find_command(const char *name)
 {
     uint32_t i;
 
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return NULL;
     }
 
-    for (i = 0U; i < g_cmd_count; i++) {
-        if ((g_commands[i] != NULL) && (strcmp(g_commands[i]->name, name) == 0)) {
+    for (i = 0U; i < g_cmd_count; i++)
+    {
+        if ((g_commands[i] != NULL) && (strcmp(g_commands[i]->name, name) == 0))
+        {
             return g_commands[i];
         }
     }
@@ -75,23 +78,28 @@ static int parse_line(char *line)
     bool in_quote = false;
 
     /* Skip leading whitespace */
-    while ((*p == ' ') || (*p == '\t')) {
+    while ((*p == ' ') || (*p == '\t'))
+    {
         p++;
     }
 
     /* Parse arguments */
-    while ((*p != '\0') && (argc < (int)SHELL_MAX_ARGS)) {
+    while ((*p != '\0') && (argc < (int)SHELL_MAX_ARGS))
+    {
         /* Skip whitespace */
-        while (((*p == ' ') || (*p == '\t')) && !in_quote) {
+        while (((*p == ' ') || (*p == '\t')) && !in_quote)
+        {
             p++;
         }
 
-        if (*p == '\0') {
+        if (*p == '\0')
+        {
             break;
         }
 
         /* Start of argument */
-        if (*p == '"') {
+        if (*p == '"')
+        {
             in_quote = true;
             p++;
         }
@@ -99,20 +107,26 @@ static int parse_line(char *line)
         g_shell.argv[argc++] = p;
 
         /* Find end of argument */
-        while ((*p != '\0') && (!in_quote || (*p != '"'))) {
-            if ((*p == ' ') || (*p == '\t')) {
-                if (!in_quote) {
+        while ((*p != '\0') && (!in_quote || (*p != '"')))
+        {
+            if ((*p == ' ') || (*p == '\t'))
+            {
+                if (!in_quote)
+                {
                     break;
                 }
             }
             p++;
         }
 
-        if (*p == '"') {
+        if (*p == '"')
+        {
             in_quote = false;
             *p = '\0';
             p++;
-        } else if (*p != '\0') {
+        }
+        else if (*p != '\0')
+        {
             *p = '\0';
             p++;
         }
@@ -147,7 +161,8 @@ int shell_init(void)
 {
     uint32_t i;
 
-    if (g_shell.initialized) {
+    if (g_shell.initialized)
+    {
         return 0;
     }
 
@@ -157,90 +172,66 @@ int shell_init(void)
     g_shell.running = false;
 
     /* Clear command array */
-    for (i = 0U; i < SHELL_MAX_CMDS; i++) {
+    for (i = 0U; i < SHELL_MAX_CMDS; i++)
+    {
         g_commands[i] = NULL;
     }
     g_cmd_count = 0U;
 
     /* Register built-in commands */
     {
-        static const ShellCommand_t cmds[] =
-        {
-            {
-                "help", "Show available commands",
-                "Usage: help [command]\n"
-                "  Show list of available commands or detailed help for a specific command.",
-                shell_cmd_help
-            },
-            {
-                "ps", "List running tasks",
-                "Usage: ps\n"
-                "  Display information about all running tasks.",
-                shell_cmd_ps
-            },
-            {
-                "mem", "Show memory usage",
-                "Usage: mem\n"
-                "  Display system memory usage statistics.",
-                shell_cmd_mem
-            },
-            {
-                "sched", "Show scheduler statistics",
-                "Usage: sched\n"
-                "  Display scheduler statistics and information.",
-                shell_cmd_sched
-            },
-            {
-                "mount", "Show mounted filesystems",
-                "Usage: mount\n"
-                "  Display list of mounted filesystems.",
-                shell_cmd_mount
-            },
-            {
-                "echo", "Echo arguments",
-                "Usage: echo [args...]\n"
-                "  Display the arguments.",
-                shell_cmd_echo
-            },
-            {
-                "clear", "Clear screen",
-                "Usage: clear\n"
-                "  Clear the terminal screen.",
-                shell_cmd_clear
-            },
-            {
-                "reboot", "Reboot system",
-                "Usage: reboot\n"
-                "  Reboot the system.",
-                shell_cmd_reboot
-            },
-            {
-                "version", "Show version information",
-                "Usage: version\n"
-                "  Display version and build information.",
-                shell_cmd_version
-            },
-            {
-                "test", "Run diagnostics",
-                "Usage: test [test_name]\n"
-                "  Run system diagnostic tests.",
-                shell_cmd_test
-            },
-            {
-                "uptime", "Show system uptime",
-                "Usage: uptime\n"
-                "  Display system uptime information.",
-                shell_cmd_uptime
-            },
-            {
-                "date", "Show/set system time",
-                "Usage: date\n"
-                "  Display or set system date and time.",
-                shell_cmd_date
-            }
-        };
+        static const ShellCommand_t cmds[] = {
+            {"help", "Show available commands",
+             "Usage: help [command]\n"
+             "  Show list of available commands or detailed help for a specific command.",
+             shell_cmd_help},
+            {"ps", "List running tasks",
+             "Usage: ps\n"
+             "  Display information about all running tasks.",
+             shell_cmd_ps},
+            {"mem", "Show memory usage",
+             "Usage: mem\n"
+             "  Display system memory usage statistics.",
+             shell_cmd_mem},
+            {"sched", "Show scheduler statistics",
+             "Usage: sched\n"
+             "  Display scheduler statistics and information.",
+             shell_cmd_sched},
+            {"mount", "Show mounted filesystems",
+             "Usage: mount\n"
+             "  Display list of mounted filesystems.",
+             shell_cmd_mount},
+            {"echo", "Echo arguments",
+             "Usage: echo [args...]\n"
+             "  Display the arguments.",
+             shell_cmd_echo},
+            {"clear", "Clear screen",
+             "Usage: clear\n"
+             "  Clear the terminal screen.",
+             shell_cmd_clear},
+            {"reboot", "Reboot system",
+             "Usage: reboot\n"
+             "  Reboot the system.",
+             shell_cmd_reboot},
+            {"version", "Show version information",
+             "Usage: version\n"
+             "  Display version and build information.",
+             shell_cmd_version},
+            {"test", "Run diagnostics",
+             "Usage: test [test_name]\n"
+             "  Run system diagnostic tests.",
+             shell_cmd_test},
+            {"uptime", "Show system uptime",
+             "Usage: uptime\n"
+             "  Display system uptime information.",
+             shell_cmd_uptime},
+            {"date", "Show/set system time",
+             "Usage: date\n"
+             "  Display or set system date and time.",
+             shell_cmd_date}};
 
-        for (i = 0U; i < (sizeof(cmds) / sizeof(cmds[0])); i++) {
+        for (i = 0U; i < (sizeof(cmds) / sizeof(cmds[0])); i++)
+        {
             (void)shell_register_command(&cmds[i]);
         }
     }
@@ -255,7 +246,8 @@ int shell_init(void)
  */
 int shell_start(void)
 {
-    if (!g_shell.initialized) {
+    if (!g_shell.initialized)
+    {
         return -EPERM;
     }
 
@@ -271,7 +263,8 @@ int shell_start(void)
     printk("\n");
 
     /* Main command loop */
-    while (g_shell.running) {
+    while (g_shell.running)
+    {
         /* Print prompt */
         shell_print_prompt();
 
@@ -297,21 +290,25 @@ void shell_stop(void)
  */
 int shell_register_command(const ShellCommand_t *cmd)
 {
-    if (cmd == NULL) {
+    if (cmd == NULL)
+    {
         return -EINVAL;
     }
 
-    if ((cmd->name == NULL) || (cmd->func == NULL)) {
+    if ((cmd->name == NULL) || (cmd->func == NULL))
+    {
         return -EINVAL;
     }
 
     /* Check if command already exists */
-    if (find_command(cmd->name) != NULL) {
+    if (find_command(cmd->name) != NULL)
+    {
         return -EEXIST;
     }
 
     /* Check if space available */
-    if (g_cmd_count >= SHELL_MAX_CMDS) {
+    if (g_cmd_count >= SHELL_MAX_CMDS)
+    {
         return -ENOSPC;
     }
 
@@ -329,23 +326,28 @@ int shell_unregister_command(const char *name)
     uint32_t i;
     uint32_t j;
 
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return -EINVAL;
     }
 
     /* Find command */
-    for (i = 0U; i < g_cmd_count; i++) {
-        if ((g_commands[i] != NULL) && (strcmp(g_commands[i]->name, name) == 0)) {
+    for (i = 0U; i < g_cmd_count; i++)
+    {
+        if ((g_commands[i] != NULL) && (strcmp(g_commands[i]->name, name) == 0))
+        {
             break;
         }
     }
 
-    if (i >= g_cmd_count) {
+    if (i >= g_cmd_count)
+    {
         return -ENOENT;
     }
 
     /* Shift remaining commands */
-    for (j = i; j < (g_cmd_count - 1U); j++) {
+    for (j = i; j < (g_cmd_count - 1U); j++)
+    {
         g_commands[j] = g_commands[j + 1U];
     }
 
@@ -363,7 +365,8 @@ int shell_execute(const char *cmd_str)
     ShellCommand_t *cmd;
     int ret;
 
-    if (cmd_str == NULL) {
+    if (cmd_str == NULL)
+    {
         return -EINVAL;
     }
 
@@ -374,13 +377,15 @@ int shell_execute(const char *cmd_str)
     /* Parse line */
     g_shell.argc = parse_line(g_shell.line);
 
-    if (g_shell.argc == 0) {
+    if (g_shell.argc == 0)
+    {
         return 0; /* Empty line */
     }
 
     /* Find command */
     cmd = find_command(g_shell.argv[0]);
-    if (cmd == NULL) {
+    if (cmd == NULL)
+    {
         print_error("Unknown command: %s", g_shell.argv[0]);
         return -ENOENT;
     }
@@ -411,10 +416,12 @@ int shell_cmd_help(int argc, char *argv[])
     uint32_t i;
     ShellCommand_t *cmd;
 
-    if (argc > 1) {
+    if (argc > 1)
+    {
         /* Show detailed help for specific command */
         cmd = find_command(argv[1]);
-        if (cmd == NULL) {
+        if (cmd == NULL)
+        {
             print_error("Unknown command: %s", argv[1]);
             return -ENOENT;
         }
@@ -423,18 +430,23 @@ int shell_cmd_help(int argc, char *argv[])
         printk("Command: %s\n", cmd->name);
         printk("Description: %s\n", cmd->desc);
         printk("\n");
-        if (cmd->help != NULL) {
+        if (cmd->help != NULL)
+        {
             printk("%s\n", cmd->help);
         }
         printk("\n");
-    } else {
+    }
+    else
+    {
         /* Show list of commands */
         printk("\n");
         printk("Available commands:\n");
         printk("\n");
 
-        for (i = 0U; i < g_cmd_count; i++) {
-            if (g_commands[i] != NULL) {
+        for (i = 0U; i < g_cmd_count; i++)
+        {
+            if (g_commands[i] != NULL)
+            {
                 printk("  %-12s - %s\n", g_commands[i]->name, g_commands[i]->desc);
             }
         }
@@ -547,8 +559,10 @@ int shell_cmd_echo(int argc, char *argv[])
 {
     int i;
 
-    for (i = 1; i < argc; i++) {
-        if (i > 1) {
+    for (i = 1; i < argc; i++)
+    {
+        if (i > 1)
+        {
             printk(" ");
         }
         printk("%s", argv[i]);
@@ -614,7 +628,8 @@ int shell_cmd_version(int argc, char *argv[])
  */
 int shell_cmd_test(int argc, char *argv[])
 {
-    if (argc > 1) {
+    if (argc > 1)
+    {
         printk("\n");
         printk("Running test: %s\n", argv[1]);
         printk("\n");
@@ -622,7 +637,9 @@ int shell_cmd_test(int argc, char *argv[])
         /* TODO: Implement test execution */
         printk("Test execution not yet implemented\n");
         printk("\n");
-    } else {
+    }
+    else
+    {
         printk("\n");
         printk("Available tests:\n");
         printk("\n");
@@ -661,14 +678,13 @@ int shell_cmd_uptime(int argc, char *argv[])
     printk("\n");
     printk("Uptime: ");
 
-    if (days > 0) {
+    if (days > 0)
+    {
         printk("%llu day%s, ", (unsigned long long)days, (days > 1ULL) ? "s" : "");
     }
 
-    printk("%02llu:%02llu:%02llu\n",
-           (unsigned long long)(hours % 24ULL),
-           (unsigned long long)(minutes % 60ULL),
-           (unsigned long long)(seconds % 60ULL));
+    printk("%02llu:%02llu:%02llu\n", (unsigned long long)(hours % 24ULL),
+           (unsigned long long)(minutes % 60ULL), (unsigned long long)(seconds % 60ULL));
 
     printk("\n");
 

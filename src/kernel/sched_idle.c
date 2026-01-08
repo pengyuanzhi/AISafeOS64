@@ -78,7 +78,8 @@ const SchedClass_t sched_class_idle = {.name = "IDLE",
  */
 static idle_rq_t *get_idle_rq(struct rq *rq)
 {
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
     return (idle_rq_t *)rq->idle_rq;
@@ -99,7 +100,8 @@ static int idle_sched_init(struct rq *rq)
 
     /* Allocate idle run queue */
     idle_rq = (idle_rq_t *)kmalloc((uint64_t)sizeof(idle_rq_t));
-    if (idle_rq == NULL) {
+    if (idle_rq == NULL)
+    {
         return -1; /* ENOMEM */
     }
 
@@ -126,7 +128,8 @@ static void idle_sched_enqueue(struct rq *rq, TCB_t *task)
 
     /* Get idle run queue */
     idle_rq = get_idle_rq(rq);
-    if (idle_rq == NULL) {
+    if (idle_rq == NULL)
+    {
         return;
     }
 
@@ -148,7 +151,8 @@ static void idle_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Get idle run queue */
     idle_rq = get_idle_rq(rq);
-    if (idle_rq == NULL) {
+    if (idle_rq == NULL)
+    {
         return;
     }
 
@@ -156,7 +160,8 @@ static void idle_sched_dequeue(struct rq *rq, TCB_t *task)
     list_del_init(&task->run_list);
 
     /* Update statistics */
-    if (idle_rq->nr_running > 0U) {
+    if (idle_rq->nr_running > 0U)
+    {
         idle_rq->nr_running--;
     }
 }
@@ -173,17 +178,20 @@ static TCB_t *idle_sched_pick_next(struct rq *rq)
 
     /* Get idle run queue */
     idle_rq = get_idle_rq(rq);
-    if (idle_rq == NULL) {
+    if (idle_rq == NULL)
+    {
         return NULL;
     }
 
     /* Check if any tasks are running */
-    if (idle_rq->nr_running == 0U) {
+    if (idle_rq->nr_running == 0U)
+    {
         return NULL;
     }
 
     /* Check if queue is empty */
-    if (list_empty(&idle_rq->queue)) {
+    if (list_empty(&idle_rq->queue))
+    {
         return NULL;
     }
 
@@ -220,7 +228,8 @@ static void idle_sched_update_curr(struct rq *rq)
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
@@ -248,13 +257,15 @@ static int idle_sched_get_stats(const struct rq *rq, void *stats)
     const idle_rq_t *idle_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
-    if ((rq == NULL) || (stats == NULL)) {
+    if ((rq == NULL) || (stats == NULL))
+    {
         return -1;
     }
 
     /* Get idle run queue */
     idle_rq = (const idle_rq_t *)rq->idle_rq;
-    if (idle_rq == NULL) {
+    if (idle_rq == NULL)
+    {
         return -1;
     }
 

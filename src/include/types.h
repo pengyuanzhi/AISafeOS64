@@ -17,18 +17,19 @@
 #include <stdbool.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/**
- * @brief 系统错误码类型
- */
-typedef int32_t ErrorCode_t;
+    /**
+     * @brief 系统错误码类型
+     */
+    typedef int32_t ErrorCode_t;
 
-/**
- * @brief 有符号大小类型 (用于返回字节数或错误码)
- */
-typedef int64_t ssize_t;
+    /**
+     * @brief 有符号大小类型 (用于返回字节数或错误码)
+     */
+    typedef int64_t ssize_t;
 
 /**
  * @brief 通用错误码定义

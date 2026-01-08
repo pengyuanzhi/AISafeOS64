@@ -64,11 +64,13 @@ uint32_t find_highest_priority(const uint64_t *bitmap)
     uint32_t bit_offset;
 
     /* Iterate through 4 words (256 bits) */
-    for (word_idx = 0U; word_idx < 4U; word_idx++) {
+    for (word_idx = 0U; word_idx < 4U; word_idx++)
+    {
         bitmap_u64 = bitmap[word_idx];
 
         /* Skip empty words */
-        if (bitmap_u64 == 0ULL) {
+        if (bitmap_u64 == 0ULL)
+        {
             continue;
         }
 
@@ -100,10 +102,13 @@ uint32_t prio_to_weight(uint32_t prio)
         /*  15 */ 36,    29,    23,    18,    15};
 
     /* Map priority 0-255 to weight index */
-    if (prio >= 128U) {
+    if (prio >= 128U)
+    {
         /* Real-time priority (high weight) */
         return 1024U;
-    } else {
+    }
+    else
+    {
         /* Normal priority (use weight table) */
         uint32_t idx = prio % 40U;
         return prio_to_weight_array[idx];
@@ -128,7 +133,8 @@ uint64_t sched_clock(void)
  */
 struct rq *cpu_rq(uint32_t cpu)
 {
-    if (cpu >= MAX_CPUS) {
+    if (cpu >= MAX_CPUS)
+    {
         return NULL;
     }
     return &per_cpu_rq[cpu];
@@ -169,21 +175,25 @@ int register_sched_class(const SchedClass_t *class)
     const SchedClass_t **link;
 
     /* Parameter validation */
-    if (class == NULL) {
+    if (class == NULL)
+    {
         return -1; /* EINVAL */
     }
 
     /* Check core operations */
     if ((class->init == NULL) || (class->enqueue == NULL) || (class->dequeue == NULL) ||
-        (class->pick_next == NULL) || (class->task_tick == NULL) || (class->update_curr == NULL)) {
+        (class->pick_next == NULL) || (class->task_tick == NULL) || (class->update_curr == NULL))
+    {
         return -1; /* EINVAL */
     }
 
     /* Insert into linked list (sorted by priority) */
     link = &sched_class_h;
 
-    while (*link != NULL) {
-        if ((*link)->priority > class->priority) {
+    while (*link != NULL)
+    {
+        if ((*link)->priority > class->priority)
+        {
             break;
         }
         link = &(*link)->next;
@@ -210,12 +220,14 @@ int scheduler_init(void)
     int ret;
 
     /* Check if already initialized */
-    if (scheduler_initialized != 0U) {
+    if (scheduler_initialized != 0U)
+    {
         return -1; /* EALREADY */
     }
 
     /* Initialize per-CPU run queues */
-    for (cpu = 0U; cpu < MAX_CPUS; cpu++) {
+    for (cpu = 0U; cpu < MAX_CPUS; cpu++)
+    {
         struct rq *rq = &per_cpu_rq[cpu];
 
         /* Initialize fields */
@@ -250,41 +262,50 @@ int scheduler_init(void)
     sched_class_h = NULL;
 
     ret = register_sched_class(&sched_class_fifo);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     ret = register_sched_class(&sched_class_edf);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     ret = register_sched_class(&sched_class_cfs);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     ret = register_sched_class(&sched_class_rr);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     ret = register_sched_class(&sched_class_idle);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     /* Initialize each scheduling class */
-    for (cpu = 0U; cpu < MAX_CPUS; cpu++) {
+    for (cpu = 0U; cpu < MAX_CPUS; cpu++)
+    {
         struct rq *rq = &per_cpu_rq[cpu];
         const SchedClass_t *class;
 
         /* Call init for each class */
         class = sched_class_h;
-        while (class != NULL) {
-            if (class->init != NULL) {
+        while (class != NULL)
+        {
+            if (class->init != NULL)
+            {
                 ret = class->init(rq);
-                if (ret != 0) {
+                if (ret != 0)
+                {
                     return ret;
                 }
             }
@@ -311,14 +332,17 @@ TCB_t *pick_next_task(struct rq *rq)
     TCB_t *next_task;
 
     /* Parameter validation */
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
 
     /* Iterate through scheduling classes */
-    for (class = sched_class_h; class != NULL; class = class->next) {
+    for (class = sched_class_h; class != NULL; class = class->next)
+    {
         /* Check if this class has runnable tasks */
-        if (rq->nr_running[class->id] == 0U) {
+        if (rq->nr_running[class->id] == 0U)
+        {
             continue;
         }
 
@@ -326,7 +350,8 @@ TCB_t *pick_next_task(struct rq *rq)
         next_task = class->pick_next(rq);
 
         /* Check if task found */
-        if (next_task != NULL) {
+        if (next_task != NULL)
+        {
             return next_task;
         }
     }
@@ -345,22 +370,26 @@ void enqueue_task(TCB_t *task)
     const SchedClass_t *class;
 
     /* Parameter validation */
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return;
     }
 
     class = task->sched_class;
-    if (class == NULL) {
+    if (class == NULL)
+    {
         return;
     }
 
     rq = task->rq;
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
     /* Check task state */
-    if (task->state != TASK_READY) {
+    if (task->state != TASK_READY)
+    {
         return;
     }
 
@@ -384,17 +413,20 @@ void dequeue_task(TCB_t *task)
     const SchedClass_t *class;
 
     /* Parameter validation */
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return;
     }
 
     class = task->sched_class;
-    if (class == NULL) {
+    if (class == NULL)
+    {
         return;
     }
 
     rq = task->rq;
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
@@ -402,7 +434,8 @@ void dequeue_task(TCB_t *task)
     class->dequeue(rq, task);
 
     /* Update statistics */
-    if (rq->nr_running[class->id] > 0U) {
+    if (rq->nr_running[class->id] > 0U)
+    {
         rq->nr_running[class->id]--;
     }
 
@@ -423,7 +456,8 @@ void schedule(void)
 
     /* Get current run queue */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
@@ -432,7 +466,8 @@ void schedule(void)
 
     /* Get previous task */
     prev = rq->curr;
-    if (prev == NULL) {
+    if (prev == NULL)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return;
     }
@@ -441,7 +476,8 @@ void schedule(void)
     rq->need_resched = 0U;
 
     /* Update previous task runtime */
-    if (prev->sched_class != NULL) {
+    if (prev->sched_class != NULL)
+    {
         prev->sched_class->update_curr(rq);
     }
 
@@ -449,7 +485,8 @@ void schedule(void)
     next = pick_next_task(rq);
 
     /* Check if context switch needed */
-    if (next == prev) {
+    if (next == prev)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return;
     }
@@ -481,7 +518,8 @@ void scheduler_tick(uint32_t cpu)
 
     /* Get run queue */
     rq = cpu_rq(cpu);
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
@@ -490,14 +528,16 @@ void scheduler_tick(uint32_t cpu)
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return;
     }
 
     /* Get scheduling class */
     class = curr->sched_class;
-    if (class == NULL) {
+    if (class == NULL)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return;
     }
@@ -506,7 +546,8 @@ void scheduler_tick(uint32_t cpu)
     class->task_tick(rq, curr);
 
     /* Check if reschedule needed */
-    if (rq->need_resched != 0U) {
+    if (rq->need_resched != 0U)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         schedule();
         return;
@@ -527,24 +568,28 @@ void yield(void)
 
     /* Get run queue */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
     /* Get scheduling class */
     class = curr->sched_class;
-    if (class == NULL) {
+    if (class == NULL)
+    {
         return;
     }
 
     /* Call class-specific yield */
-    if (class->yield != NULL) {
+    if (class->yield != NULL)
+    {
         unsigned long flags;
         spin_lock_irqsave(&rq->lock, flags);
         class->yield(rq, curr);
@@ -577,31 +622,37 @@ uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (
     struct rq *rq;
 
     /* Parameter validation */
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return 0U;
     }
 
-    if (entry == NULL) {
+    if (entry == NULL)
+    {
         return 0U;
     }
 
-    if (prio >= PRIORITY_LEVELS) {
+    if (prio >= PRIORITY_LEVELS)
+    {
         return 0U;
     }
 
-    if (stack_size == 0U) {
+    if (stack_size == 0U)
+    {
         return 0U;
     }
 
     /* Allocate task */
     task = (TCB_t *)kmalloc(sizeof(TCB_t));
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return 0U;
     }
 
     /* Allocate stack */
     task->stack_base = (uint64_t)kmalloc((uint64_t)stack_size);
-    if (task->stack_base == 0ULL) {
+    if (task->stack_base == 0ULL)
+    {
         kfree(task);
         return 0U;
     }
@@ -620,7 +671,8 @@ uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (
     /* TODO: Implement safe string copy */
 
     /* Set scheduling class */
-    switch (policy) {
+    switch (policy)
+    {
         case SCHED_FIFO:
             task->sched_class = &sched_class_fifo;
             break;
@@ -643,7 +695,8 @@ uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (
 
     /* Get run queue */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         kfree((void *)task->stack_base);
         kfree(task);
         return 0U;
@@ -678,17 +731,21 @@ void task_exit(int code)
 
     /* Get run queue */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         /* Cannot do much */
-        while (1) {
+        while (1)
+        {
             __asm__ volatile("wfi");
         }
     }
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
-        while (1) {
+    if (curr == NULL)
+    {
+        while (1)
+        {
             __asm__ volatile("wfi");
         }
     }

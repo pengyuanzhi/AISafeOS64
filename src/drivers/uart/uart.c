@@ -101,7 +101,8 @@ int uart_init(void)
 
     /* 计算波特率除数 */
     bdiv = uartclk / (16U * baudrate);
-    if (bdiv == 0U) {
+    if (bdiv == 0U)
+    {
         return -1; /* 无效波特率 */
     }
 
@@ -112,7 +113,8 @@ int uart_init(void)
     uart0->CR = 0U;
 
     /* 等待UART空闲 */
-    while ((uart0->FR & UART_FR_BUSY) != 0U) {
+    while ((uart0->FR & UART_FR_BUSY) != 0U)
+    {
         /* 等待 */
     }
 
@@ -147,7 +149,8 @@ int uart_init(void)
 void uart_putc(char ch)
 {
     /* 等待发送FIFO为空 */
-    while ((uart0->FR & UART_FR_TXFE) == 0U) {
+    while ((uart0->FR & UART_FR_TXFE) == 0U)
+    {
         /* 等待 */
     }
 
@@ -164,7 +167,8 @@ void uart_putc(char ch)
 char uart_getc(void)
 {
     /* 等待接收FIFO非空 */
-    while ((uart0->FR & UART_FR_RXFE) != 0U) {
+    while ((uart0->FR & UART_FR_RXFE) != 0U)
+    {
         /* 等待 */
     }
 
@@ -180,12 +184,15 @@ char uart_getc(void)
  */
 void uart_puts(const char *str)
 {
-    if (str == NULL) {
+    if (str == NULL)
+    {
         return;
     }
 
-    while (*str != '\0') {
-        if (*str == '\n') {
+    while (*str != '\0')
+    {
+        if (*str == '\n')
+        {
             uart_putc('\r'); /* LF前发送CR */
         }
         uart_putc(*str);

@@ -91,7 +91,8 @@ const SchedClass_t sched_class_cfs = {.name = "CFS",
  */
 static cfs_rq_t *get_cfs_rq(struct rq *rq)
 {
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
     return (cfs_rq_t *)rq->cfs_rq;
@@ -112,7 +113,8 @@ static int cfs_sched_init(struct rq *rq)
 
     /* Allocate CFS run queue */
     cfs_rq = (cfs_rq_t *)kmalloc((uint64_t)sizeof(cfs_rq_t));
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return -1; /* ENOMEM */
     }
 
@@ -144,12 +146,14 @@ static void cfs_sched_enqueue(struct rq *rq, TCB_t *task)
 
     /* Get CFS run queue */
     cfs_rq = get_cfs_rq(rq);
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return;
     }
 
     /* Initialize vruntime if needed */
-    if (task->vruntime == 0ULL) {
+    if (task->vruntime == 0ULL)
+    {
         task->vruntime = cfs_rq->min_vruntime;
     }
 
@@ -157,14 +161,18 @@ static void cfs_sched_enqueue(struct rq *rq, TCB_t *task)
     link = &cfs_rq->tasks_timeline.rb_node;
     parent = NULL;
 
-    while (*link != NULL) {
+    while (*link != NULL)
+    {
         parent = *link;
         entry = rb_entry(parent, TCB_t, run_node);
 
         /* Compare vruntime */
-        if (task->vruntime < entry->vruntime) {
+        if (task->vruntime < entry->vruntime)
+        {
             link = &(*link)->rb_left;
-        } else {
+        }
+        else
+        {
             link = &(*link)->rb_right;
         }
     }
@@ -174,7 +182,8 @@ static void cfs_sched_enqueue(struct rq *rq, TCB_t *task)
     rb_insert_color(&task->run_node, &cfs_rq->tasks_timeline);
 
     /* Update minimum vruntime */
-    if (task->vruntime < cfs_rq->min_vruntime) {
+    if (task->vruntime < cfs_rq->min_vruntime)
+    {
         cfs_rq->min_vruntime = task->vruntime;
     }
 
@@ -194,7 +203,8 @@ static void cfs_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Get CFS run queue */
     cfs_rq = get_cfs_rq(rq);
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return;
     }
 
@@ -203,13 +213,15 @@ static void cfs_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Update minimum vruntime */
     node = rb_first(&cfs_rq->tasks_timeline);
-    if (node != NULL) {
+    if (node != NULL)
+    {
         TCB_t *first = rb_entry(node, TCB_t, run_node);
         cfs_rq->min_vruntime = first->vruntime;
     }
 
     /* Update statistics */
-    if (cfs_rq->nr_running > 0U) {
+    if (cfs_rq->nr_running > 0U)
+    {
         cfs_rq->nr_running--;
     }
 }
@@ -227,18 +239,21 @@ static TCB_t *cfs_sched_pick_next(struct rq *rq)
 
     /* Get CFS run queue */
     cfs_rq = get_cfs_rq(rq);
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return NULL;
     }
 
     /* Check if any tasks are running */
-    if (cfs_rq->nr_running == 0U) {
+    if (cfs_rq->nr_running == 0U)
+    {
         return NULL;
     }
 
     /* Get leftmost node (minimum vruntime) */
     leftmost = rb_first(&cfs_rq->tasks_timeline);
-    if (leftmost == NULL) {
+    if (leftmost == NULL)
+    {
         return NULL;
     }
 
@@ -276,13 +291,15 @@ static void cfs_sched_update_curr(struct rq *rq)
 
     /* Get CFS run queue */
     cfs_rq = get_cfs_rq(rq);
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return;
     }
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
@@ -293,7 +310,8 @@ static void cfs_sched_update_curr(struct rq *rq)
     delta_exec = now - curr->exec_start;
 
     /* Check if any time elapsed */
-    if (delta_exec == 0ULL) {
+    if (delta_exec == 0ULL)
+    {
         return;
     }
 
@@ -317,7 +335,8 @@ static void cfs_sched_update_curr(struct rq *rq)
     cfs_rq->exec_clock += delta_exec;
 
     /* Check if task needs requeue */
-    if ((curr->vruntime - cfs_rq->min_vruntime) > CFS_GRANULARITY_NS) {
+    if ((curr->vruntime - cfs_rq->min_vruntime) > CFS_GRANULARITY_NS)
+    {
         /* Dequeue and re-enqueue to maintain tree order */
         cfs_sched_dequeue(rq, curr);
         cfs_sched_enqueue(rq, curr);
@@ -351,27 +370,32 @@ static int cfs_sched_can_preempt(const struct rq *rq, const TCB_t *task)
 
     /* Get CFS run queue */
     cfs_rq = (const cfs_rq_t *)rq->cfs_rq;
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return 0;
     }
 
     /* Check if queue is empty */
-    if (cfs_rq->nr_running == 0U) {
+    if (cfs_rq->nr_running == 0U)
+    {
         return 0;
     }
 
     /* Get minimum vruntime task */
     leftmost = rb_first(&cfs_rq->tasks_timeline);
-    if (leftmost == NULL) {
+    if (leftmost == NULL)
+    {
         return 0;
     }
 
     first = rb_entry(leftmost, TCB_t, run_node);
 
     /* Can preempt if current task is not the minimum */
-    if (first != task) {
+    if (first != task)
+    {
         /* Check vruntime difference */
-        if ((first->vruntime + CFS_GRANULARITY_NS) < task->vruntime) {
+        if ((first->vruntime + CFS_GRANULARITY_NS) < task->vruntime)
+        {
             return 1;
         }
     }
@@ -395,8 +419,10 @@ static int cfs_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedCla
     task->sched_class = new_class;
 
     /* Enqueue to new scheduler */
-    if (new_class != NULL) {
-        if (new_class->enqueue != NULL) {
+    if (new_class != NULL)
+    {
+        if (new_class->enqueue != NULL)
+        {
             new_class->enqueue(rq, task);
         }
     }
@@ -415,13 +441,15 @@ static int cfs_sched_get_stats(const struct rq *rq, void *stats)
     const cfs_rq_t *cfs_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
-    if ((rq == NULL) || (stats == NULL)) {
+    if ((rq == NULL) || (stats == NULL))
+    {
         return -1;
     }
 
     /* Get CFS run queue */
     cfs_rq = (const cfs_rq_t *)rq->cfs_rq;
-    if (cfs_rq == NULL) {
+    if (cfs_rq == NULL)
+    {
         return -1;
     }
 

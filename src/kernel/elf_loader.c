@@ -35,7 +35,8 @@ static bool g_elf_loader_initialized = false;
  */
 int elf_loader_init(void)
 {
-    if (g_elf_loader_initialized) {
+    if (g_elf_loader_initialized)
+    {
         return 0;
     }
 
@@ -51,17 +52,20 @@ int elf_loader_init(void)
 bool elf_validate_magic(const uint8_t *data, uint32_t size)
 {
     /* Parameter validation */
-    if (data == NULL) {
+    if (data == NULL)
+    {
         return false;
     }
 
     /* Check minimum size */
-    if (size < ELF_MAGIC_SIZE) {
+    if (size < ELF_MAGIC_SIZE)
+    {
         return false;
     }
 
     /* Compare magic number */
-    if (memcmp(data, g_elf_magic, ELF_MAGIC_SIZE) != 0) {
+    if (memcmp(data, g_elf_magic, ELF_MAGIC_SIZE) != 0)
+    {
         return false;
     }
 
@@ -78,16 +82,19 @@ int elf_read_header(const uint8_t *data, uint32_t size, const Elf64_Ehdr **ehdr)
     uint64_t shdr_end;
 
     /* Parameter validation */
-    if (data == NULL) {
+    if (data == NULL)
+    {
         return -EINVAL;
     }
 
-    if (ehdr == NULL) {
+    if (ehdr == NULL)
+    {
         return -EINVAL;
     }
 
     /* Check minimum size */
-    if (size < sizeof(Elf64_Ehdr)) {
+    if (size < sizeof(Elf64_Ehdr))
+    {
         return -EINVAL;
     }
 
@@ -95,44 +102,53 @@ int elf_read_header(const uint8_t *data, uint32_t size, const Elf64_Ehdr **ehdr)
     header = (const Elf64_Ehdr *)data;
 
     /* Validate magic number */
-    if (!elf_validate_magic(data, size)) {
+    if (!elf_validate_magic(data, size))
+    {
         return -EINVAL;
     }
 
     /* Validate machine type (ARM64) */
-    if (header->e_machine != EM_AARCH64) {
+    if (header->e_machine != EM_AARCH64)
+    {
         printk(KERN_ERR "Wrong machine type: %u\n", header->e_machine);
         return -ENOEXEC;
     }
 
     /* Validate entry point */
-    if (header->e_entry == 0UL) {
+    if (header->e_entry == 0UL)
+    {
         printk(KERN_ERR "Invalid entry point: 0\n");
         return -ENOEXEC;
     }
 
     /* Validate program headers */
-    if (header->e_phoff > (uint64_t)size) {
+    if (header->e_phoff > (uint64_t)size)
+    {
         return -EINVAL;
     }
 
-    if (header->e_phnum > 0U) {
+    if (header->e_phnum > 0U)
+    {
         phdr_end = header->e_phoff + ((uint64_t)header->e_phentsize * (uint64_t)header->e_phnum);
 
-        if (phdr_end > (uint64_t)size) {
+        if (phdr_end > (uint64_t)size)
+        {
             return -EINVAL;
         }
     }
 
     /* Validate section headers */
-    if (header->e_shoff > (uint64_t)size) {
+    if (header->e_shoff > (uint64_t)size)
+    {
         return -EINVAL;
     }
 
-    if (header->e_shnum > 0U) {
+    if (header->e_shnum > 0U)
+    {
         shdr_end = header->e_shoff + ((uint64_t)header->e_shentsize * (uint64_t)header->e_shnum);
 
-        if (shdr_end > (uint64_t)size) {
+        if (shdr_end > (uint64_t)size)
+        {
             return -EINVAL;
         }
     }
@@ -154,11 +170,13 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
     const Elf64_Ehdr *ehdr;
 
     /* Parameter validation */
-    if (path == NULL) {
+    if (path == NULL)
+    {
         return -EINVAL;
     }
 
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return -EINVAL;
     }
 
@@ -167,14 +185,16 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
 
     /* Open file */
     fd = open(path, O_RDONLY);
-    if (fd < 0) {
+    if (fd < 0)
+    {
         printk(KERN_ERR "Failed to open %s: %d\n", path, fd);
         return fd;
     }
 
     /* Get file size */
     ret = lseek(fd, 0, SEEK_END);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         close(fd);
         return ret;
     }
@@ -183,7 +203,8 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
 
     /* Allocate buffer */
     data = (uint8_t *)kmalloc((uint64_t)size);
-    if (data == NULL) {
+    if (data == NULL)
+    {
         close(fd);
         return -ENOMEM;
     }
@@ -193,14 +214,16 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
     ret = read(fd, data, size);
     close(fd);
 
-    if (ret != (ssize_t)size) {
+    if (ret != (ssize_t)size)
+    {
         kfree(data);
         return -EIO;
     }
 
     /* Validate ELF header */
     ret = elf_read_header(data, size, &ehdr);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         kfree(data);
         return ret;
     }
@@ -229,19 +252,23 @@ int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_
     uint32_t loaded = 0U;
 
     /* Parameter validation */
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return -EINVAL;
     }
 
-    if (segments == NULL) {
+    if (segments == NULL)
+    {
         return -EINVAL;
     }
 
-    if (segment_count == NULL) {
+    if (segment_count == NULL)
+    {
         return -EINVAL;
     }
 
-    if (max_segments == 0U) {
+    if (max_segments == 0U)
+    {
         return -EINVAL;
     }
 
@@ -250,21 +277,25 @@ int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_
     phdr = (const Elf64_Phdr *)(ctx->elf_data + ctx->phdr_offset);
 
     /* Load each PT_LOAD segment */
-    for (i = 0U; i < ctx->phdr_count; i++) {
-        if (phdr[i].p_type == PT_LOAD) {
+    for (i = 0U; i < ctx->phdr_count; i++)
+    {
+        if (phdr[i].p_type == PT_LOAD)
+        {
             uint8_t *vaddr;
             uint64_t filesz = phdr[i].p_filesz;
             uint64_t memsz = phdr[i].p_memsz;
             uint64_t offset = phdr[i].p_offset;
 
             /* Check if we have room in output array */
-            if (loaded >= max_segments) {
+            if (loaded >= max_segments)
+            {
                 break;
             }
 
             /* Allocate memory */
             vaddr = (uint8_t *)kmalloc((uint64_t)memsz);
-            if (vaddr == NULL) {
+            if (vaddr == NULL)
+            {
                 return -ENOMEM;
             }
 
@@ -272,7 +303,8 @@ int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_
             (void)memset(vaddr, 0, memsz);
 
             /* Copy file data */
-            if (filesz > 0U) {
+            if (filesz > 0U)
+            {
                 (void)memcpy(vaddr, ctx->elf_data + offset, (size_t)filesz);
             }
 
@@ -280,13 +312,18 @@ int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_
             {
                 uint32_t mmu_flags = 0U;
 
-                if ((phdr[i].p_flags & PF_X) != 0U) {
+                if ((phdr[i].p_flags & PF_X) != 0U)
+                {
                     /* Code segment: RX */
                     mmu_flags = MMU_AP_RO | MMU_PXN_DISABLE;
-                } else if ((phdr[i].p_flags & PF_W) != 0U) {
+                }
+                else if ((phdr[i].p_flags & PF_W) != 0U)
+                {
                     /* Data segment: RW */
                     mmu_flags = MMU_AP_RW | MMU_PXN_ENABLE | MMU_UXN_ENABLE;
-                } else {
+                }
+                else
+                {
                     /* Read-only: R */
                     mmu_flags = MMU_AP_RO | MMU_PXN_ENABLE | MMU_UXN_ENABLE;
                 }
@@ -321,11 +358,13 @@ int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32
     uint32_t i;
 
     /* Parameter validation */
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return -EINVAL;
     }
 
-    if ((segments == NULL) && (segment_count > 0U)) {
+    if ((segments == NULL) && (segment_count > 0U))
+    {
         return -EINVAL;
     }
 
@@ -333,7 +372,8 @@ int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32
     ehdr = (const Elf64_Ehdr *)ctx->elf_data;
 
     /* Skip if no section headers */
-    if (ehdr->e_shoff == 0UL) {
+    if (ehdr->e_shoff == 0UL)
+    {
         return 0;
     }
 
@@ -341,8 +381,10 @@ int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32
     shdr = (const Elf64_Shdr *)(ctx->elf_data + ehdr->e_shoff);
 
     /* Process relocation sections */
-    for (i = 0U; i < ehdr->e_shnum; i++) {
-        if ((shdr[i].sh_type == SHT_RELA) && (shdr[i].sh_size > 0U)) {
+    for (i = 0U; i < ehdr->e_shnum; i++)
+    {
+        if ((shdr[i].sh_type == SHT_RELA) && (shdr[i].sh_size > 0U))
+        {
             const Elf64_Rela *rela;
             uint32_t j;
             uint32_t num_rela;
@@ -352,29 +394,38 @@ int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32
             num_rela = (uint32_t)(shdr[i].sh_size / sizeof(Elf64_Rela));
 
             /* Process each relocation */
-            for (j = 0U; j < num_rela; j++) {
+            for (j = 0U; j < num_rela; j++)
+            {
                 uint32_t type = (uint32_t)ELF64_R_TYPE(rela[j].r_info);
                 uint64_t offset = rela[j].r_offset;
                 int64_t addend = rela[j].r_addend;
                 uint64_t *target;
 
                 /* Check offset bounds */
-                if (offset >= ctx->elf_size) {
+                if (offset >= ctx->elf_size)
+                {
                     return -EINVAL;
                 }
 
                 target = (uint64_t *)(ctx->elf_data + offset);
 
                 /* Process relocation type */
-                switch (type) {
+                switch (type)
+                {
                     case R_AARCH64_RELATIVE:
                         /* Base-relative relocation */
-                        if (addend >= 0) {
+                        if (addend >= 0)
+                        {
                             *target = load_base + (uint64_t)addend;
-                        } else {
-                            if ((uint64_t)(-addend) <= load_base) {
+                        }
+                        else
+                        {
+                            if ((uint64_t)(-addend) <= load_base)
+                            {
                                 *target = load_base - (uint64_t)(-addend);
-                            } else {
+                            }
+                            else
+                            {
                                 return -EINVAL;
                             }
                         }
@@ -402,15 +453,18 @@ int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32
 int elf_calc_hash(const uint8_t *data, uint32_t size, uint8_t *hash)
 {
     /* Parameter validation */
-    if (data == NULL) {
+    if (data == NULL)
+    {
         return -EINVAL;
     }
 
-    if (hash == NULL) {
+    if (hash == NULL)
+    {
         return -EINVAL;
     }
 
-    if (size == 0U) {
+    if (size == 0U)
+    {
         return -EINVAL;
     }
 
@@ -430,27 +484,32 @@ int elf_verify_signature(const uint8_t *data, uint32_t size, const uint8_t *sign
     int ret;
 
     /* Parameter validation */
-    if (data == NULL) {
+    if (data == NULL)
+    {
         return -EINVAL;
     }
 
-    if (signature == NULL) {
+    if (signature == NULL)
+    {
         return -EINVAL;
     }
 
-    if (pubkey == NULL) {
+    if (pubkey == NULL)
+    {
         return -EINVAL;
     }
 
     /* Calculate hash */
     ret = elf_calc_hash(data, size, hash);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
     /* Verify signature */
     ret = ecdsa_verify_hash(pubkey, signature, hash);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         printk(KERN_ERR "Signature verification failed\n");
         return -EPERM;
     }
@@ -463,7 +522,8 @@ int elf_verify_signature(const uint8_t *data, uint32_t size, const uint8_t *sign
  */
 uint64_t elf_get_entry_point(const ElfLoadContext_t *ctx)
 {
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return 0UL;
     }
 
@@ -475,11 +535,13 @@ uint64_t elf_get_entry_point(const ElfLoadContext_t *ctx)
  */
 void elf_free_context(ElfLoadContext_t *ctx)
 {
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return;
     }
 
-    if (ctx->elf_data != NULL) {
+    if (ctx->elf_data != NULL)
+    {
         free((void *)ctx->elf_data);
         ctx->elf_data = NULL;
     }

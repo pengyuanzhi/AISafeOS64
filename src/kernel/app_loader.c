@@ -54,7 +54,8 @@ int app_loader_init(void)
     int ret = 0;
 
     /* Check if already initialized */
-    if (g_initialized) {
+    if (g_initialized)
+    {
         printk(KERN_WARNING "App loader already initialized\n");
         return 0;
     }
@@ -68,7 +69,8 @@ int app_loader_init(void)
 
     /* Initialize sub-systems */
     ret = elf_loader_init();
-    if (ret != 0) {
+    if (ret != 0)
+    {
         printk(KERN_ERR "Failed to initialize ELF loader: %d\n", ret);
         return ret;
     }
@@ -90,13 +92,15 @@ int app_loader_load_all(const char *config_path)
     uint64_t end_time;
 
     /* Parameter validation */
-    if (config_path == NULL) {
+    if (config_path == NULL)
+    {
         printk(KERN_ERR "NULL config path\n");
         return -EINVAL;
     }
 
     /* Check if initialized */
-    if (!g_initialized) {
+    if (!g_initialized)
+    {
         printk(KERN_ERR "App loader not initialized\n");
         return -EPERM;
     }
@@ -109,7 +113,8 @@ int app_loader_load_all(const char *config_path)
     /* Parse configuration file */
     {
         int ret = app_parse_config(config_path);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_ERR "Failed to parse config: %d\n", ret);
             return ret;
         }
@@ -118,12 +123,14 @@ int app_loader_load_all(const char *config_path)
     g_stats.total_apps = g_app_count;
 
     /* Load each application */
-    for (i = 0U; i < g_app_count; i++) {
+    for (i = 0U; i < g_app_count; i++)
+    {
         const AppConfig_t *config = &g_apps[i];
         int ret;
 
         /* Check if enabled */
-        if (!config->enabled) {
+        if (!config->enabled)
+        {
             printk(KERN_INFO "Application '%s' is disabled\n", config->name);
             g_stats.disabled_apps++;
             continue;
@@ -133,7 +140,8 @@ int app_loader_load_all(const char *config_path)
 
         /* Load application */
         ret = app_load_single(config);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_ERR "Failed to load '%s': %d\n", config->name, ret);
             g_stats.failed_apps++;
             continue;
@@ -163,25 +171,30 @@ int app_loader_restart(const char *app_name)
     uint32_t i;
 
     /* Parameter validation */
-    if (app_name == NULL) {
+    if (app_name == NULL)
+    {
         return -EINVAL;
     }
 
     /* Find application */
-    for (i = 0U; i < g_app_count; i++) {
-        if (strcmp(g_apps[i].name, app_name) == 0) {
+    for (i = 0U; i < g_app_count; i++)
+    {
+        if (strcmp(g_apps[i].name, app_name) == 0)
+        {
             config = &g_apps[i];
             break;
         }
     }
 
-    if (i >= g_app_count) {
+    if (i >= g_app_count)
+    {
         printk(KERN_ERR "Application '%s' not found\n", app_name);
         return -ENOENT;
     }
 
     /* Check if auto-restart is enabled */
-    if (!config->auto_restart) {
+    if (!config->auto_restart)
+    {
         printk(KERN_WARNING "Auto-restart disabled for '%s'\n", app_name);
         return -EPERM;
     }
@@ -198,7 +211,8 @@ int app_loader_restart(const char *app_name)
 int app_loader_shutdown(void)
 {
     /* Check if initialized */
-    if (!g_initialized) {
+    if (!g_initialized)
+    {
         return 0;
     }
 
@@ -222,11 +236,13 @@ int app_loader_shutdown(void)
  */
 int app_loader_get_stats(AppLoaderStats_t *stats)
 {
-    if (stats == NULL) {
+    if (stats == NULL)
+    {
         return -EINVAL;
     }
 
-    if (!g_initialized) {
+    if (!g_initialized)
+    {
         return -EPERM;
     }
 
@@ -242,12 +258,15 @@ const AppConfig_t *app_loader_find_app(const char *name)
 {
     uint32_t i;
 
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return NULL;
     }
 
-    for (i = 0U; i < g_app_count; i++) {
-        if (strcmp(g_apps[i].name, name) == 0) {
+    for (i = 0U; i < g_app_count; i++)
+    {
+        if (strcmp(g_apps[i].name, name) == 0)
+        {
             return &g_apps[i];
         }
     }
@@ -260,7 +279,8 @@ const AppConfig_t *app_loader_find_app(const char *name)
  */
 bool app_loader_validate_config(const AppConfig_t *config)
 {
-    if (config == NULL) {
+    if (config == NULL)
+    {
         return false;
     }
 
@@ -278,7 +298,8 @@ static int app_parse_config(const char *config_path)
 
     /* Open configuration file */
     ret = ini_parser_create(config_path, &parser);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         printk(KERN_ERR "Failed to open config file: %d\n", ret);
         return ret;
     }
@@ -286,43 +307,50 @@ static int app_parse_config(const char *config_path)
     /* Parse each application section */
     g_app_count = 0U;
 
-    for (i = 0U; i < CONFIG_APP_LOADER_MAX_APPS; i++) {
+    for (i = 0U; i < CONFIG_APP_LOADER_MAX_APPS; i++)
+    {
         AppConfig_t *app = &g_apps[i];
         char section[32];
         int value;
 
         /* Build section name */
         ret = snprintf(section, sizeof(section), "app%u", i);
-        if ((ret < 0) || ((uint32_t)ret >= sizeof(section))) {
+        if ((ret < 0) || ((uint32_t)ret >= sizeof(section)))
+        {
             break;
         }
 
         /* Check if section exists */
-        if (!ini_parser_has_section(parser, section)) {
+        if (!ini_parser_has_section(parser, section))
+        {
             break;
         }
 
         /* Read name */
         ret = ini_parser_get_string(parser, section, "name", app->name, sizeof(app->name));
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_WARNING "App %u: missing name\n", i);
             continue;
         }
 
         /* Read path */
         ret = ini_parser_get_string(parser, section, "path", app->path, sizeof(app->path));
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_WARNING "App %u: missing path\n", i);
             continue;
         }
 
         /* Validate path */
-        if (app->path[0] != '/') {
+        if (app->path[0] != '/')
+        {
             printk(KERN_WARNING "App %u: invalid path (not absolute)\n", i);
             continue;
         }
 
-        if (strstr(app->path, "..") != NULL) {
+        if (strstr(app->path, "..") != NULL)
+        {
             printk(KERN_WARNING "App %u: invalid path (contains ..)\n", i);
             continue;
         }
@@ -362,13 +390,15 @@ static int app_parse_config(const char *config_path)
         /* Read signature (hex string) */
         ret = ini_parser_get_string(parser, section, "signature", (char *)app->signature,
                                     sizeof(app->signature));
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_WARNING "App %u: missing signature\n", i);
             continue;
         }
 
         /* Validate configuration */
-        if (app_validate_config_internal(app) != 0) {
+        if (app_validate_config_internal(app) != 0)
+        {
             printk(KERN_WARNING "App %u: invalid configuration\n", i);
             continue;
         }
@@ -398,21 +428,24 @@ static int app_load_single(const AppConfig_t *config)
 
     /* Read ELF file */
     ret = elf_load_from_file(config->path, &elf_ctx);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ERR_LOAD_FAIL;
     }
 
     /* Verify signature */
     ret = elf_verify_signature(elf_ctx.elf_data, elf_ctx.elf_size, config->signature,
                                g_system_pubkey);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         free((void *)elf_ctx.elf_data);
         return ERR_SIGNATURE_FAIL;
     }
 
     /* Load segments */
     ret = elf_load_segments(&elf_ctx);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         free((void *)elf_ctx.elf_data);
         return ERR_LOAD_FAIL;
     }
@@ -422,7 +455,8 @@ static int app_load_single(const AppConfig_t *config)
 
     /* Create task */
     ret = app_create_task(config, entry_point);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         free((void *)elf_ctx.elf_data);
         return ERR_LOAD_FAIL;
     }
@@ -444,7 +478,8 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry)
 
     /* Allocate stack */
     stack = (uint8_t *)kmalloc((uint64_t)config->stack_size);
-    if (stack == NULL) {
+    if (stack == NULL)
+    {
         return -ENOMEM;
     }
 
@@ -455,7 +490,8 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry)
     tcb = task_create(config->name, (TaskEntry_t)entry, stack_top, config->priority,
                       config->cpu_affinity);
 
-    if (tcb == NULL) {
+    if (tcb == NULL)
+    {
         kfree(stack);
         return -ENOMEM;
     }
@@ -479,26 +515,31 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry)
 static int app_validate_config_internal(const AppConfig_t *config)
 {
     /* Check name */
-    if (config->name[0] == '\0') {
+    if (config->name[0] == '\0')
+    {
         return -EINVAL;
     }
 
     /* Check path */
-    if (config->path[0] != '/') {
+    if (config->path[0] != '/')
+    {
         return -EINVAL;
     }
 
-    if (strstr(config->path, "..") != NULL) {
+    if (strstr(config->path, "..") != NULL)
+    {
         return -EINVAL;
     }
 
     /* Check priority */
-    if (config->priority >= PRIORITY_LEVELS) {
+    if (config->priority >= PRIORITY_LEVELS)
+    {
         return -EINVAL;
     }
 
     /* Check stack size */
-    if ((config->stack_size < 4096U) || (config->stack_size > CONFIG_APP_LOADER_MAX_STACK_SIZE)) {
+    if ((config->stack_size < 4096U) || (config->stack_size > CONFIG_APP_LOADER_MAX_STACK_SIZE))
+    {
         return -EINVAL;
     }
 

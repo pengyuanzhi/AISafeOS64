@@ -64,7 +64,8 @@ extern void cpu_switch_to_first_task(TCB_t *task);
  */
 void context_switch(TCB_t *prev, TCB_t *next)
 {
-    if (prev == next) {
+    if (prev == next)
+    {
         return;
     }
 
@@ -83,20 +84,23 @@ void scheduler_start(void)
 
     /* 获取当前CPU的运行队列 */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         printk("[FATAL] Run queue not initialized!\n");
         goto kernel_panic;
     }
 
     /* 检查是否有空闲任务 */
-    if (rq->idle == NULL) {
+    if (rq->idle == NULL)
+    {
         printk("[FATAL] Idle task not created!\n");
         goto kernel_panic;
     }
 
     /* 检查是否有其他任务 */
     first = pick_next_task(rq);
-    if (first == NULL) {
+    if (first == NULL)
+    {
         printk("[FATAL] No tasks to run!\n");
         goto kernel_panic;
     }
@@ -117,7 +121,8 @@ void scheduler_start(void)
 
 kernel_panic:
     printk("[FATAL] Scheduler failed to start!\n");
-    while (1) {
+    while (1)
+    {
         __asm__ volatile("wfi");
     }
 }
@@ -132,12 +137,14 @@ int wake_up_task(TCB_t *task)
     struct rq *rq;
     unsigned long flags;
 
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return -1; /* EINVAL */
     }
 
     rq = task->rq;
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return -1;
     }
 
@@ -145,7 +152,8 @@ int wake_up_task(TCB_t *task)
     spin_lock_irqsave(&rq->lock, flags);
 
     /* 检查任务状态 */
-    if (task->state == TASK_BLOCKED || task->state == TASK_SLEEPING) {
+    if (task->state == TASK_BLOCKED || task->state == TASK_SLEEPING)
+    {
         /* 设置为就绪态 */
         task->state = TASK_READY;
 
@@ -171,7 +179,8 @@ TCB_t *get_current_task(void)
     struct rq *rq;
 
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
 
@@ -189,12 +198,14 @@ void task_wakeup_timer(TCB_t *task)
     struct rq *rq;
     unsigned long flags;
 
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return;
     }
 
     rq = task->rq;
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
@@ -202,7 +213,8 @@ void task_wakeup_timer(TCB_t *task)
     spin_lock_irqsave(&rq->lock, flags);
 
     /* 检查任务状态 */
-    if (task->state == TASK_SLEEPING) {
+    if (task->state == TASK_SLEEPING)
+    {
         /* 设置为就绪态 */
         task->state = TASK_READY;
 
@@ -234,7 +246,8 @@ static void sleep_timer_callback(void *arg)
 {
     sleep_timer_wrapper_t *wrapper = (sleep_timer_wrapper_t *)arg;
 
-    if (wrapper != NULL) {
+    if (wrapper != NULL)
+    {
         /* 唤醒任务 */
         task_wakeup_timer(wrapper->task);
 
@@ -253,13 +266,15 @@ static int sleep_enqueue(TCB_t *task, uint64_t wakeup_ticks)
 {
     sleep_task_t *node;
 
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 分配睡眠节点 */
     node = (sleep_task_t *)kmalloc(sizeof(sleep_task_t));
-    if (node == NULL) {
+    if (node == NULL)
+    {
         return -ERROR_OUT_OF_MEMORY;
     }
 
@@ -269,14 +284,18 @@ static int sleep_enqueue(TCB_t *task, uint64_t wakeup_ticks)
     node->next = NULL;
 
     /* 插入睡眠队列（按唤醒时间排序） */
-    if ((g_sleep_queue == NULL) || (wakeup_ticks < g_sleep_queue->wakeup_ticks)) {
+    if ((g_sleep_queue == NULL) || (wakeup_ticks < g_sleep_queue->wakeup_ticks))
+    {
         /* 插入队首 */
         node->next = g_sleep_queue;
         g_sleep_queue = node;
-    } else {
+    }
+    else
+    {
         /* 查找插入位置 */
         sleep_task_t *current = g_sleep_queue;
-        while ((current->next != NULL) && (current->next->wakeup_ticks <= wakeup_ticks)) {
+        while ((current->next != NULL) && (current->next->wakeup_ticks <= wakeup_ticks))
+        {
             current = current->next;
         }
 
@@ -307,7 +326,8 @@ int task_sleep(uint64_t ms)
     uint64_t wakeup_ticks;
     int ret;
 
-    if (ms == 0UL) {
+    if (ms == 0UL)
+    {
         /* 睡眠时间为0，直接yield */
         yield();
         return ERROR_SUCCESS;
@@ -315,7 +335,8 @@ int task_sleep(uint64_t ms)
 
     /* 获取当前任务 */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return -ERROR_INVALID_STATE;
     }
 
@@ -323,7 +344,8 @@ int task_sleep(uint64_t ms)
     spin_lock_irqsave(&rq->lock, flags);
 
     current = rq->curr;
-    if (current == NULL) {
+    if (current == NULL)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return -ERROR_INVALID_STATE;
     }
@@ -333,7 +355,8 @@ int task_sleep(uint64_t ms)
 
     /* 分配定时器包装器 */
     wrapper = (sleep_timer_wrapper_t *)kmalloc(sizeof(sleep_timer_wrapper_t));
-    if (wrapper == NULL) {
+    if (wrapper == NULL)
+    {
         spin_unlock_irqrestore(&rq->lock, flags);
         return -ERROR_OUT_OF_MEMORY;
     }
@@ -345,14 +368,16 @@ int task_sleep(uint64_t ms)
 
     /* 启动定时器 */
     ret = swtimer_start(&wrapper->timer, ms);
-    if (ret != ERROR_SUCCESS) {
+    if (ret != ERROR_SUCCESS)
+    {
         kfree(wrapper);
         spin_unlock_irqrestore(&rq->lock, flags);
         return ret;
     }
 
     /* 从运行队列移除 */
-    if (current->state == TASK_RUNNING) {
+    if (current->state == TASK_RUNNING)
+    {
         dequeue_task(current);
     }
 
@@ -383,7 +408,8 @@ void check_sleeping_tasks(void)
 
     /* 获取当前CPU的运行队列 */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return;
     }
 
@@ -391,9 +417,11 @@ void check_sleeping_tasks(void)
     current = g_sleep_queue;
     prev = NULL;
 
-    while (current != NULL) {
+    while (current != NULL)
+    {
         /* 检查是否到达唤醒时间 */
-        if (current->wakeup_ticks > g_jiffies) {
+        if (current->wakeup_ticks > g_jiffies)
+        {
             /* 队列按时间排序，后续任务都未到期 */
             break;
         }
@@ -405,9 +433,12 @@ void check_sleeping_tasks(void)
         task_wakeup_timer(current->task);
 
         /* 从队列中移除 */
-        if (prev == NULL) {
+        if (prev == NULL)
+        {
             g_sleep_queue = next;
-        } else {
+        }
+        else
+        {
             prev->next = next;
         }
 
@@ -431,16 +462,19 @@ int set_task_priority(TCB_t *task, uint8_t prio)
     unsigned long flags;
     bool need_resched;
 
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return -1; /* EINVAL */
     }
 
-    if (prio >= PRIORITY_LEVELS) {
+    if (prio >= PRIORITY_LEVELS)
+    {
         return -1;
     }
 
     rq = task->rq;
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return -1;
     }
 
@@ -450,7 +484,8 @@ int set_task_priority(TCB_t *task, uint8_t prio)
     /* 检查是否需要重新调度 */
     need_resched = false;
 
-    if (task->state == TASK_READY || task->state == TASK_RUNNING) {
+    if (task->state == TASK_READY || task->state == TASK_RUNNING)
+    {
         /* 从运行队列移除 */
         dequeue_task(task);
 
@@ -462,10 +497,13 @@ int set_task_priority(TCB_t *task, uint8_t prio)
         enqueue_task(task);
 
         /* 如果优先级提高，需要重新调度 */
-        if (prio < task->static_prio) {
+        if (prio < task->static_prio)
+        {
             need_resched = true;
         }
-    } else {
+    }
+    else
+    {
         /* 任务不在运行队列，直接更新优先级 */
         task->prio = prio;
         task->normal_prio = prio;
@@ -475,7 +513,8 @@ int set_task_priority(TCB_t *task, uint8_t prio)
     spin_unlock_irqrestore(&rq->lock, flags);
 
     /* 触发调度 */
-    if (need_resched) {
+    if (need_resched)
+    {
         schedule();
     }
 
@@ -492,16 +531,19 @@ int sched_get_stats(uint32_t cpu, SchedStats_t *stats)
 {
     struct rq *rq;
 
-    if (cpu >= MAX_CPUS) {
+    if (cpu >= MAX_CPUS)
+    {
         return -1; /* EINVAL */
     }
 
-    if (stats == NULL) {
+    if (stats == NULL)
+    {
         return -1;
     }
 
     rq = cpu_rq(cpu);
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return -1;
     }
 
@@ -511,7 +553,8 @@ int sched_get_stats(uint32_t cpu, SchedStats_t *stats)
     stats->load_weight = rq->load_weight;
     stats->nr_running = 0U;
 
-    for (uint32_t i = 0U; i < 5U; i++) {
+    for (uint32_t i = 0U; i < 5U; i++)
+    {
         stats->nr_running += rq->nr_running[i];
     }
 
@@ -561,13 +604,15 @@ TCB_t *create_idle_task(void)
 
     /* 分配TCB */
     task = (TCB_t *)kmalloc(sizeof(TCB_t));
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return NULL;
     }
 
     /* 分配栈 */
     task->stack_base = (uint64_t)kmalloc(stack_size);
-    if (task->stack_base == 0ULL) {
+    if (task->stack_base == 0ULL)
+    {
         kfree(task);
         return NULL;
     }
@@ -618,13 +663,15 @@ int idle_task_init(void)
 
     /* 获取运行队列 */
     rq = this_rq();
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return -1;
     }
 
     /* 创建空闲任务 */
     idle = create_idle_task();
-    if (idle == NULL) {
+    if (idle == NULL)
+    {
         return -1;
     }
 
@@ -645,7 +692,8 @@ void idle_task_entry(void *arg)
 {
     (void)arg;
 
-    while (1) {
+    while (1)
+    {
         /* 等待中断 */
         __asm__ volatile("wfi");
 

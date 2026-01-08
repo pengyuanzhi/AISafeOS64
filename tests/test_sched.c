@@ -38,7 +38,8 @@ uint64_t sched_clock(void)
 static void dummy_task_entry(void)
 {
     /* Dummy task - does nothing */
-    while (1) {
+    while (1)
+    {
         /* Wait forever */
     }
 }
@@ -58,14 +59,17 @@ static TCB_t *create_test_task(const char *name, uint8_t prio, SchedPolicy_t pol
 
     /* Allocate stack */
     stack = (uint64_t *)kmalloc((uint64_t)stack_size);
-    if (stack == NULL) {
+    if (stack == NULL)
+    {
         return NULL;
     }
 
     /* Create task using task_create */
-    task = task_create(name, dummy_task_entry, stack + (stack_size / sizeof(uint64_t)), prio, 0xFFU);
+    task =
+        task_create(name, dummy_task_entry, stack + (stack_size / sizeof(uint64_t)), prio, 0xFFU);
 
-    if (task == NULL) {
+    if (task == NULL)
+    {
         kfree(stack);
         return NULL;
     }
@@ -78,8 +82,10 @@ static TCB_t *create_test_task(const char *name, uint8_t prio, SchedPolicy_t pol
  */
 static void destroy_test_task(TCB_t *task)
 {
-    if (task != NULL) {
-        if (task->stack_base != 0ULL) {
+    if (task != NULL)
+    {
+        if (task->stack_base != 0ULL)
+        {
             kfree((void *)(uintptr_t)task->stack_base);
         }
         kfree(task);
@@ -228,7 +234,8 @@ TEST_CASE(fifo_enqueue_dequeue)
     destroy_test_task(task2);
 
     /* Clean up run queue */
-    if (rq.fifo_rq != NULL) {
+    if (rq.fifo_rq != NULL)
+    {
         kfree(rq.fifo_rq);
     }
 }
@@ -266,7 +273,8 @@ TEST_CASE(fifo_priority_ordering)
     destroy_test_task(task_high);
 
     /* Clean up run queue */
-    if (rq.fifo_rq != NULL) {
+    if (rq.fifo_rq != NULL)
+    {
         kfree(rq.fifo_rq);
     }
 }
@@ -300,7 +308,8 @@ TEST_CASE(rr_time_slicing)
     task->exec_start = test_time;
 
     /* Simulate 5 ticks */
-    for (uint32_t i = 0U; i < 5U; i++) {
+    for (uint32_t i = 0U; i < 5U; i++)
+    {
         test_time += 1000ULL; /* 1ms per tick */
         sched_class_rr.task_tick(&rq, task);
     }
@@ -311,7 +320,8 @@ TEST_CASE(rr_time_slicing)
     destroy_test_task(task);
 
     /* Clean up run queue */
-    if (rq.rr_rq != NULL) {
+    if (rq.rr_rq != NULL)
+    {
         kfree(rq.rr_rq);
     }
 }
@@ -347,7 +357,8 @@ TEST_CASE(rr_rotation)
 
     /* Simulate time slice expiration */
     rq.need_resched = 0U;
-    for (uint32_t i = 0U; i < 10U; i++) {
+    for (uint32_t i = 0U; i < 10U; i++)
+    {
         sched_class_rr.task_tick(&rq, task1);
     }
 
@@ -358,7 +369,8 @@ TEST_CASE(rr_rotation)
     destroy_test_task(task2);
 
     /* Clean up run queue */
-    if (rq.rr_rq != NULL) {
+    if (rq.rr_rq != NULL)
+    {
         kfree(rq.rr_rq);
     }
 }
@@ -398,7 +410,8 @@ TEST_CASE(cfs_vruntime_tracking)
     destroy_test_task(task);
 
     /* Clean up run queue */
-    if (rq.cfs_rq != NULL) {
+    if (rq.cfs_rq != NULL)
+    {
         kfree(rq.cfs_rq);
     }
 }
@@ -440,7 +453,8 @@ TEST_CASE(cfs_pick_by_vruntime)
     destroy_test_task(task_high_vruntime);
 
     /* Clean up run queue */
-    if (rq.cfs_rq != NULL) {
+    if (rq.cfs_rq != NULL)
+    {
         kfree(rq.cfs_rq);
     }
 }
@@ -486,7 +500,8 @@ TEST_CASE(edf_deadline_scheduling)
     destroy_test_task(task_late);
 
     /* Clean up run queue */
-    if (rq.edf_rq != NULL) {
+    if (rq.edf_rq != NULL)
+    {
         kfree(rq.edf_rq);
     }
 }
@@ -519,7 +534,8 @@ TEST_CASE(edf_deadline_miss)
     destroy_test_task(task);
 
     /* Clean up run queue */
-    if (rq.edf_rq != NULL) {
+    if (rq.edf_rq != NULL)
+    {
         kfree(rq.edf_rq);
     }
 }
@@ -555,7 +571,8 @@ TEST_CASE(idle_basic_operations)
     destroy_test_task(idle_task);
 
     /* Clean up run queue */
-    if (rq.idle_rq != NULL) {
+    if (rq.idle_rq != NULL)
+    {
         kfree(rq.idle_rq);
     }
 }
@@ -601,7 +618,8 @@ TEST_CASE(scheduler_statistics)
     destroy_test_task(task2);
 
     /* Clean up run queue */
-    if (rq.cfs_rq != NULL) {
+    if (rq.cfs_rq != NULL)
+    {
         kfree(rq.cfs_rq);
     }
 }
@@ -642,7 +660,8 @@ TEST_CASE(fifo_preemption)
     destroy_test_task(task_high);
 
     /* Clean up run queue */
-    if (rq.fifo_rq != NULL) {
+    if (rq.fifo_rq != NULL)
+    {
         kfree(rq.fifo_rq);
     }
 }
@@ -683,7 +702,8 @@ TEST_CASE(cfs_preemption)
     destroy_test_task(task_next);
 
     /* Clean up run queue */
-    if (rq.cfs_rq != NULL) {
+    if (rq.cfs_rq != NULL)
+    {
         kfree(rq.cfs_rq);
     }
 }

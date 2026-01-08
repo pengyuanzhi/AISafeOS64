@@ -82,7 +82,8 @@ const SchedClass_t sched_class_edf = {.name = "EDF",
  */
 static edf_rq_t *get_edf_rq(struct rq *rq)
 {
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
     return (edf_rq_t *)rq->edf_rq;
@@ -103,7 +104,8 @@ static int edf_sched_init(struct rq *rq)
 
     /* Allocate EDF run queue */
     edf_rq = (edf_rq_t *)kmalloc((uint64_t)sizeof(edf_rq_t));
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return -1; /* ENOMEM */
     }
 
@@ -134,12 +136,14 @@ static void edf_sched_enqueue(struct rq *rq, TCB_t *task)
 
     /* Get EDF run queue */
     edf_rq = get_edf_rq(rq);
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return;
     }
 
     /* Check deadline validity */
-    if (task->deadline == 0ULL) {
+    if (task->deadline == 0ULL)
+    {
         return;
     }
 
@@ -147,14 +151,18 @@ static void edf_sched_enqueue(struct rq *rq, TCB_t *task)
     link = &edf_rq->tasks_timeline.rb_node;
     parent = NULL;
 
-    while (*link != NULL) {
+    while (*link != NULL)
+    {
         parent = *link;
         entry = rb_entry(parent, TCB_t, run_node);
 
         /* Compare deadlines */
-        if (task->deadline < entry->deadline) {
+        if (task->deadline < entry->deadline)
+        {
             link = &(*link)->rb_left;
-        } else {
+        }
+        else
+        {
             link = &(*link)->rb_right;
         }
     }
@@ -164,7 +172,8 @@ static void edf_sched_enqueue(struct rq *rq, TCB_t *task)
     rb_insert_color(&task->run_node, &edf_rq->tasks_timeline);
 
     /* Update minimum deadline */
-    if ((edf_rq->min_deadline == 0ULL) || (task->deadline < edf_rq->min_deadline)) {
+    if ((edf_rq->min_deadline == 0ULL) || (task->deadline < edf_rq->min_deadline))
+    {
         edf_rq->min_deadline = task->deadline;
     }
 
@@ -184,7 +193,8 @@ static void edf_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Get EDF run queue */
     edf_rq = get_edf_rq(rq);
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return;
     }
 
@@ -193,15 +203,19 @@ static void edf_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Update minimum deadline */
     node = rb_first(&edf_rq->tasks_timeline);
-    if (node != NULL) {
+    if (node != NULL)
+    {
         TCB_t *first = rb_entry(node, TCB_t, run_node);
         edf_rq->min_deadline = first->deadline;
-    } else {
+    }
+    else
+    {
         edf_rq->min_deadline = 0ULL;
     }
 
     /* Update statistics */
-    if (edf_rq->nr_running > 0U) {
+    if (edf_rq->nr_running > 0U)
+    {
         edf_rq->nr_running--;
     }
 }
@@ -219,18 +233,21 @@ static TCB_t *edf_sched_pick_next(struct rq *rq)
 
     /* Get EDF run queue */
     edf_rq = get_edf_rq(rq);
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return NULL;
     }
 
     /* Check if any tasks are running */
-    if (edf_rq->nr_running == 0U) {
+    if (edf_rq->nr_running == 0U)
+    {
         return NULL;
     }
 
     /* Get leftmost node (earliest deadline) */
     leftmost = rb_first(&edf_rq->tasks_timeline);
-    if (leftmost == NULL) {
+    if (leftmost == NULL)
+    {
         return NULL;
     }
 
@@ -253,7 +270,8 @@ static void edf_sched_tick(struct rq *rq, TCB_t *task)
     now = sched_clock();
 
     /* Check for deadline miss */
-    if (now >= task->deadline) {
+    if (now >= task->deadline)
+    {
         /* TODO: Handle deadline miss */
         /* Could log, set flag, or trigger recovery */
     }
@@ -273,7 +291,8 @@ static void edf_sched_update_curr(struct rq *rq)
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
@@ -304,25 +323,29 @@ static int edf_sched_can_preempt(const struct rq *rq, const TCB_t *task)
 
     /* Get EDF run queue */
     edf_rq = (const edf_rq_t *)rq->edf_rq;
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return 0;
     }
 
     /* Check if queue is empty */
-    if (edf_rq->nr_running == 0U) {
+    if (edf_rq->nr_running == 0U)
+    {
         return 0;
     }
 
     /* Get earliest deadline task */
     leftmost = rb_first(&edf_rq->tasks_timeline);
-    if (leftmost == NULL) {
+    if (leftmost == NULL)
+    {
         return 0;
     }
 
     first = rb_entry(leftmost, TCB_t, run_node);
 
     /* Can preempt if current task is not the earliest */
-    if (first != task) {
+    if (first != task)
+    {
         return 1;
     }
 
@@ -345,8 +368,10 @@ static int edf_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedCla
     task->sched_class = new_class;
 
     /* Enqueue to new scheduler */
-    if (new_class != NULL) {
-        if (new_class->enqueue != NULL) {
+    if (new_class != NULL)
+    {
+        if (new_class->enqueue != NULL)
+        {
             new_class->enqueue(rq, task);
         }
     }
@@ -365,13 +390,15 @@ static int edf_sched_get_stats(const struct rq *rq, void *stats)
     const edf_rq_t *edf_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
-    if ((rq == NULL) || (stats == NULL)) {
+    if ((rq == NULL) || (stats == NULL))
+    {
         return -1;
     }
 
     /* Get EDF run queue */
     edf_rq = (const edf_rq_t *)rq->edf_rq;
-    if (edf_rq == NULL) {
+    if (edf_rq == NULL)
+    {
         return -1;
     }
 

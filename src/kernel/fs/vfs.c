@@ -42,7 +42,8 @@ static void init_fd_table(void)
 {
     uint32_t i;
 
-    for (i = 0U; i < VFS_MAX_FD; i++) {
+    for (i = 0U; i < VFS_MAX_FD; i++)
+    {
         g_fd_table[i].file = NULL;
         g_fd_table[i].flags = 0U;
         g_fd_table[i].fd = (int)i;
@@ -58,8 +59,10 @@ static int alloc_fd(void)
 {
     uint32_t i;
 
-    for (i = 0U; i < VFS_MAX_FD; i++) {
-        if (g_fd_table[i].file == NULL) {
+    for (i = 0U; i < VFS_MAX_FD; i++)
+    {
+        if (g_fd_table[i].file == NULL)
+        {
             return (int)i;
         }
     }
@@ -73,7 +76,8 @@ static int alloc_fd(void)
  */
 static void free_fd(int fd)
 {
-    if ((fd >= 0) && (fd < (int)VFS_MAX_FD)) {
+    if ((fd >= 0) && (fd < (int)VFS_MAX_FD))
+    {
         g_fd_table[fd].file = NULL;
         g_fd_table[fd].flags = 0U;
         g_fd_table[fd].open_count = 0ULL;
@@ -89,13 +93,17 @@ static FileSystemType_t *find_filesystem(const char *name)
 {
     uint32_t i;
 
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return NULL;
     }
 
-    for (i = 0U; i < g_fs_count; i++) {
-        if (g_fs_types[i] != NULL) {
-            if (strcmp(g_fs_types[i]->name, name) == 0) {
+    for (i = 0U; i < g_fs_count; i++)
+    {
+        if (g_fs_types[i] != NULL)
+        {
+            if (strcmp(g_fs_types[i]->name, name) == 0)
+            {
                 return g_fs_types[i];
             }
         }
@@ -116,7 +124,8 @@ static VFSMount_t *find_mount(const char *path)
     size_t best_len;
     size_t len;
 
-    if (path == NULL) {
+    if (path == NULL)
+    {
         return NULL;
     }
 
@@ -124,13 +133,16 @@ static VFSMount_t *find_mount(const char *path)
     best_len = 0U;
     mount = g_mount_list;
 
-    while (mount != NULL) {
+    while (mount != NULL)
+    {
         len = strlen(mount->mountpoint);
 
         /* Check if path starts with mountpoint */
-        if (strncmp(path, mount->mountpoint, len) == 0) {
+        if (strncmp(path, mount->mountpoint, len) == 0)
+        {
             /* Find longest matching mountpoint */
-            if (len > best_len) {
+            if (len > best_len)
+            {
                 best_match = mount;
                 best_len = len;
             }
@@ -151,7 +163,8 @@ static VFSFile_t *alloc_file(void)
     VFSFile_t *file;
 
     file = (VFSFile_t *)kmalloc((uint64_t)sizeof(VFSFile_t));
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return NULL;
     }
 
@@ -167,8 +180,10 @@ static VFSFile_t *alloc_file(void)
  */
 static void free_file(VFSFile_t *file)
 {
-    if (file != NULL) {
-        if (file->private_data != NULL) {
+    if (file != NULL)
+    {
+        if (file->private_data != NULL)
+        {
             kfree(file->private_data);
         }
         kfree(file);
@@ -184,7 +199,8 @@ static void free_file(VFSFile_t *file)
  */
 int vfs_init(void)
 {
-    if (g_vfs_initialized) {
+    if (g_vfs_initialized)
+    {
         return 0;
     }
 
@@ -215,27 +231,31 @@ int vfs_register_filesystem(const FileSystemType_t *fs)
 {
     uint32_t i;
 
-    if (fs == NULL) {
+    if (fs == NULL)
+    {
         return -EINVAL;
     }
 
-    if (fs->name == NULL) {
+    if (fs->name == NULL)
+    {
         return -EINVAL;
     }
 
     spinlock_lock(&g_vfs_lock);
 
     /* Check if already registered */
-    for (i = 0U; i < g_fs_count; i++) {
-        if ((g_fs_types[i] != NULL) &&
-            (strcmp(g_fs_types[i]->name, fs->name) == 0)) {
+    for (i = 0U; i < g_fs_count; i++)
+    {
+        if ((g_fs_types[i] != NULL) && (strcmp(g_fs_types[i]->name, fs->name) == 0))
+        {
             spinlock_unlock(&g_vfs_lock);
             return -EEXIST;
         }
     }
 
     /* Check if space available */
-    if (g_fs_count >= MAX_FILESYSTEMS) {
+    if (g_fs_count >= MAX_FILESYSTEMS)
+    {
         spinlock_unlock(&g_vfs_lock);
         return -ENOSPC;
     }
@@ -258,27 +278,31 @@ int vfs_unregister_filesystem(const char *name)
     uint32_t i;
     uint32_t j;
 
-    if (name == NULL) {
+    if (name == NULL)
+    {
         return -EINVAL;
     }
 
     spinlock_lock(&g_vfs_lock);
 
     /* Find filesystem */
-    for (i = 0U; i < g_fs_count; i++) {
-        if ((g_fs_types[i] != NULL) &&
-            (strcmp(g_fs_types[i]->name, name) == 0)) {
+    for (i = 0U; i < g_fs_count; i++)
+    {
+        if ((g_fs_types[i] != NULL) && (strcmp(g_fs_types[i]->name, name) == 0))
+        {
             break;
         }
     }
 
-    if (i >= g_fs_count) {
+    if (i >= g_fs_count)
+    {
         spinlock_unlock(&g_vfs_lock);
         return -ENOENT;
     }
 
     /* Shift remaining filesystems */
-    for (j = i; j < (g_fs_count - 1U); j++) {
+    for (j = i; j < (g_fs_count - 1U); j++)
+    {
         g_fs_types[j] = g_fs_types[j + 1U];
     }
 
@@ -301,34 +325,39 @@ int vfs_mount(const char *device, const char *mountpoint, const char *fstype, ui
     FileSystemType_t *fs;
     int ret;
 
-    if ((mountpoint == NULL) || (fstype == NULL)) {
+    if ((mountpoint == NULL) || (fstype == NULL))
+    {
         return -EINVAL;
     }
 
     /* Find filesystem type */
     fs = find_filesystem(fstype);
-    if (fs == NULL) {
+    if (fs == NULL)
+    {
         printk(KERN_ERR "VFS: Filesystem type '%s' not found\n", fstype);
         return -ENODEV;
     }
 
     /* Check if mountpoint already exists */
     mount = find_mount(mountpoint);
-    if (mount != NULL) {
+    if (mount != NULL)
+    {
         printk(KERN_ERR "VFS: Mountpoint '%s' already mounted\n", mountpoint);
         return -EBUSY;
     }
 
     /* Allocate mount structure */
     mount = (VFSMount_t *)kmalloc((uint64_t)sizeof(VFSMount_t));
-    if (mount == NULL) {
+    if (mount == NULL)
+    {
         return -ENOMEM;
     }
 
     /* Initialize mount */
     (void)memset(mount, 0, sizeof(VFSMount_t));
 
-    if (device != NULL) {
+    if (device != NULL)
+    {
         (void)strncpy(mount->device, device, sizeof(mount->device) - 1U);
     }
 
@@ -343,9 +372,11 @@ int vfs_mount(const char *device, const char *mountpoint, const char *fstype, ui
     mount->next = NULL;
 
     /* Call filesystem mount function */
-    if (fs->mount != NULL) {
+    if (fs->mount != NULL)
+    {
         ret = fs->mount(mount, device, NULL);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             printk(KERN_ERR "VFS: Failed to mount '%s': %d\n", mountpoint, ret);
             kfree(mount);
             return ret;
@@ -373,7 +404,8 @@ int vfs_umount(const char *mountpoint)
     VFSMount_t *mount;
     VFSMount_t *prev;
 
-    if (mountpoint == NULL) {
+    if (mountpoint == NULL)
+    {
         return -EINVAL;
     }
 
@@ -383,37 +415,45 @@ int vfs_umount(const char *mountpoint)
     prev = NULL;
     mount = g_mount_list;
 
-    while (mount != NULL) {
-        if (strcmp(mount->mountpoint, mountpoint) == 0) {
+    while (mount != NULL)
+    {
+        if (strcmp(mount->mountpoint, mountpoint) == 0)
+        {
             break;
         }
         prev = mount;
         mount = mount->next;
     }
 
-    if (mount == NULL) {
+    if (mount == NULL)
+    {
         spinlock_unlock(&g_vfs_lock);
         return -ENOENT;
     }
 
     /* Remove from list */
-    if (prev == NULL) {
+    if (prev == NULL)
+    {
         g_mount_list = mount->next;
-    } else {
+    }
+    else
+    {
         prev->next = mount->next;
     }
 
     spinlock_unlock(&g_vfs_lock);
 
     /* Call filesystem unmount */
-    if ((mount->sb_ops != NULL) && (mount->sb_ops->umount != NULL)) {
+    if ((mount->sb_ops != NULL) && (mount->sb_ops->umount != NULL))
+    {
         (void)mount->sb_ops->umount(mount);
     }
 
     printk(KERN_INFO "VFS: Unmounted '%s'\n", mountpoint);
 
     /* Free mount structure */
-    if (mount->private_data != NULL) {
+    if (mount->private_data != NULL)
+    {
         kfree(mount->private_data);
     }
     kfree(mount);
@@ -436,21 +476,25 @@ int vfs_open(const char *path, uint32_t flags)
     int fd;
     int ret;
 
-    if (path == NULL) {
+    if (path == NULL)
+    {
         return -EINVAL;
     }
 
     /* Find mount point */
     mount = find_mount(path);
-    if (mount == NULL) {
+    if (mount == NULL)
+    {
         return -ENOENT;
     }
 
     /* Get inode */
     ret = vfs_get_inode(path, &inode);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         /* File doesn't exist */
-        if ((flags & O_CREAT) != 0U) {
+        if ((flags & O_CREAT) != 0U)
+        {
             /* TODO: Create file */
             return -ENOSYS;
         }
@@ -459,7 +503,8 @@ int vfs_open(const char *path, uint32_t flags)
 
     /* Allocate file structure */
     file = alloc_file();
-    if (file == NULL) {
+    if (file == NULL)
+    {
         vfs_put_inode(inode);
         return -ENOMEM;
     }
@@ -473,9 +518,11 @@ int vfs_open(const char *path, uint32_t flags)
     file->private_data = NULL;
 
     /* Call filesystem open function */
-    if ((mount->file_ops != NULL) && (mount->file_ops->open != NULL)) {
+    if ((mount->file_ops != NULL) && (mount->file_ops->open != NULL))
+    {
         ret = mount->file_ops->open(inode, file);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             vfs_put_inode(inode);
             free_file(file);
             return ret;
@@ -484,8 +531,10 @@ int vfs_open(const char *path, uint32_t flags)
 
     /* Allocate file descriptor */
     fd = alloc_fd();
-    if (fd < 0) {
-        if ((mount->file_ops != NULL) && (mount->file_ops->close != NULL)) {
+    if (fd < 0)
+    {
+        if ((mount->file_ops != NULL) && (mount->file_ops->close != NULL))
+        {
             (void)mount->file_ops->close(file);
         }
         vfs_put_inode(inode);
@@ -511,12 +560,14 @@ int vfs_close(int fd)
     VFSMount_t *mount;
     int ret = 0;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
@@ -524,17 +575,20 @@ int vfs_close(int fd)
 
     /* Decrement reference count */
     g_fd_table[fd].open_count--;
-    if (g_fd_table[fd].open_count > 0ULL) {
+    if (g_fd_table[fd].open_count > 0ULL)
+    {
         return 0;
     }
 
     /* Call filesystem close function */
-    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->close != NULL)) {
+    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->close != NULL))
+    {
         ret = mount->file_ops->close(file);
     }
 
     /* Put inode */
-    if (file->inode != NULL) {
+    if (file->inode != NULL)
+    {
         vfs_put_inode(file->inode);
     }
 
@@ -555,28 +609,33 @@ ssize_t vfs_read(int fd, void *buf, uint64_t count)
     VFSFile_t *file;
     VFSMount_t *mount;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
-    if (buf == NULL) {
+    if (buf == NULL)
+    {
         return -EINVAL;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
     mount = file->mount;
 
     /* Check if readable */
-    if ((file->flags & O_ACCMODE) == O_WRONLY) {
+    if ((file->flags & O_ACCMODE) == O_WRONLY)
+    {
         return -EBADF;
     }
 
     /* Call filesystem read function */
-    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->read == NULL)) {
+    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->read == NULL))
+    {
         return -ENOSYS;
     }
 
@@ -591,28 +650,33 @@ ssize_t vfs_write(int fd, const void *buf, uint64_t count)
     VFSFile_t *file;
     VFSMount_t *mount;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
-    if (buf == NULL) {
+    if (buf == NULL)
+    {
         return -EINVAL;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
     mount = file->mount;
 
     /* Check if writable */
-    if ((file->flags & O_ACCMODE) == O_RDONLY) {
+    if ((file->flags & O_ACCMODE) == O_RDONLY)
+    {
         return -EBADF;
     }
 
     /* Call filesystem write function */
-    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->write == NULL)) {
+    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->write == NULL))
+    {
         return -ENOSYS;
     }
 
@@ -628,23 +692,29 @@ uint64_t vfs_lseek(int fd, int64_t offset, int whence)
     VFSMount_t *mount;
     uint64_t new_pos;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return (uint64_t)-EBADF;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return (uint64_t)-EBADF;
     }
 
     mount = file->mount;
 
     /* Call filesystem lseek function if available */
-    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->lseek != NULL)) {
+    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->lseek != NULL))
+    {
         new_pos = mount->file_ops->lseek(file, offset, whence);
-    } else {
+    }
+    else
+    {
         /* Default implementation */
-        switch (whence) {
+        switch (whence)
+        {
             case SEEK_SET:
                 new_pos = (uint64_t)offset;
                 break;
@@ -654,9 +724,12 @@ uint64_t vfs_lseek(int fd, int64_t offset, int whence)
                 break;
 
             case SEEK_END:
-                if (file->inode != NULL) {
+                if (file->inode != NULL)
+                {
                     new_pos = file->inode->size + (uint64_t)offset;
-                } else {
+                }
+                else
+                {
                     return (uint64_t)-EBADF;
                 }
                 break;
@@ -679,19 +752,22 @@ int vfs_ioctl(int fd, uint32_t cmd, void *arg)
     VFSFile_t *file;
     VFSMount_t *mount;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
     mount = file->mount;
 
     /* Call filesystem ioctl function */
-    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->ioctl == NULL)) {
+    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->ioctl == NULL))
+    {
         return -ENOSYS;
     }
 
@@ -706,13 +782,15 @@ int vfs_stat(const char *path, VFSStat_t *stat)
     VFSInode_t *inode;
     int ret;
 
-    if ((path == NULL) || (stat == NULL)) {
+    if ((path == NULL) || (stat == NULL))
+    {
         return -EINVAL;
     }
 
     /* Get inode */
     ret = vfs_get_inode(path, &inode);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return ret;
     }
 
@@ -746,16 +824,19 @@ int vfs_fstat(int fd, VFSStat_t *stat)
     VFSInode_t *inode;
     VFSMount_t *mount;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
-    if (stat == NULL) {
+    if (stat == NULL)
+    {
         return -EINVAL;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
@@ -763,14 +844,16 @@ int vfs_fstat(int fd, VFSStat_t *stat)
     mount = file->mount;
 
     /* Call filesystem fstat function if available */
-    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->fstat != NULL)) {
+    if ((mount != NULL) && (mount->file_ops != NULL) && (mount->file_ops->fstat != NULL))
+    {
         return mount->file_ops->fstat(file, stat);
     }
 
     /* Default implementation */
     (void)memset(stat, 0, sizeof(VFSStat_t));
 
-    if (inode != NULL) {
+    if (inode != NULL)
+    {
         stat->st_ino = (uint32_t)inode->ino;
         stat->st_mode = inode->mode;
         stat->st_size = inode->size;
@@ -794,19 +877,22 @@ int vfs_fsync(int fd)
     VFSFile_t *file;
     VFSMount_t *mount;
 
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return -EBADF;
     }
 
     file = g_fd_table[fd].file;
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return -EBADF;
     }
 
     mount = file->mount;
 
     /* Call filesystem fsync function */
-    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->fsync == NULL)) {
+    if ((mount == NULL) || (mount->file_ops == NULL) || (mount->file_ops->fsync == NULL))
+    {
         return -ENOSYS;
     }
 
@@ -890,7 +976,8 @@ int vfs_rename(const char *oldpath, const char *newpath)
  */
 VFSFile_t *vfs_get_file(int fd)
 {
-    if ((fd < 0) || (fd >= (int)VFS_MAX_FD)) {
+    if ((fd < 0) || (fd >= (int)VFS_MAX_FD))
+    {
         return NULL;
     }
 
@@ -913,20 +1000,23 @@ int vfs_get_inode(const char *path, VFSInode_t **result)
 {
     VFSMount_t *mount;
 
-    if ((path == NULL) || (result == NULL)) {
+    if ((path == NULL) || (result == NULL))
+    {
         return -EINVAL;
     }
 
     /* Find mount point */
     mount = find_mount(path);
-    if (mount == NULL) {
+    if (mount == NULL)
+    {
         return -ENOENT;
     }
 
     /* TODO: Implement path traversal */
     /* For now, just return root inode if available */
 
-    if (mount->root == NULL) {
+    if (mount->root == NULL)
+    {
         return -ENOENT;
     }
 
@@ -940,7 +1030,8 @@ int vfs_get_inode(const char *path, VFSInode_t **result)
  */
 void vfs_put_inode(VFSInode_t *inode)
 {
-    if (inode != NULL) {
+    if (inode != NULL)
+    {
         /* TODO: Implement reference counting */
         (void)inode;
     }
@@ -952,11 +1043,13 @@ void vfs_put_inode(VFSInode_t *inode)
 int vfs_resolve_path(const char *path, char *resolved, size_t size)
 {
     /* TODO: Implement path resolution */
-    if ((path == NULL) || (resolved == NULL)) {
+    if ((path == NULL) || (resolved == NULL))
+    {
         return -EINVAL;
     }
 
-    if (size == 0U) {
+    if (size == 0U)
+    {
         return -EINVAL;
     }
 

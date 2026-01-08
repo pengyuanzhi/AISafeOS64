@@ -64,16 +64,19 @@ static HeapManager_t g_heap;
 int kheap_init(void *start, uint64_t size)
 {
     /* 参数验证 */
-    if (start == NULL) {
+    if (start == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (size < HEAP_MIN_SIZE) {
+    if (size < HEAP_MIN_SIZE)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 检查对齐 */
-    if (((uint64_t)start & (HEAP_MIN_ALIGN - 1UL)) != 0UL) {
+    if (((uint64_t)start & (HEAP_MIN_ALIGN - 1UL)) != 0UL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
@@ -107,7 +110,8 @@ int kheap_init(void *start, uint64_t size)
 void *kmalloc(uint64_t size)
 {
     /* 参数验证 */
-    if (size == 0UL) {
+    if (size == 0UL)
+    {
         return NULL;
     }
 
@@ -115,7 +119,8 @@ void *kmalloc(uint64_t size)
     size = (size + (HEAP_MIN_ALIGN - 1UL)) & ~(HEAP_MIN_ALIGN - 1UL);
 
     /* 至少分配HEAP_MIN_SIZE */
-    if (size < HEAP_MIN_SIZE) {
+    if (size < HEAP_MIN_SIZE)
+    {
         size = HEAP_MIN_SIZE;
     }
 
@@ -123,16 +128,19 @@ void *kmalloc(uint64_t size)
     HeapBlock_t *prev = NULL;
     HeapBlock_t *block = g_heap.first_block;
 
-    while (block != NULL) {
+    while (block != NULL)
+    {
         /* 跳过已使用的块 */
-        if (block->used) {
+        if (block->used)
+        {
             prev = block;
             block = block->next;
             continue;
         }
 
         /* 检查块大小是否足够 */
-        if (block->size < size) {
+        if (block->size < size)
+        {
             prev = block;
             block = block->next;
             continue;
@@ -140,7 +148,8 @@ void *kmalloc(uint64_t size)
 
         /* 找到合适的块 */
         /* 检查是否需要分割 */
-        if (block->size >= (size + sizeof(HeapBlock_t) + HEAP_MIN_ALIGN)) {
+        if (block->size >= (size + sizeof(HeapBlock_t) + HEAP_MIN_ALIGN))
+        {
             /* 分割块 */
             HeapBlock_t *new_block = (HeapBlock_t *)((uint8_t *)block + size);
             new_block->size = block->size - size;
@@ -178,7 +187,8 @@ void *kmalloc(uint64_t size)
 void kfree(void *ptr)
 {
     /* 参数验证 */
-    if (ptr == NULL) {
+    if (ptr == NULL)
+    {
         return;
     }
 
@@ -186,7 +196,8 @@ void kfree(void *ptr)
     HeapBlock_t *block = (HeapBlock_t *)((uint8_t *)ptr - sizeof(HeapBlock_t));
 
     /* 验证块 */
-    if (!block->used) {
+    if (!block->used)
+    {
         /* 重复释放 */
         return;
     }
@@ -199,7 +210,8 @@ void kfree(void *ptr)
     g_heap.total_free += block->size;
 
     /* 尝试合并下一个块 */
-    if ((block->next != NULL) && (!block->next->used)) {
+    if ((block->next != NULL) && (!block->next->used))
+    {
         /* 合并块 */
         block->size += block->next->size;
         block->next = block->next->next;
@@ -207,15 +219,18 @@ void kfree(void *ptr)
 
     /* 尝试合并上一个块（需要遍历） */
     HeapBlock_t *prev_block = g_heap.first_block;
-    while (prev_block != NULL) {
-        if ((prev_block->next == block) && (!prev_block->used)) {
+    while (prev_block != NULL)
+    {
+        if ((prev_block->next == block) && (!prev_block->used))
+        {
             /* 合并块 */
             prev_block->size += block->size;
             prev_block->next = block->next;
             break;
         }
 
-        if (prev_block->next == block) {
+        if (prev_block->next == block)
+        {
             break;
         }
 

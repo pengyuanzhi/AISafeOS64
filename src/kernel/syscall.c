@@ -39,7 +39,8 @@ typedef int64_t (*syscall_func_t)(uint64_t *params);
  */
 static int64_t sys_write_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -47,14 +48,16 @@ static int64_t sys_write_impl(uint64_t *params)
     uint64_t count = params[1];
 
     /* 参数验证 */
-    if (buf == NULL) {
+    if (buf == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     /* 简单实现：直接使用printk */
     /* TODO: 改进为直接写入UART */
     uint64_t written = 0UL;
-    for (uint64_t i = 0UL; i < count; i++) {
+    for (uint64_t i = 0UL; i < count; i++)
+    {
         printk("%c", buf[i]);
         written++;
     }
@@ -69,7 +72,8 @@ static int64_t sys_write_impl(uint64_t *params)
  */
 static int64_t sys_read_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -77,7 +81,8 @@ static int64_t sys_read_impl(uint64_t *params)
     uint64_t count = params[1];
 
     /* 参数验证 */
-    if (buf == NULL) {
+    if (buf == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -94,7 +99,8 @@ static int64_t sys_read_impl(uint64_t *params)
  */
 static int64_t sys_exit_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -141,7 +147,8 @@ static int64_t sys_yield_impl(uint64_t *params)
  */
 static int64_t sys_sleep_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -150,7 +157,8 @@ static int64_t sys_sleep_impl(uint64_t *params)
     /* 调用msleep实现任务睡眠 */
     int ret = msleep(ms);
 
-    if (ret != ERROR_SUCCESS) {
+    if (ret != ERROR_SUCCESS)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -164,14 +172,16 @@ static int64_t sys_sleep_impl(uint64_t *params)
  */
 static int64_t sys_malloc_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     uint64_t size = params[0];
 
     /* 参数验证 */
-    if (size == 0UL) {
+    if (size == 0UL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -179,7 +189,8 @@ static int64_t sys_malloc_impl(uint64_t *params)
     extern void *kmalloc(uint64_t size);
     void *ptr = kmalloc(size);
 
-    if (ptr == NULL) {
+    if (ptr == NULL)
+    {
         return -SYS_ERROR_NOMEM;
     }
 
@@ -193,14 +204,16 @@ static int64_t sys_malloc_impl(uint64_t *params)
  */
 static int64_t sys_free_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     void *ptr = (void *)params[0];
 
     /* 参数验证 */
-    if (ptr == NULL) {
+    if (ptr == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -235,13 +248,15 @@ static int64_t sys_gettime_impl(uint64_t *params)
  */
 static int64_t sys_sched_set_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -254,13 +269,15 @@ static int64_t sys_sched_set_impl(uint64_t *params)
         return -SYS_ERROR_INVAL;
     }
 
-    if (priority >= PRIORITY_LEVELS) {
+    if (priority >= PRIORITY_LEVELS)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     /* 设置优先级 */
     int ret = set_task_priority(task, (uint8_t)priority);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -281,13 +298,15 @@ static int64_t sys_sched_set_impl(uint64_t *params)
  */
 static int64_t sys_sched_get_impl(uint64_t *params)
 {
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
@@ -295,16 +314,21 @@ static int64_t sys_sched_get_impl(uint64_t *params)
     uint32_t *priority_ptr = (uint32_t *)params[1];
 
     /* 输出参数 */
-    if (policy_ptr != NULL) {
+    if (policy_ptr != NULL)
+    {
         /* 返回调度策略ID */
-        if (task->sched_class != NULL) {
+        if (task->sched_class != NULL)
+        {
             *policy_ptr = task->sched_class->id;
-        } else {
+        }
+        else
+        {
             *policy_ptr = 4U; /* 默认IDLE */
         }
     }
 
-    if (priority_ptr != NULL) {
+    if (priority_ptr != NULL)
+    {
         *priority_ptr = task->prio;
     }
 
@@ -349,19 +373,22 @@ static const syscall_func_t g_syscall_table[] = {
 int64_t syscall_handler(uint64_t syscall_nr, uint64_t *params)
 {
     /* 参数验证 */
-    if (params == NULL) {
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     /* 验证系统调用号 */
-    if (syscall_nr >= SYSCALL_TABLE_SIZE) {
+    if (syscall_nr >= SYSCALL_TABLE_SIZE)
+    {
         printk("[SYSCALL] Invalid system call number: %lu\n", syscall_nr);
         return -SYS_ERROR_NOSYS;
     }
 
     /* 查表获取系统调用函数 */
     syscall_func_t func = g_syscall_table[syscall_nr];
-    if (func == NULL) {
+    if (func == NULL)
+    {
         printk("[SYSCALL] Unimplemented system call: %lu\n", syscall_nr);
         return -SYS_ERROR_NOSYS;
     }
@@ -384,7 +411,8 @@ void task_exit(int exit_code)
     printk("[TASK] Task exited with code %d\n", exit_code);
     printk("[TASK] Halting...\n");
 
-    while (true) {
+    while (true)
+    {
         __asm__ volatile("wfe");
     }
 }
@@ -406,7 +434,8 @@ int task_getpid(void)
 {
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL) {
+    if (task == NULL)
+    {
         return 0;
     }
 

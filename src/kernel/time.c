@@ -58,7 +58,8 @@ void udelay(uint64_t us)
     uint64_t start = read_timer_count();
     uint64_t ticks = (freq * us) / 1000000UL;
 
-    while ((read_timer_count() - start) < ticks) {
+    while ((read_timer_count() - start) < ticks)
+    {
         __asm__ volatile("wfe");
     }
 }
@@ -71,7 +72,8 @@ void udelay(uint64_t us)
  */
 void mdelay(uint64_t ms)
 {
-    for (uint64_t i = 0UL; i < ms; i++) {
+    for (uint64_t i = 0UL; i < ms; i++)
+    {
         udelay(1000UL);
     }
 }

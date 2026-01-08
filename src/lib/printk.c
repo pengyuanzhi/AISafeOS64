@@ -63,14 +63,18 @@ void printk(const char *fmt, ...)
     p = fmt;
     fmt_spec = false;
 
-    while (*p != '\0') {
-        if (*p == '%') {
+    while (*p != '\0')
+    {
+        if (*p == '%')
+        {
             p++;
-            if (*p == '\0') {
+            if (*p == '\0')
+            {
                 break; /* 格式字符串以%结尾 */
             }
 
-            switch (*p) {
+            switch (*p)
+            {
                 case 'c': /* 字符 */
                     ch = (char)va_arg(args, int32_t);
                     uart_putc(ch);
@@ -79,27 +83,34 @@ void printk(const char *fmt, ...)
                 case 's': /* 字符串 */
                 {
                     const char *str = va_arg(args, const char *);
-                    if (str == NULL) {
+                    if (str == NULL)
+                    {
                         uart_puts("(null)");
-                    } else {
+                    }
+                    else
+                    {
                         uart_puts(str);
                     }
-                } break;
+                }
+                break;
 
                 case 'd': /* 有符号十进制整数 */
                     val = va_arg(args, int32_t);
-                    if (val < 0) {
+                    if (val < 0)
+                    {
                         uart_putc('-');
                         val = -val;
                     }
                     /* 转换为字符串 */
                     i = 0U;
-                    do {
+                    do
+                    {
                         buffer[i++] = (char)('0' + (val % 10));
                         val /= 10;
                     } while (val > 0);
                     /* 反向输出 */
-                    while (i > 0U) {
+                    while (i > 0U)
+                    {
                         uart_putc(buffer[--i]);
                     }
                     break;
@@ -108,12 +119,14 @@ void printk(const char *fmt, ...)
                     uval = va_arg(args, uint32_t);
                     /* 转换为字符串 */
                     i = 0U;
-                    do {
+                    do
+                    {
                         buffer[i++] = (char)('0' + (uval % 10U));
                         uval /= 10U;
                     } while (uval > 0U);
                     /* 反向输出 */
-                    while (i > 0U) {
+                    while (i > 0U)
+                    {
                         uart_putc(buffer[--i]);
                     }
                     break;
@@ -122,21 +135,29 @@ void printk(const char *fmt, ...)
                     uval = va_arg(args, uint32_t);
                     /* 转换为字符串 */
                     i = 0U;
-                    if (uval == 0U) {
+                    if (uval == 0U)
+                    {
                         uart_putc('0');
-                    } else {
-                        while (uval > 0U) {
+                    }
+                    else
+                    {
+                        while (uval > 0U)
+                        {
                             uint32_t nibble = uval & 0xFU;
-                            if (nibble < 10U) {
+                            if (nibble < 10U)
+                            {
                                 hex_char = (char)('0' + nibble);
-                            } else {
+                            }
+                            else
+                            {
                                 hex_char = (char)('a' + (nibble - 10U));
                             }
                             buffer[i++] = hex_char;
                             uval >>= 4U;
                         }
                         /* 反向输出 */
-                        while (i > 0U) {
+                        while (i > 0U)
+                        {
                             uart_putc(buffer[--i]);
                         }
                     }
@@ -147,12 +168,16 @@ void printk(const char *fmt, ...)
                     uval = (uint32_t)va_arg(args, void *);
                     uart_puts("0x");
                     /* 转换为字符串（8位十六进制） */
-                    for (i = 0U; i < 8U; i++) {
+                    for (i = 0U; i < 8U; i++)
+                    {
                         uint32_t shift = 28U - (i * 4U);
                         uint32_t nibble = (uval >> shift) & 0xFU;
-                        if (nibble < 10U) {
+                        if (nibble < 10U)
+                        {
                             hex_char = (char)('0' + nibble);
-                        } else {
+                        }
+                        else
+                        {
                             hex_char = (char)('a' + (nibble - 10U));
                         }
                         uart_putc(hex_char);
@@ -170,7 +195,9 @@ void printk(const char *fmt, ...)
             }
 
             p++;
-        } else {
+        }
+        else
+        {
             uart_putc(*p);
             p++;
         }

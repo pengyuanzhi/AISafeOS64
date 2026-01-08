@@ -35,7 +35,8 @@ static swtimer_t *g_timer_list = NULL;
  */
 void swtimer_init(swtimer_t *timer, void (*callback)(void *arg), void *arg)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return;
     }
 
@@ -55,16 +56,19 @@ void swtimer_init(swtimer_t *timer, void (*callback)(void *arg), void *arg)
  */
 static int timer_remove(swtimer_t *timer)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (g_timer_list == NULL) {
+    if (g_timer_list == NULL)
+    {
         return -ERROR_NOT_FOUND;
     }
 
     /* 检查是否为链表头 */
-    if (g_timer_list == timer) {
+    if (g_timer_list == timer)
+    {
         g_timer_list = timer->next;
         timer->next = NULL;
         return ERROR_SUCCESS;
@@ -74,8 +78,10 @@ static int timer_remove(swtimer_t *timer)
     swtimer_t *prev = g_timer_list;
     swtimer_t *current = g_timer_list->next;
 
-    while (current != NULL) {
-        if (current == timer) {
+    while (current != NULL)
+    {
+        if (current == timer)
+        {
             /* 找到，移除 */
             prev->next = current->next;
             timer->next = NULL;
@@ -95,12 +101,14 @@ static int timer_remove(swtimer_t *timer)
  */
 static void timer_insert(swtimer_t *timer)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return;
     }
 
     /* 链表为空或定时器应插入头部 */
-    if ((g_timer_list == NULL) || (timer->expire_ticks < g_timer_list->expire_ticks)) {
+    if ((g_timer_list == NULL) || (timer->expire_ticks < g_timer_list->expire_ticks))
+    {
         timer->next = g_timer_list;
         g_timer_list = timer;
         return;
@@ -108,7 +116,8 @@ static void timer_insert(swtimer_t *timer)
 
     /* 查找插入位置 */
     swtimer_t *current = g_timer_list;
-    while ((current->next != NULL) && (current->next->expire_ticks <= timer->expire_ticks)) {
+    while ((current->next != NULL) && (current->next->expire_ticks <= timer->expire_ticks))
+    {
         current = current->next;
     }
 
@@ -126,16 +135,19 @@ static void timer_insert(swtimer_t *timer)
  */
 static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (timer->callback == NULL) {
+    if (timer->callback == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 如果定时器已激活，先停止 */
-    if (timer->active) {
+    if (timer->active)
+    {
         swtimer_stop(timer);
     }
 
@@ -171,7 +183,8 @@ int swtimer_start(swtimer_t *timer, uint64_t delay_ms)
  */
 int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms)
 {
-    if (period_ms == 0UL) {
+    if (period_ms == 0UL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
@@ -185,11 +198,13 @@ int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_
  */
 int swtimer_stop(swtimer_t *timer)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (!timer->active) {
+    if (!timer->active)
+    {
         return -ERROR_INVALID_STATE;
     }
 
@@ -209,12 +224,14 @@ int swtimer_stop(swtimer_t *timer)
  */
 int swtimer_delete(swtimer_t *timer)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 停止定时器（如果激活） */
-    if (timer->active) {
+    if (timer->active)
+    {
         swtimer_stop(timer);
     }
 
@@ -237,7 +254,8 @@ int swtimer_delete(swtimer_t *timer)
  */
 bool swtimer_is_active(swtimer_t *timer)
 {
-    if (timer == NULL) {
+    if (timer == NULL)
+    {
         return false;
     }
 
@@ -252,9 +270,11 @@ void swtimer_tick_handler(void)
 {
     swtimer_t *current = g_timer_list;
 
-    while (current != NULL) {
+    while (current != NULL)
+    {
         /* 检查定时器是否过期 */
-        if (current->expire_ticks > g_jiffies) {
+        if (current->expire_ticks > g_jiffies)
+        {
             /* 链表按过期时间排序，后续定时器都未过期 */
             break;
         }
@@ -263,24 +283,29 @@ void swtimer_tick_handler(void)
         swtimer_t *next = current->next;
 
         /* 标记为未激活（一次性定时器） */
-        if (!current->periodic) {
+        if (!current->periodic)
+        {
             current->active = false;
         }
 
         /* 调用回调函数 */
-        if (current->callback != NULL) {
+        if (current->callback != NULL)
+        {
             current->callback(current->arg);
         }
 
         /* 处理周期性定时器 */
-        if (current->periodic) {
+        if (current->periodic)
+        {
             /* 重新计算过期时间 */
             current->expire_ticks = g_jiffies + current->period_ticks;
 
             /* 从链表中移除并重新插入（保持排序） */
             timer_remove(current);
             timer_insert(current);
-        } else {
+        }
+        else
+        {
             /* 一次性定时器，从链表中移除 */
             timer_remove(current);
         }
@@ -301,7 +326,8 @@ void swtimer_tick_handler(void)
  */
 int msleep(uint64_t ms)
 {
-    if (ms == 0UL) {
+    if (ms == 0UL)
+    {
         return ERROR_SUCCESS;
     }
 

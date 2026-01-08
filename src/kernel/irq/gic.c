@@ -88,27 +88,32 @@ int gic_init(void)
     GICD_WRITE(GICD_CTLR, 0);
 
     /* 禁用所有中断 */
-    for (i = 32; i < num_irqs; i += 32) {
+    for (i = 32; i < num_irqs; i += 32)
+    {
         GICD_WRITE(GICD_ICENABLER + (i / 8), 0xFFFFFFFF);
     }
 
     /* 清除所有挂起 */
-    for (i = 32; i < num_irqs; i += 32) {
+    for (i = 32; i < num_irqs; i += 32)
+    {
         GICD_WRITE(GICD_ICPENDR + (i / 8), 0xFFFFFFFF);
     }
 
     /* 设置所有SPI的优先级为默认值 */
-    for (i = 32; i < num_irqs; i += 4) {
+    for (i = 32; i < num_irqs; i += 4)
+    {
         GICD_WRITE(GICD_IPRIORITYR + i, 0xA0A0A0A0);
     }
 
     /* 设置所有SPI为Group 0 */
-    for (i = 32; i < num_irqs; i += 32) {
+    for (i = 32; i < num_irqs; i += 32)
+    {
         GICD_WRITE(GICD_IGROUPR + (i / 8), 0);
     }
 
     /* 配置所有SPI为电平触发 */
-    for (i = 32; i < num_irqs; i += 16) {
+    for (i = 32; i < num_irqs; i += 16)
+    {
         GICD_WRITE(GICD_ICFGR + (i / 4), 0);
     }
 
@@ -121,7 +126,8 @@ int gic_init(void)
     GICR_WRITE(GICR_WAKER, waker);
 
     /* 等待唤醒完成 */
-    while ((GICR_READ(GICR_WAKER) & 0x4) != 0) {
+    while ((GICR_READ(GICR_WAKER) & 0x4) != 0)
+    {
         __asm__ volatile("nop");
     }
 
@@ -132,7 +138,8 @@ int gic_init(void)
     GICR_WRITE(GICR_ICPENDR0, 0xFFFFFFFF);
 
     /* 设置SGI和PPI优先级 */
-    for (i = 0; i < 32; i += 4) {
+    for (i = 0; i < 32; i += 4)
+    {
         GICR_WRITE(GICR_IPRIORITYR + i, 0xA0A0A0A0);
     }
 
@@ -155,14 +162,18 @@ int gic_init(void)
  */
 int irq_enable(uint32_t irq)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (irq < 32) {
+    if (irq < 32)
+    {
         /* SGI或PPI: 使用Redistributor */
         GICR_WRITE(GICR_ISENABLER0, (1U << irq));
-    } else {
+    }
+    else
+    {
         /* SPI: 使用Distributor */
         GICD_WRITE(GICD_ISENABLER + ((irq / 32) * 4), (1U << (irq % 32)));
     }
@@ -177,14 +188,18 @@ int irq_enable(uint32_t irq)
  */
 int irq_disable(uint32_t irq)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (irq < 32) {
+    if (irq < 32)
+    {
         /* SGI或PPI: 使用Redistributor */
         GICR_WRITE(GICR_ICENABLER0, (1U << irq));
-    } else {
+    }
+    else
+    {
         /* SPI: 使用Distributor */
         GICD_WRITE(GICD_ICENABLER + ((irq / 32) * 4), (1U << (irq % 32)));
     }
@@ -200,22 +215,27 @@ int irq_disable(uint32_t irq)
  */
 int irq_set_priority(uint32_t irq, uint32_t priority)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (priority > 255) {
+    if (priority > 255)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* GIC优先级寄存器以字节为单位访问 */
-    if (irq < 32) {
+    if (irq < 32)
+    {
         /* SGI或PPI */
         uint32_t offset = GICR_IPRIORITYR + irq;
         uint32_t val = GICR_READ(offset);
         val = (val & ~(0xFF << ((irq % 4) * 8))) | (priority << ((irq % 4) * 8));
         GICR_WRITE(offset, val);
-    } else {
+    }
+    else
+    {
         /* SPI */
         uint32_t offset = GICD_IPRIORITYR + irq;
         uint32_t val = GICD_READ(offset);
@@ -234,37 +254,48 @@ int irq_set_priority(uint32_t irq, uint32_t priority)
  */
 int irq_set_trigger(uint32_t irq, irq_trigger_t trigger)
 {
-    if (irq >= 1020) {
+    if (irq >= 1020)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* SGI (0-15) 固定为电平触发，不能修改 */
-    if (irq < 16) {
+    if (irq < 16)
+    {
         return -ERROR_NOT_SUPPORTED;
     }
 
     uint32_t mask = (2U << ((irq % 16) * 2));
 
-    if (irq < 32) {
+    if (irq < 32)
+    {
         /* PPI: 使用Redistributor */
         uint32_t offset = GICR_ICFGR1;
         uint32_t val = GICR_READ(offset);
 
-        if (trigger == IRQ_TRIGGER_EDGE) {
+        if (trigger == IRQ_TRIGGER_EDGE)
+        {
             val |= mask;
-        } else {
+        }
+        else
+        {
             val &= ~mask;
         }
 
         GICR_WRITE(offset, val);
-    } else {
+    }
+    else
+    {
         /* SPI: 使用Distributor */
         uint32_t offset = GICD_ICFGR + ((irq / 16) * 4);
         uint32_t val = GICD_READ(offset);
 
-        if (trigger == IRQ_TRIGGER_EDGE) {
+        if (trigger == IRQ_TRIGGER_EDGE)
+        {
             val |= mask;
-        } else {
+        }
+        else
+        {
             val &= ~mask;
         }
 
@@ -282,11 +313,13 @@ int irq_set_trigger(uint32_t irq, irq_trigger_t trigger)
  */
 int irq_send_sgi(uint8_t target_cpu, uint8_t sgi)
 {
-    if (sgi > 15) {
+    if (sgi > 15)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (target_cpu == 0) {
+    if (target_cpu == 0)
+    {
         return -ERROR_INVALID_PARAM;
     }
 

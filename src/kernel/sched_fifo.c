@@ -84,7 +84,8 @@ const SchedClass_t sched_class_fifo = {.name = "FIFO",
  */
 static fifo_rq_t *get_fifo_rq(struct rq *rq)
 {
-    if (rq == NULL) {
+    if (rq == NULL)
+    {
         return NULL;
     }
     return (fifo_rq_t *)rq->fifo_rq;
@@ -106,12 +107,14 @@ static int fifo_sched_init(struct rq *rq)
 
     /* Allocate FIFO run queue */
     fifo_rq = (fifo_rq_t *)kmalloc((uint64_t)sizeof(fifo_rq_t));
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return -1; /* ENOMEM */
     }
 
     /* Initialize priority queues */
-    for (i = 0U; i < 256U; i++) {
+    for (i = 0U; i < 256U; i++)
+    {
         INIT_LIST_HEAD(&fifo_rq->queue_array[i]);
     }
 
@@ -140,7 +143,8 @@ static void fifo_sched_enqueue(struct rq *rq, TCB_t *task)
 
     /* Get FIFO run queue */
     fifo_rq = get_fifo_rq(rq);
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return;
     }
 
@@ -148,7 +152,8 @@ static void fifo_sched_enqueue(struct rq *rq, TCB_t *task)
     prio = task->prio;
 
     /* Validate priority */
-    if (prio >= 256U) {
+    if (prio >= 256U)
+    {
         return;
     }
 
@@ -177,7 +182,8 @@ static void fifo_sched_dequeue(struct rq *rq, TCB_t *task)
 
     /* Get FIFO run queue */
     fifo_rq = get_fifo_rq(rq);
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return;
     }
 
@@ -185,7 +191,8 @@ static void fifo_sched_dequeue(struct rq *rq, TCB_t *task)
     prio = task->prio;
 
     /* Validate priority */
-    if (prio >= 256U) {
+    if (prio >= 256U)
+    {
         return;
     }
 
@@ -193,12 +200,14 @@ static void fifo_sched_dequeue(struct rq *rq, TCB_t *task)
     list_del_init(&task->run_list);
 
     /* Update bitmap if queue is now empty */
-    if (list_empty(&fifo_rq->queue_array[prio])) {
+    if (list_empty(&fifo_rq->queue_array[prio]))
+    {
         clear_bit(prio, fifo_rq->priority_bitmap);
     }
 
     /* Update statistics */
-    if (fifo_rq->nr_running > 0U) {
+    if (fifo_rq->nr_running > 0U)
+    {
         fifo_rq->nr_running--;
     }
 }
@@ -220,22 +229,26 @@ static TCB_t *fifo_sched_pick_next(struct rq *rq)
 
     /* Get FIFO run queue */
     fifo_rq = get_fifo_rq(rq);
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return NULL;
     }
 
     /* Check if any tasks are running */
-    if (fifo_rq->nr_running == 0U) {
+    if (fifo_rq->nr_running == 0U)
+    {
         return NULL;
     }
 
     /* Find highest priority (using CLZ) */
     prio = 255U;
 
-    for (word_idx = 0U; word_idx < 4U; word_idx++) {
+    for (word_idx = 0U; word_idx < 4U; word_idx++)
+    {
         bitmap_u64 = fifo_rq->priority_bitmap[word_idx];
 
-        if (bitmap_u64 == 0ULL) {
+        if (bitmap_u64 == 0ULL)
+        {
             continue;
         }
 
@@ -246,19 +259,22 @@ static TCB_t *fifo_sched_pick_next(struct rq *rq)
     }
 
     /* Check if valid priority found */
-    if (prio == 255U) {
+    if (prio == 255U)
+    {
         return NULL; /* Should not happen if nr_running > 0 */
     }
 
     /* Get priority queue */
-    if (prio >= 256U) {
+    if (prio >= 256U)
+    {
         return NULL;
     }
 
     queue = &fifo_rq->queue_array[prio];
 
     /* Check if queue is empty */
-    if (list_empty(queue)) {
+    if (list_empty(queue))
+    {
         return NULL;
     }
 
@@ -295,7 +311,8 @@ static void fifo_sched_update_curr(struct rq *rq)
 
     /* Get current task */
     curr = rq->curr;
-    if (curr == NULL) {
+    if (curr == NULL)
+    {
         return;
     }
 
@@ -325,14 +342,16 @@ static void fifo_sched_yield(struct rq *rq, TCB_t *task)
 
     /* Get FIFO run queue */
     fifo_rq = get_fifo_rq(rq);
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return;
     }
 
     /* Get task priority */
     prio = task->prio;
 
-    if (prio >= 256U) {
+    if (prio >= 256U)
+    {
         return;
     }
 
@@ -360,7 +379,8 @@ static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task)
 
     /* Get FIFO run queue */
     fifo_rq = (const fifo_rq_t *)rq->fifo_rq;
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return 0;
     }
 
@@ -370,10 +390,12 @@ static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task)
     /* Find highest priority */
     highest_prio = 255U;
 
-    for (word_idx = 0U; word_idx < 4U; word_idx++) {
+    for (word_idx = 0U; word_idx < 4U; word_idx++)
+    {
         bitmap_u64 = fifo_rq->priority_bitmap[word_idx];
 
-        if (bitmap_u64 == 0ULL) {
+        if (bitmap_u64 == 0ULL)
+        {
             continue;
         }
 
@@ -383,7 +405,8 @@ static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task)
     }
 
     /* Can preempt if higher priority task exists */
-    if (highest_prio > prio) {
+    if (highest_prio > prio)
+    {
         return 1;
     }
 
@@ -406,8 +429,10 @@ static int fifo_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedCl
     task->sched_class = new_class;
 
     /* Enqueue to new scheduler */
-    if (new_class != NULL) {
-        if (new_class->enqueue != NULL) {
+    if (new_class != NULL)
+    {
+        if (new_class->enqueue != NULL)
+        {
             new_class->enqueue(rq, task);
         }
     }
@@ -426,13 +451,15 @@ static int fifo_sched_get_stats(const struct rq *rq, void *stats)
     const fifo_rq_t *fifo_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
-    if ((rq == NULL) || (stats == NULL)) {
+    if ((rq == NULL) || (stats == NULL))
+    {
         return -1; /* EINVAL */
     }
 
     /* Get FIFO run queue */
     fifo_rq = (const fifo_rq_t *)rq->fifo_rq;
-    if (fifo_rq == NULL) {
+    if (fifo_rq == NULL)
+    {
         return -1;
     }
 

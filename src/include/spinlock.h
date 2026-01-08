@@ -17,7 +17,8 @@
 #include "sync.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /* 类型别名 */
@@ -33,10 +34,10 @@ extern "C" {
 /* 用于sched.c的宏 */
 #define SPIN_LOCK_UNLOCKED {0, 0}
 
-static inline void spin_lock_init(spinlock_t *lock)
-{
-    spinlock_init(lock);
-}
+    static inline void spin_lock_init(spinlock_t *lock)
+    {
+        spinlock_init(lock);
+    }
 
 #ifdef __cplusplus
 }

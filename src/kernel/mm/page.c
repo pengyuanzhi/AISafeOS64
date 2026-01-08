@@ -55,22 +55,26 @@ static uint32_t g_page_bitmap[MAX_BITMAP_WORDS];
 int page_allocator_init(uint64_t base_addr, uint64_t size)
 {
     /* 参数验证 */
-    if (base_addr == 0UL) {
+    if (base_addr == 0UL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (size < PAGE_SIZE) {
+    if (size < PAGE_SIZE)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 检查对齐 */
-    if ((base_addr & (PAGE_SIZE - 1UL)) != 0UL) {
+    if ((base_addr & (PAGE_SIZE - 1UL)) != 0UL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 计算页数 */
     uint64_t pages = size / PAGE_SIZE;
-    if (pages > MAX_PAGES) {
+    if (pages > MAX_PAGES)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
@@ -82,13 +86,15 @@ int page_allocator_init(uint64_t base_addr, uint64_t size)
 
     /* 初始化位图 */
     g_page_allocator.bitmap = g_page_bitmap;
-    for (uint64_t i = 0UL; i < bitmap_words; i++) {
+    for (uint64_t i = 0UL; i < bitmap_words; i++)
+    {
         g_page_allocator.bitmap[i] = 0xFFFFFFFFU;
     }
 
     /* 标记最后可能不完整的字 */
     uint64_t remaining_pages = pages % 32U;
-    if (remaining_pages != 0UL) {
+    if (remaining_pages != 0UL)
+    {
         uint32_t mask = (1U << remaining_pages) - 1U;
         g_page_allocator.bitmap[bitmap_words - 1] = mask;
     }
@@ -107,16 +113,20 @@ int page_allocator_init(uint64_t base_addr, uint64_t size)
 uint64_t page_alloc(void)
 {
     /* 查找第一个空闲页 */
-    for (uint64_t word_idx = 0UL; word_idx < g_page_allocator.total_pages / 32U; word_idx++) {
+    for (uint64_t word_idx = 0UL; word_idx < g_page_allocator.total_pages / 32U; word_idx++)
+    {
         uint32_t word = g_page_allocator.bitmap[word_idx];
 
-        if (word != 0U) {
+        if (word != 0U)
+        {
             /* 找到空闲页 */
             uint32_t page_idx = 0U;
 
             /* 查找第一个0位（空闲页） */
-            for (uint32_t bit = 0U; bit < 32U; bit++) {
-                if ((word & (1U << bit)) != 0U) {
+            for (uint32_t bit = 0U; bit < 32U; bit++)
+            {
+                if ((word & (1U << bit)) != 0U)
+                {
                     page_idx = bit;
                     break;
                 }
@@ -126,7 +136,8 @@ uint64_t page_alloc(void)
             uint64_t page_nr = word_idx * 32U + page_idx;
 
             /* 检查是否超出范围 */
-            if (page_nr >= g_page_allocator.total_pages) {
+            if (page_nr >= g_page_allocator.total_pages)
+            {
                 return 0UL; /* 无可用页 */
             }
 
@@ -156,12 +167,14 @@ uint64_t page_alloc(void)
 void page_free(uint64_t addr)
 {
     /* 参数验证 */
-    if (addr == 0UL) {
+    if (addr == 0UL)
+    {
         return;
     }
 
     /* 检查对齐 */
-    if ((addr & (PAGE_SIZE - 1UL)) != 0UL) {
+    if ((addr & (PAGE_SIZE - 1UL)) != 0UL)
+    {
         return;
     }
 
@@ -169,7 +182,8 @@ void page_free(uint64_t addr)
     uint64_t page_nr = (addr - g_page_allocator.base_addr) / PAGE_SIZE;
 
     /* 检查范围 */
-    if (page_nr >= g_page_allocator.total_pages) {
+    if (page_nr >= g_page_allocator.total_pages)
+    {
         return;
     }
 
@@ -179,7 +193,8 @@ void page_free(uint64_t addr)
 
     /* 检查页是否已分配 */
     uint32_t mask = g_page_allocator.bitmap[word_idx] & (1U << page_idx);
-    if (mask != 0U) {
+    if (mask != 0U)
+    {
         /* 页未分配，重复释放 */
         return;
     }

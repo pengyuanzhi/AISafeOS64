@@ -153,9 +153,12 @@ static int32_t motor_pid_control(uint32_t setpoint, uint32_t measured)
     int32_t output = (Kp * error) + (Ki * integral) + (Kd * derivative);
 
     /* Clamp output */
-    if (output > 100) {
+    if (output > 100)
+    {
         output = 100;
-    } else if (output < -100) {
+    }
+    else if (output < -100)
+    {
         output = -100;
     }
 
@@ -177,7 +180,8 @@ static int32_t motor_pid_control(uint32_t setpoint, uint32_t measured)
 static size_t strlen(const char *s)
 {
     size_t len = 0U;
-    while (s[len] != '\0') {
+    while (s[len] != '\0')
+    {
         len++;
     }
     return len;
@@ -197,26 +201,31 @@ static int int_to_str(int32_t value, char *str, size_t size)
     int neg = 0;
     int count = 0;
 
-    if (value < 0) {
+    if (value < 0)
+    {
         neg = 1;
         value = -value;
     }
 
     /* Convert to string (reverse) */
-    do {
+    do
+    {
         tmp[i++] = '0' + (value % 10);
         value /= 10;
     } while (value > 0);
 
     /* Add sign if negative */
-    if (neg) {
+    if (neg)
+    {
         tmp[i++] = '-';
     }
 
     /* Copy to output (reverse back) */
-    if ((size_t)i < size) {
+    if ((size_t)i < size)
+    {
         int j;
-        for (j = i - 1; j >= 0; j--) {
+        for (j = i - 1; j >= 0; j--)
+        {
             str[count++] = tmp[j];
         }
         str[count] = '\0';
@@ -253,7 +262,8 @@ int app_main(int argc, char *argv[])
     syscall_write(msg, strlen(msg));
 
     /* Main control loop */
-    while (1) {
+    while (1)
+    {
         uint32_t sensor_value;
         int32_t control_output;
 
@@ -264,16 +274,20 @@ int app_main(int argc, char *argv[])
         control_output = motor_pid_control(setpoint, sensor_value);
 
         /* Set motor output */
-        if (control_output >= 0) {
+        if (control_output >= 0)
+        {
             set_motor_output((uint32_t)control_output);
-        } else {
+        }
+        else
+        {
             /* Negative output means reverse direction */
             /* TODO: Implement direction control */
             set_motor_output(0U);
         }
 
         /* Log status every 100 iterations */
-        if ((iterations % 100U) == 0U) {
+        if ((iterations % 100U) == 0U)
+        {
             len = int_to_str((int32_t)sensor_value, buffer, sizeof(buffer));
             syscall_write("Position: ", 10);
             syscall_write(buffer, (size_t)len);

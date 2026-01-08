@@ -23,14 +23,17 @@ int find_first_set_bit(const uint64_t *bitmap, uint32_t nbits)
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
-        if (bitmap[i] != 0ULL) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
+        if (bitmap[i] != 0ULL)
+        {
             /* 使用CLZ查找第一个置位 */
             uint32_t bit = (uint32_t)__builtin_clzll(bitmap[i]);
             uint32_t result = i * BITS_PER_LONG + (BITS_PER_LONG - 1 - bit);
 
             /* 检查是否超出范围 */
-            if (result < nbits) {
+            if (result < nbits)
+            {
                 return (int)result;
             }
         }
@@ -49,15 +52,18 @@ int find_first_zero_bit(const uint64_t *bitmap, uint32_t nbits)
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
-        if (bitmap[i] != ~0ULL) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
+        if (bitmap[i] != ~0ULL)
+        {
             /* 反转位图查找第一个置位 */
             uint64_t inverted = ~bitmap[i];
             uint32_t bit = (uint32_t)__builtin_clzll(inverted);
             uint32_t result = i * BITS_PER_LONG + (BITS_PER_LONG - 1 - bit);
 
             /* 检查是否超出范围 */
-            if (result < nbits) {
+            if (result < nbits)
+            {
                 return (int)result;
             }
         }
@@ -76,14 +82,17 @@ int find_last_set_bit(const uint64_t *bitmap, uint32_t nbits)
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (int i = (int)nlongs - 1; i >= 0; i--) {
-        if (bitmap[i] != 0ULL) {
+    for (int i = (int)nlongs - 1; i >= 0; i--)
+    {
+        if (bitmap[i] != 0ULL)
+        {
             /* 使用CTZ查找最后一个置位 */
             uint32_t bit = (uint32_t)__builtin_ctzll(bitmap[i]);
             uint32_t result = i * BITS_PER_LONG + bit;
 
             /* 检查是否超出范围 */
-            if (result < nbits) {
+            if (result < nbits)
+            {
                 return (int)result;
             }
         }
@@ -101,7 +110,8 @@ int find_last_set_bit(const uint64_t *bitmap, uint32_t nbits)
  */
 int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
 {
-    if (start >= nbits) {
+    if (start >= nbits)
+    {
         return -1;
     }
 
@@ -110,22 +120,27 @@ int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
     uint64_t mask = bitmap[word] >> bit;
 
     /* 检查当前字 */
-    if (mask != 0ULL) {
+    if (mask != 0ULL)
+    {
         uint32_t offset = (uint32_t)__builtin_ctzll(mask);
         uint32_t result = start + offset;
 
-        if (result < nbits) {
+        if (result < nbits)
+        {
             return (int)result;
         }
     }
 
     /* 检查后续字 */
-    for (uint32_t i = word + 1; i < BITS_TO_LONGS(nbits); i++) {
-        if (bitmap[i] != 0ULL) {
+    for (uint32_t i = word + 1; i < BITS_TO_LONGS(nbits); i++)
+    {
+        if (bitmap[i] != 0ULL)
+        {
             uint32_t bit_offset = (uint32_t)__builtin_ctzll(bitmap[i]);
             uint32_t result = i * BITS_PER_LONG + bit_offset;
 
-            if (result < nbits) {
+            if (result < nbits)
+            {
                 return (int)result;
             }
         }
@@ -143,7 +158,8 @@ int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
  */
 int find_next_zero_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
 {
-    if (start >= nbits) {
+    if (start >= nbits)
+    {
         return -1;
     }
 
@@ -152,23 +168,28 @@ int find_next_zero_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
     uint64_t mask = ~(bitmap[word] >> bit);
 
     /* 检查当前字 */
-    if (mask != 0ULL) {
+    if (mask != 0ULL)
+    {
         uint32_t offset = (uint32_t)__builtin_ctzll(mask);
         uint32_t result = start + offset;
 
-        if (result < nbits) {
+        if (result < nbits)
+        {
             return (int)result;
         }
     }
 
     /* 检查后续字 */
-    for (uint32_t i = word + 1; i < BITS_TO_LONGS(nbits); i++) {
-        if (bitmap[i] != ~0ULL) {
+    for (uint32_t i = word + 1; i < BITS_TO_LONGS(nbits); i++)
+    {
+        if (bitmap[i] != ~0ULL)
+        {
             uint64_t inverted = ~bitmap[i];
             uint32_t bit_offset = (uint32_t)__builtin_ctzll(inverted);
             uint32_t result = i * BITS_PER_LONG + bit_offset;
 
-            if (result < nbits) {
+            if (result < nbits)
+            {
                 return (int)result;
             }
         }
@@ -188,7 +209,8 @@ uint32_t bitmap_count_bits(const uint64_t *bitmap, uint32_t nbits)
     uint32_t count = 0U;
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
         /* 使用popcount统计置位数 */
         count += (uint32_t)__builtin_popcountll(bitmap[i]);
     }
@@ -203,7 +225,8 @@ void bitmap_and(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint3
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
         dst[i] = src1[i] & src2[i];
     }
 }
@@ -215,7 +238,8 @@ void bitmap_or(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
         dst[i] = src1[i] | src2[i];
     }
 }
@@ -227,7 +251,8 @@ void bitmap_xor(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint3
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
         dst[i] = src1[i] ^ src2[i];
     }
 }
@@ -239,7 +264,8 @@ void bitmap_not(uint64_t *dst, const uint64_t *src, uint32_t nbits)
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
         dst[i] = ~src[i];
     }
 }
@@ -251,8 +277,10 @@ int bitmap_equal(const uint64_t *src1, const uint64_t *src2, uint32_t nbits)
 {
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
-    for (uint32_t i = 0; i < nlongs; i++) {
-        if (src1[i] != src2[i]) {
+    for (uint32_t i = 0; i < nlongs; i++)
+    {
+        if (src1[i] != src2[i])
+        {
             return 0;
         }
     }
