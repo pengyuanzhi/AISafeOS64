@@ -191,10 +191,11 @@
   /**
    * @brief 自适应系统调用（方案C）
       */
+
     int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                      void *(*start_routine)(void *), void *arg) {
       TCB_t *current = get_current_task();
-
+    
       /* 运行时决策 */
       if (current->isolation_mode == TASK_ISOLATION_SHARED) {
           // 共享地址空间：直接调用（零开销）
@@ -468,6 +469,7 @@
   /**
    * @brief cpio文件头（newc格式）
       */
+
     typedef struct {
       char    magic[6];      /* "070701" or "070702" */
       char    ino[8];        /* inode number */
@@ -488,6 +490,7 @@
   /**
    * @brief cpio文件系统
       */
+
     typedef struct {
       uint8_t     *data;          /* cpio镜像数据 */
       uint32_t    size;           /* 镜像大小 */
@@ -504,14 +507,15 @@
    * @note 简化的cpio读取实现
    * @note 仅支持读取（initramfs是只读的）
       */
+
     int initramfs_read(const char *path, uint8_t *buf, uint32_t size) {
       uint32_t offset = 0;
       CpioHeader_t *hdr;
-
+    
       /* 遍历cpio归档 */
       while (offset < g_initramfs.size) {
           hdr = (CpioHeader_t *)(g_initramfs.data + offset);
-
+    
           /* 解析文件头 */
           uint32_t namesize = cpio_parse_hex(hdr->namesize);
           uint32_t filesize = cpio_parse_hex(hdr->filesize);
@@ -539,7 +543,7 @@
           offset += sizeof(CpioHeader_t) + namesize + filesize;
           offset = (offset + 3) & ~3U;  /* 4字节对齐 */
       }
-
+    
       return -ENOENT;
     }
 
@@ -577,6 +581,7 @@
   /**
    * @brief rcS脚本命令
       */
+
     typedef struct {
       const char *name;
       int (*handler)(int argc, char *argv[]);
@@ -590,28 +595,29 @@
    * @note 仅支持简化的Shell语法
    * @note 不支持管道、重定向、后台运行
       */
+
     int rc_script_execute(const char *script_path) {
       char *script;
       uint32_t script_size;
       char line[256];
       uint32_t line_pos = 0;
       int ret;
-
+    
       /* 读取脚本文件 */
       script_size = initramfs_read(script_path, (uint8_t *)g_script_buf,
                                     sizeof(g_script_buf));
       if (script_size < 0) {
           return script_size;
       }
-
+    
       script = g_script_buf;
-
+    
       /* 逐行解析和执行 */
       while (line_pos < script_size) {
           char *line_start = &script[line_pos];
           char *newline;
           uint32_t line_len;
-
+    
           /* 查找换行符 */
           newline = strchr(line_start, '\n');
           if (newline == NULL) {
@@ -642,33 +648,34 @@
       
           line_pos += line_len + 1;
       }
-
+    
       return 0;
     }
 
   /**
    * @brief 执行rcS脚本的一行
       */
+
     static int rc_execute_line(const char *line) {
       char *argv[16];
       int argc;
       const RcScriptCmd_t *cmd;
       char *line_copy;
       int ret;
-
+    
       /* 复制行（用于修改） */
       line_copy = strdup(line);
       if (line_copy == NULL) {
           return -ENOMEM;
       }
-
+    
       /* 解析命令和参数 */
       argc = rc_parse_args(line_copy, argv, 16);
       if (argc <= 0) {
           free(line_copy);
           return 0;
       }
-
+    
       /* 查找命令 */
       cmd = rc_find_command(argv[0]);
       if (cmd == NULL) {
@@ -676,10 +683,10 @@
           free(line_copy);
           return -ENOENT;
       }
-
+    
       /* 执行命令 */
       ret = cmd->handler(argc, argv);
-
+    
       free(line_copy);
       return ret;
     }
@@ -687,29 +694,30 @@
   /**
    * @brief rcS命令表
       */
+
     static const RcScriptCmd_t g_rc_commands[] = {
       /* 文件系统命令 */
       { "mount",    rc_cmd_mount },
       { "umount",   rc_cmd_umount },
-
+    
       /* 网络命令 */
       { "ifconfig", rc_cmd_ifconfig },
       { "route",    rc_cmd_route },
-
+    
       /* 任务管理 */
       { "spawn",    rc_cmd_spawn },
       { "run",      rc_cmd_run },
       { "kill",     rc_cmd_kill },
-
+    
       /* 配置管理 */
       { "source",   rc_cmd_source },
       { "set",      rc_cmd_set },
-
+    
       /* 控制命令 */
       { "if",       rc_cmd_if },
       { "for",      rc_cmd_for },
       { "exit",     rc_cmd_exit },
-
+    
       { NULL, NULL }
     };
 
@@ -865,28 +873,29 @@
    * @brief 安全的cpio文件解析
    * @note 防止恶意cpio文件攻击
       */
+
     int safe_initramfs_read(const char *path, uint8_t *buf, uint32_t size) {
       /* 1. 验证cpio魔数 */
       if (memcmp(g_initramfs.data, "070701", 6) != 0 &&
           memcmp(g_initramfs.data, "070702", 6) != 0) {
           return -EINVAL;
       }
-
+    
       /* 2. 验证路径（防止路径遍历攻击） */
       if (strstr(path, "..") != NULL) {
           return -EINVAL;  /* 拒绝包含..的路径 */
       }
-
+    
       /* 3. 验证文件名长度 */
       if (strlen(path) > 256) {
           return -ENAMETOOLONG;
       }
-
+    
       /* 4. 验证缓冲区大小 */
       if (size > INITRAMFS_MAX_FILE_SIZE) {
           return -EFBIG;
       }
-
+    
       /* 5. 读取文件（带边界检查） */
       return initramfs_read(path, buf, size);
     }
@@ -993,3 +1002,162 @@
 | AISafe-eBPF     | 中   | 高   | 中   | P1     | 10周   |
 | 驱动框架        | 中   | 低   | 低   | P1     | 6周    |
 | 形式化验证      | 极高 | 极高 | 低   | P1     | 16周   |
+
+
+
+## 提交格式模板
+
+标准的代码提交（Commit）消息格式通常遵循 **Conventional Commits** 规范，结构清晰、便于自动化工具解析（如生成 CHANGELOG、语义化版本等）。以下是推荐格式：
+
+------
+
+### ✅ 提交格式模板
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+> **注意**：  
+>
+> - 第一行（header）**不超过 72 个字符**  
+> - `<type>` 和 `<subject>` 之间用冒号 `:` 分隔，**冒号后加一个空格**  
+> - 空一行后再写 body 和 footer  
+> - 所有行建议不超过 100 字符（便于 git log 查看）
+
+------
+
+### 🔹 `<type>`（必需）—— 提交类型
+
+| 类型       | 说明                                       |
+| ---------- | ------------------------------------------ |
+| `feat`     | 新功能（feature）                          |
+| `fix`      | 修复 bug                                   |
+| `docs`     | 文档更新                                   |
+| `style`    | 代码格式调整（不影响逻辑，如空格、分号）   |
+| `refactor` | 重构（既不是新功能也不是修复）             |
+| `perf`     | 性能优化                                   |
+| `test`     | 添加或修改测试                             |
+| `build`    | 构建系统或依赖变更（如 Makefile、CI 配置） |
+| `ci`       | CI 配置文件和脚本                          |
+| `chore`    | 杂项（如更新 .gitignore）                  |
+| `revert`   | 回滚某次提交                               |
+
+------
+
+### 🔹 `<scope>`—— 影响范围
+
+指明本次修改的模块或组件，例如：
+
+- `msg_queue`
+- `pthread`
+- `comm_util`
+- `timer`
+
+示例：
+`fix(msg_queue): handle EPERM in timed pop`
+
+------
+
+### 🔹 `<subject>`（必需）—— 简短描述
+
+- **使用祈使句**（Imperative mood），如 “fix” 而不是 “fixed” 或 “fixes”
+- **首字母小写**
+- **不要加句号**
+
+✅ 正确：
+`fix: resolve mutex ownership check in cond_timedwait`
+
+❌ 错误：
+`Fixed a bug.`
+`fixes mutex issue`
+
+------
+
+### 🔹 `<body>`—— 详细说明
+
+- 解释 **为什么** 要做这个修改（而非“做了什么”，因为 diff 已体现）
+- 可包含背景、问题现象、设计决策等
+- 每行不超过 100 字符
+- 可使用 `-` 或 `*` 列表
+
+示例：
+
+```
+The pthread_cond_timedwait returned EPERM (1) because the mutex owner
+was not correctly recorded after double unlock. This patch ensures
+mutex is only unlocked once and adds validation in queue pop.
+```
+
+------
+
+### 🔹 `<footer>`—— 关联JARIA信息
+
+常用于：
+
+- **关联 Issue**：`Closes #123`, `Fixes #456`
+- **BREAKING CHANGE**：重大不兼容变更
+
+示例：
+
+```
+Closes #789
+
+BREAKING CHANGE: The msg_queue_pop API now returns -EPERM on mutex error.
+```
+
+------
+
+### 📌 完整示例
+
+```
+fix(comm_util): handle EPERM in msg queue timed pop
+
+The pthread_cond_timedwait returned EPERM (errno=1) when the mutex
+was corrupted due to potential double unlock in high-concurrency
+scenarios. Added strict error checking and ensured mutex is held
+before calling cond_timedwait.
+
+Also refactored timeout calculation to avoid custom timespec conversion.
+
+Closes #1024
+```
+
+
+
+### github推送
+
+  gh auth login
+
+  登录后，你可以选择交互式方式并按照提示操作。认证完成后，再运行：
+
+  gh repo create AISafeOS64 --source=. --remote=origin --push
+
+  或者，如果你有 GitHub personal access token，可以设置环境变量：
+
+  $env:GH_TOKEN="your_token_here"
+
+  set GH_TOKEN=your_token_here
+
+  gh repo create AISafeOS64 --source=. --remote=origin --push
+
+  完成认证后告诉我，我会帮你继续推送。
+
+ 
+
+
+
+https://github.com/pengyuanzhi/AISafeOS64.git
+
+```
+echo "# AISafeOS64" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/pengyuanzhi/AISafeOS64.git
+git push -u origin main
+```

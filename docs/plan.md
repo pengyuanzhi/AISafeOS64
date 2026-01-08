@@ -10039,7 +10039,579 @@ make clean
 
 ---
 
-## 8. 风险与挑战
+## 8. 补充功能设计
+
+本章补充了4个在专项功能中未涉及但对安全关键系统重要的功能：电源管理、看门狗定时器、错误恢复机制和日志系统。
+
+### 8.1 电源管理 (Power Management)
+
+#### 8.1.1 功能需求
+
+**核心需求**
+
+**PM1. CPU频率调节**
+- 支持动态电压频率调节 (DVFS)
+- 支持多级频率档位（至少4档）
+- 频率切换延迟<100μs
+- 支持用户空间配置策略
+
+**PM2. CPU空闲状态管理**
+- 支持 WFI (Wait For Interrupt) 指令
+- 支持深度睡眠状态 (WFE)
+- 空闲唤醒延迟<10μs
+- 支持多级空闲状态（至少3级）
+
+**PM3. 外设电源控制**
+- 支持外设独立电源域
+- 支持动态开关外设电源
+- 外设初始化时间<1ms
+
+**PM4. 系统级电源管理**
+- 支持系统休眠 (Suspend to RAM)
+- 支持系统关机
+- 唤醒源配置
+- 唤醒延迟<100ms
+
+**非功能需求**
+
+- **性能要求**: 频率调节开销<1% CPU，空闲状态进入延迟<5μs
+- **可靠性要求**: 电源状态切换成功率>99.99%，看门喂狗必须在状态切换期间继续
+- **安全性要求**: 频率调节必须考虑实时任务约束，禁止在关键任务执行时进入深度睡眠
+
+#### 8.1.2 架构设计
+
+**系统架构**
+
+```
+应用层 (电源策略配置 / 性能模式选择)
+         ↓
+电源管理框架 (策略管理器 / 频率调节器 / 空闲管理器)
+         ↓
+硬件抽象层 (CPU频率控制 / 电源域控制 / 唤醒源管理)
+         ↓
+ARMv8-A 硬件 (PMU / GIC / Timer / 电源控制器)
+```
+
+**数据结构设计**
+
+```c
+/**
+ * @brief CPU操作点结构
+ * @note MISRA-C:2012合规
+ */
+typedef struct {
+    uint32_t freq_hz;        /**< CPU频率 (Hz) */
+    uint32_t voltage_mv;      /**< 电压 (mV) */
+    uint32_t power_mw;       /**< 功耗 (mW) */
+} OPP_t;
+
+/**
+ * @brief 电源策略结构
+ */
+typedef struct {
+    const char *name;        /**< 策略名称 */
+    uint32_t flags;          /**< 策略标志 */
+    uint32_t (*select_opp)(uint32_t current_load,
+                           const OPP_t *opps,
+                           uint32_t opp_count);
+} PowerPolicy_t;
+
+/**
+ * @brief CPU空闲状态结构
+ */
+typedef struct {
+    const char *name;        /**< 状态名称 */
+    uint32_t flags;          /**< 状态标志 */
+    uint32_t latency_us;     /**< 唤醒延迟 (μs) */
+    uint32_t power_save;     /**< 省电百分比 (0-100) */
+    int (*enter)(void);
+    int (*exit)(void);
+} IdleState_t;
+```
+
+#### 8.1.3 API设计
+
+```c
+/* 电源管理初始化 */
+int pm_init(void);
+
+/* CPU频率调节 */
+int pm_set_cpu_frequency(uint32_t freq_hz);
+uint32_t pm_get_cpu_frequency(void);
+
+/* 空闲状态管理 */
+int pm_cpu_idle(uint32_t expected_idle_us);
+
+/* 电源策略管理 */
+int pm_set_policy(const PowerPolicy_t *policy);
+const PowerPolicy_t *pm_get_policy(void);
+```
+
+#### 8.1.4 实施计划
+
+**实施周期**: 4周
+
+**Week 1-2: CPU频率调节**
+- DVFS框架实现
+- 操作点配置
+- 电压调节器集成
+
+**Week 3-4: 空闲状态管理**
+- WFI/WFE实现
+- 深度睡眠支持
+- 状态选择算法
+
+---
+
+### 8.2 看门狗定时器 (Watchdog Timer)
+
+#### 8.2.1 功能需求
+
+**核心需求**
+
+**WD1. 硬件看门狗**
+- 支持ARMv8-A架构的通用看门狗定时器
+- 可配置超时时间（1ms-60s）
+- 支持窗口看门狗模式（可选）
+- 超时自动复位系统
+
+**WD2. 软件看门狗**
+- 基于定时器实现
+- 每个任务可选配独立的软件看门狗
+- 任务级故障隔离
+- 超时触发任务重启或系统重启
+
+**WD3. 看门喂狗策略**
+- 自动喂狗（在任务正常运行时）
+- 手动喂狗（API调用）
+- 死锁检测（防止喂狗线程自身死锁）
+- 喂狗超时记录
+
+**非功能需求**
+
+- **可靠性要求**: 硬件看门狗故障覆盖率>99%，软件看门狗故障检测时间<100ms
+- **安全性要求**: 符合ISO 26262 ASIL-D要求，看门狗配置受安全保护
+
+#### 8.2.2 架构设计
+
+**数据结构设计**
+
+```c
+/**
+ * @brief 看门狗配置结构
+ * @note MISRA-C:2012合规
+ */
+typedef struct {
+    uint32_t timeout_ms;     /**< 超时时间 (ms) */
+    uint32_t window_ms;      /**< 窗口时间 (ms) */
+    uint32_t flags;          /**< 配置标志 */
+    void (*timeout_callback)(uint32_t wdt_id);
+    int (*reset_action)(uint32_t wdt_id);
+} WatchdogConfig_t;
+
+/**
+ * @brief 软件看门狗结构
+ */
+typedef struct {
+    uint32_t task_id;        /**< 关联的任务ID */
+    uint32_t timeout_ms;     /**< 超时时间 */
+    uint64_t last_feed_ns;   /**< 上次喂狗时间 */
+    uint32_t flags;          /**< 标志 */
+    uint32_t fault_count;    /**< 故障计数 */
+    WatchdogConfig_t config; /**< 配置 */
+} SoftwareWatchdog_t;
+```
+
+#### 8.2.3 API设计
+
+```c
+/* 硬件看门狗 */
+int wdt_hardware_init(const WatchdogConfig_t *config);
+int wdt_hardware_start(uint32_t wdt_id);
+int wdt_hardware_feed(uint32_t wdt_id);
+int wdt_hardware_stop(uint32_t wdt_id);
+
+/* 软件看门狗 */
+int wdt_software_create(uint32_t task_id,
+                        const WatchdogConfig_t *config);
+int wdt_software_feed(uint32_t wdt_id);
+int wdt_software_destroy(uint32_t wdt_id);
+```
+
+#### 8.2.4 故障恢复策略
+
+```c
+/**
+ * @brief 看门狗故障等级
+ */
+typedef enum {
+    WDT_FAULT_LEVEL_WARNING = 0,  /**< 警告级：记录日志 */
+    WDT_FAULT_LEVEL_TASK,        /**< 任务级：重启任务 */
+    WDT_FAULT_LEVEL_SYSTEM       /**< 系统级：重启系统 */
+} WatchdogFaultLevel_t;
+```
+
+#### 8.2.5 实施计划
+
+**实施周期**: 3周
+
+**Week 1: 硬件看门狗**
+- ARM Generic Watchdog驱动
+- 看门狗初始化和喂狗
+- 超时处理
+
+**Week 2-3: 软件看门狗**
+- 软件看门狗监控线程
+- 任务级故障隔离
+- 自动喂狗实现
+
+---
+
+### 8.3 错误恢复机制 (Error Recovery)
+
+#### 8.3.1 功能需求
+
+**核心需求**
+
+**ER1. 异常处理**
+- 支持同步异常（数据中止、预取中止）
+- 支持异步异常（IRQ、FIQ）
+- 支持系统错误异常（SError）
+- 异常分类和统计
+
+**ER2. 错误码系统**
+- 统一的错误码定义
+- 错误码到字符串转换
+- 错误码严重性分级
+- 错误传播机制
+
+**ER3. 故障隔离**
+- 任务级故障隔离
+- 内存隔离（通过MPU/MMU）
+- 资源隔离（文件描述符、句柄）
+- 故障不传播到其他任务
+
+**ER4. 故障恢复**
+- 任务级故障恢复（任务重启）
+- 系统级故障恢复（系统重启）
+- 应用级故障恢复（应用重启）
+- 安全状态恢复
+
+**非功能需求**
+
+- **可靠性要求**: 错误检测覆盖率>95%，恢复成功率>90%
+- **安全性要求**: 符合ISO 26262 ASIL-D要求，错误处理路径经过形式化验证
+
+#### 8.3.2 架构设计
+
+**数据结构设计**
+
+```c
+/**
+ * @brief 错误码类型
+ * @note MISRA-C:2012合规
+ */
+typedef int32_t ErrorCode_t;
+
+/* 错误码范围定义 */
+#define ERROR_SUCCESS           0
+#define ERROR_BASE              0x1000
+
+/* 通用错误 */
+#define ERROR_FAIL              (ERROR_BASE + 0x01)
+#define ERROR_INVALID_PARAM     (ERROR_BASE + 0x02)
+#define ERROR_OUT_OF_MEMORY     (ERROR_BASE + 0x03)
+#define ERROR_TIMEOUT           (ERROR_BASE + 0x04)
+
+/**
+ * @brief 错误信息结构
+ */
+typedef struct {
+    ErrorCode_t code;          /**< 错误码 */
+    const char *msg;           /**< 错误消息 */
+    const char *file;          /**< 发生错误的文件 */
+    uint32_t line;             /**< 发生错误的行号 */
+    uint64_t timestamp;        /**< 时间戳 */
+} ErrorInfo_t;
+
+/**
+ * @brief 恢复策略结构
+ */
+typedef struct {
+    const char *name;         /**< 策略名称 */
+    uint32_t flags;           /**< 策略标志 */
+    int (*execute)(const ErrorInfo_t *error);
+} RecoveryStrategy_t;
+```
+
+#### 8.3.3 API设计
+
+```c
+/* 错误报告 */
+int error_report(ErrorCode_t code,
+                const char *file,
+                uint32_t line);
+
+/* 恢复策略管理 */
+int error_recovery_register(ErrorCode_t error_code,
+                           const RecoveryStrategy_t *strategy);
+int error_recovery_execute(const ErrorInfo_t *error);
+```
+
+#### 8.3.4 实施计划
+
+**实施周期**: 4周
+
+**Week 1-2: 异常处理框架**
+- 同步/异步异常处理
+- 错误分类和统计
+- 错误码系统
+
+**Week 3-4: 故障恢复**
+- 任务级故障隔离
+- 恢复策略实现
+- 系统重启机制
+
+---
+
+### 8.4 日志系统 (Logging System)
+
+#### 8.4.1 功能需求
+
+**核心需求**
+
+**LOG1. 日志级别**
+- 支持至少5个日志级别（DEBUG/INFO/WARN/ERROR/FATAL）
+- 可配置全局日志级别
+- 运行时动态调整日志级别
+
+**LOG2. 日志格式**
+- 时间戳（高精度）
+- 日志级别
+- 任务ID
+- 文件名和行号
+- 日志消息
+
+**LOG3. 日志输出**
+- 支持串口输出（UART）
+- 支持网络输出（UDP/TCP，可选）
+- 支持文件系统输出（可选）
+- 支持循环缓冲区（内存中）
+
+**LOG4. 日志过滤**
+- 基于日志级别过滤
+- 基于任务ID过滤
+- 基于模块过滤
+- 运行时动态配置过滤规则
+
+**LOG5. 性能要求**
+- 日志记录延迟<10μs
+- 异步日志输出
+- 不阻塞调用线程
+
+**非功能需求**
+
+- **性能要求**: 日志系统开销<2% CPU，内存占用<100KB，日志丢失率<1%
+- **可靠性要求**: 日志系统故障不影响核心功能，日志输出失败不导致系统崩溃
+
+#### 8.4.2 架构设计
+
+**数据结构设计**
+
+```c
+/**
+ * @brief 日志级别枚举
+ * @note MISRA-C:2012合规
+ */
+typedef enum {
+    LOG_LEVEL_DEBUG = 0,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_FATAL
+} LogLevel_t;
+
+/**
+ * @brief 日志消息结构
+ */
+typedef struct {
+    uint64_t timestamp_ns;   /**< 时间戳 (ns) */
+    uint32_t task_id;        /**< 任务ID */
+    LogLevel_t level;        /**< 日志级别 */
+    const char *file;        /**< 文件名 */
+    uint32_t line;           /**< 行号 */
+    const char *msg;         /**< 日志消息 */
+    uint32_t msg_len;        /**< 消息长度 */
+} LogMessage_t;
+
+/**
+ * @brief 日志配置结构
+ */
+typedef struct {
+    LogLevel_t global_level; /**< 全局日志级别 */
+    uint32_t flags;          /**< 配置标志 */
+    bool (*filter)(const LogMessage_t *msg);
+} LogConfig_t;
+```
+
+#### 8.4.3 API设计
+
+```c
+/* 日志输出 */
+void log_output(LogLevel_t level,
+               const char *file,
+               uint32_t line,
+               const char *fmt,
+               ...);
+
+/* 日志配置 */
+void log_set_level(LogLevel_t level);
+void log_set_filter(bool (*filter)(const LogMessage_t *msg));
+
+/* 日志宏 */
+#define LOG_DEBUG(fmt, ...) \
+    log_output(LOG_LEVEL_DEBUG, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) \
+    log_output(LOG_LEVEL_INFO, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...) \
+    log_output(LOG_LEVEL_WARN, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) \
+    log_output(LOG_LEVEL_ERROR, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_FATAL(fmt, ...) \
+    log_output(LOG_LEVEL_FATAL, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+```
+
+#### 8.4.4 实施计划
+
+**实施周期**: 3周
+
+**Week 1: 日志框架**
+- 日志级别和格式
+- 格式化输出
+- 时间戳记录
+
+**Week 2: 输出后端**
+- 串口输出实现
+- 循环缓冲区
+- 异步输出
+
+**Week 3: 高级功能**
+- 日志过滤
+- 多输出目标
+- 性能优化
+
+---
+
+### 8.5 集成和配置
+
+#### 8.5.1 MenuConfig配置
+
+```kconfig
+# Power Management configuration
+config POWER_MANAGEMENT
+    bool "Power Management Support"
+    default y
+
+config PM_CPU_FREQ
+    bool "CPU Frequency Scaling"
+    depends on POWER_MANAGEMENT
+    default y
+
+config PM_CPU_IDLE
+    bool "CPU Idle States"
+    depends on POWER_MANAGEMENT
+    default y
+
+# Watchdog configuration
+config WATCHDOG
+    bool "Watchdog Timer Support"
+    default y
+
+config WATCHDOG_HARDWARE
+    bool "Hardware Watchdog"
+    depends on WATCHDOG
+    default y
+
+config WATCHDOG_SOFTWARE
+    bool "Software Watchdog"
+    depends on WATCHDOG
+    default y
+
+# Error Recovery configuration
+config ERROR_RECOVERY
+    bool "Error Recovery Support"
+    default y
+
+config ERROR_RECOVERY_TASK_RESTART
+    bool "Task Restart on Error"
+    depends on ERROR_RECOVERY
+    default y
+
+# Logging configuration
+config LOG
+    bool "Logging Support"
+    default y
+
+config LOG_LEVEL
+    int "Default Log Level"
+    depends on LOG
+    range 0 4
+    default 2
+
+config LOG_UART
+    bool "UART Log Output"
+    depends on LOG
+    default y
+```
+
+#### 8.5.2 设备树配置
+
+```dts
+/ {
+    cpus {
+        cpu@0 {
+            operating-points = <600000 800000>,
+                                 <1200000 900000>,
+                                 <1500000 1000000>,
+                                 <1800000 1100000>;
+        };
+    };
+
+    watchdog@0 {
+        compatible = "arm,arm-generic-watchdog";
+        reg = <0x0 0x1000>;
+        interrupts = <0 25 IRQ_TYPE_LEVEL_HIGH>;
+        timeout-ms = <30000>;
+    };
+
+    pmu@0 {
+        compatible = "arm,armv8-pmuv3";
+        events = <0x08>;
+    };
+};
+```
+
+#### 8.5.3 实施优先级
+
+**P0 - 必须实现（0-3个月）**
+
+1. 电源管理基础（2周）- CPU频率调节、WFI/WFE空闲状态
+2. 硬件看门狗（2周）- ARM Generic Watchdog驱动
+3. 日志系统基础（2周）- 日志级别、串口输出、循环缓冲区
+
+**P1 - 重要功能（3-6个月）**
+
+4. 软件看门狗（3周）- 软件看门狗监控、任务级故障隔离
+5. 错误恢复（4周）- 异常处理框架、错误码系统、任务重启策略
+
+**P2 - 可选功能（6-12个月）**
+
+6. 高级电源管理（6周）- 深度睡眠、外设电源控制、系统休眠
+7. 高级日志功能（4周）- 网络日志、文件系统日志、日志分析
+
+---
+
+## 9. 风险与挑战
 
 ### 8.1 技术风险
 - **MMU复杂度**: 4级页表实现复杂，需要仔细验证
