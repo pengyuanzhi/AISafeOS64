@@ -48,6 +48,7 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/task.c \
            $(SRC_DIR)/kernel/loader.c \
            $(SRC_DIR)/kernel/shell.c \
+           $(SRC_DIR)/kernel/device.c \
            $(SRC_DIR)/kernel/fs/vfs.c \
            $(SRC_DIR)/kernel/fs/initramfs.c \
            $(SRC_DIR)/kernel/fs/procfs.c

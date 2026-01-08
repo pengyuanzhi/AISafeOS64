@@ -3,7 +3,7 @@
 ## 项目概述
 AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 
-## 已完成模块（10/15核心模块）
+## 已完成模块（11/15核心模块）
 
 ### 1. ✅ 启动代码和HAL (Module 1)
 **文件**: `src/arch/arm64/boot/start.S`, `src/drivers/uart/uart.c`
@@ -110,14 +110,27 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 
 **提交**: `feat(shell): implement debug shell interface with built-in commands`
 
+### 11. ✅ 设备驱动框架 (Module 11)
+**文件**: `src/kernel/device.c`, `src/include/device.h`
+- 统一设备驱动接口
+- 设备管理核心（注册、注销、查找）
+- 设备驱动注册和管理
+- 字符设备支持（/dev/null, /dev/zero, /dev/random, /dev/console）
+- 设备操作接口（open, close, read, write, ioctl）
+- 设备树管理（父子关系）
+- 引用计数和打开计数
+- 线程安全（spinlock保护）
+
+**提交**: `feat(driver): implement device driver framework with character device support`
+
 ## 代码统计
 
 | 类别 | 文件数 | 代码行数（估计） |
 |------|--------|----------------|
 | 汇编代码 | 2 | ~500行 |
-| C代码 | 24+ | ~6500行 |
-| 头文件 | 18+ | ~3600行 |
-| **总计** | **44+** | **~10600行** |
+| C代码 | 25+ | ~7100行 |
+| 头文件 | 19+ | ~3900行 |
+| **总计** | **46+** | **~11500行** |
 
 ## 功能特性
 
@@ -133,6 +146,7 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 - ✅ 上下文切换（ARMv8-A汇编）
 - ✅ 虚拟文件系统（VFS核心层、initramfs、procfs）
 - ✅ Shell调试接口（命令行解析器、内置命令）
+- ✅ 设备驱动框架（统一接口、字符设备支持）
 
 ### 部分实现
 - ⚠️ 调度算法（FIFO/EDF/CFS/RR/IDLE类框架存在，需完善）
@@ -141,7 +155,6 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 
 ### 未实现
 - ❌ 网络栈
-- ❌ 驱动框架
 - ❌ 安全功能（栈溢出保护、MPU/MMU抽象层等10个专项）
 
 ## 架构设计
@@ -245,10 +258,10 @@ aarch64-none-elf-gdb build/aisafe64.elf
    - 性能测试
 
 ### 中期目标（1-2月）
-4. **驱动框架**
-   - 统一设备操作接口
-   - 字符设备驱动
-   - 平台设备驱动
+4. **平台设备驱动**
+   - 平台设备支持
+   - 设备树解析
+   - 热插拔支持
 
 ### 长期目标（3-6月）
 5. **安全功能**（plan.md中的10个专项）
@@ -276,4 +289,5 @@ aarch64-none-elf-gdb build/aisafe64.elf
 - 2025-01-08: 项目初始化，完成8个核心模块
 - 2025-01-08: 完成VFS模块（VFS核心层、initramfs、procfs），共9个核心模块
 - 2025-01-08: 完成Shell调试接口模块，共10个核心模块
+- 2025-01-08: 完成设备驱动框架模块（统一接口、字符设备支持），共11个核心模块
 - [后续更新记录]
