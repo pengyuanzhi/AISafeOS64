@@ -72,12 +72,15 @@ extern "C"
     /**
      * @brief 信号量结构
      * @details 支持二值信号量和计数信号量
+     *
+     * @note 锁顺序：先获取 lock，再操作 wait_queue 和 count
      */
     typedef struct
     {
         volatile int32_t count;      /**< 计数 */
         uint32_t max_count;          /**< 最大计数 */
         struct list_head wait_queue; /**< 等待队列 */
+        spinlock_t lock;             /**< 保护 wait_queue 和状态转换 */
     } semaphore_t;
 
     /**

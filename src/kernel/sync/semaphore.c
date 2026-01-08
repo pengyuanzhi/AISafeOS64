@@ -62,7 +62,11 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
     /* 初始化等待队列 */
     INIT_LIST_HEAD(&sem->wait_queue);
 
-    /* 内存屏障 */
+    /* 初始化自旋锁 */
+    spinlock_init(&sem->lock);
+
+    /* 内存屏障确保初始化完成对其他CPU可见 */
+    /* 注意：spinlock_init 内部可能有屏障，这里额外屏障确保安全 */
     MEMORY_BARRIER();
 
     return ERROR_SUCCESS;
@@ -137,6 +141,8 @@ int semaphore_trywait(semaphore_t *sem)
  *       - 必须在任务上下文中调用（不能在中断中调用）
  *       - semaphore_post 可以在中断中调用
  *       - 典型场景：中断释放信号量，任务等待信号量
+ *
+ * @lock_sem: 必须持有 sem->lock 保护 wait_queue
  */
 int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
 {
@@ -171,6 +177,7 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
             }
 
             /* CAS失败，重试 */
+            cpu_relax(); /* 退让策略，减少总线压力 */
             continue;
         }
 
@@ -201,18 +208,58 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
     wait_node.task = current;
     wait_node.timeout = (timeout_ms == UINT64_MAX) ? 0 : (sched_clock() + timeout_ms * 1000000ULL);
 
-    /* 将当前任务添加到等待队列 */
+    /* ======== 关键区开始：使用自旋锁保护等待队列 ======== */
+    spinlock_lock(&sem->lock);
+
+    /* 将当前任务添加到等待队列（锁保护） */
     list_add_tail(&wait_node.wait_list, &sem->wait_queue);
 
-    /* 阻塞当前任务 */
+    /* 阻塞当前任务（状态转换需要锁保护） */
     current->state = TASK_BLOCKED;
-    schedule(); /* 触发调度，切换到其他任务 */
 
-    /* 任务被唤醒后，检查是否成功获取信号量 */
+    /* 释放锁，准备调度 */
+    spinlock_unlock(&sem->lock);
+    /* ======== 关键区结束 ======== */
+
+    /*
+     * schedule() 调用契约：
+     *
+     * 1. 调用前要求：
+     *    - 必须在任务上下文中（不在中断中）
+     *    - 当前任务状态已设置为 TASK_BLOCKED
+     *    - 相关锁已释放
+     *
+     * 2. 调用效果：
+     *    - 保存当前任务上下文
+     *    - 选择下一个就绪任务运行
+     *    - 可能经过很长时间才返回
+     *
+     * 3. 返回后保证：
+     *    - 重新调度到当前任务
+     *    - current 指针仍然有效
+     *    - 任务状态可能已改变（被 semaphore_post 设置为 TASK_READY）
+     *
+     * 4. 注意事项：
+     *    - schedule() 返回后必须重新获取锁
+     *    - 不要假设 schedule() 返回时任务状态
+     *    - 检查 current->state 判断唤醒原因
+     */
+    schedule();
+
+    /* ======== 唤醒后重新获取锁 ======== */
+    spinlock_lock(&sem->lock);
+
+    /* 从等待队列中删除（总是执行，避免内存泄漏和UAF） */
+    list_del(&wait_node.wait_list);
+
+    /* 释放锁 */
+    spinlock_unlock(&sem->lock);
+    /* ======== 退出关键区 ======== */
+
+    /* 检查任务状态判断是否成功获取信号量 */
     if (current->state == TASK_BLOCKED)
     {
-        /* 超时或被中断，从等待队列中移除 */
-        list_del(&wait_node.wait_list);
+        /* 超时或被中断，任务仍然是阻塞状态 */
         return -ERROR_TIMEOUT;
     }
 
@@ -232,7 +279,9 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
  * @note 使用约束：
  *       - 可以在任务上下文或中断上下文中调用
  *       - 典型场景：中断处理程序释放信号量，唤醒等待的任务
- *       - 中断安全：使用原子操作保证线程安全
+ *       - 中断安全：使用锁和原子操作保证线程安全
+ *
+ * @lock_sem: 必须持有 sem->lock 保护 wait_queue
  */
 int semaphore_post(semaphore_t *sem)
 {
@@ -260,10 +309,9 @@ int semaphore_post(semaphore_t *sem)
         {
             /* 成功释放信号量 */
 
-            /* 内存屏障 */
-            MEMORY_BARRIER();
+            /* 检查是否有任务在等待（需要锁保护） */
+            spinlock_lock(&sem->lock);
 
-            /* 检查是否有任务在等待 */
             if (!list_empty(&sem->wait_queue))
             {
                 /* 获取等待队列中的第一个任务 */
@@ -272,10 +320,10 @@ int semaphore_post(semaphore_t *sem)
                     list_entry(entry, semaphore_wait_node_t, wait_list);
                 TCB_t *task = wait_node->task;
 
-                /* 从等待队列中移除 */
+                /* 从等待队列中移除（避免重复唤醒） */
                 list_del(entry);
 
-                /* 唤醒任务 */
+                /* 唤醒任务（在锁保护下设置状态） */
                 if (task != NULL)
                 {
                     task->state = TASK_READY;
@@ -283,10 +331,13 @@ int semaphore_post(semaphore_t *sem)
                 }
             }
 
+            spinlock_unlock(&sem->lock);
+
             return ERROR_SUCCESS;
         }
 
-        /* CAS失败，立即重试（不使用 WFE 保证实时性） */
+        /* CAS失败，立即重试 */
+        cpu_relax(); /* 退让策略，减少总线压力 */
     }
 }
 

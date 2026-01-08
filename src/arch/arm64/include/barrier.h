@@ -112,6 +112,16 @@ extern "C"
 #define COMPILER_BARRIER() __asm__ volatile("" ::: "memory")
 
 /**
+ * @brief CPU退让提示
+ * @details 提示CPU当前线程正在自旋等待，CPU可以优化流水线
+ *
+ * @note 在ARMv8-A上使用YIELD指令
+ * @note 减少功耗和总线压力
+ * @note 应该在CAS循环失败时调用
+ */
+#define cpu_relax() __asm__ volatile("yield" ::: "memory")
+
+/**
  * @brief 独占加载（Load-Exclusive Register）
  * @details 原子操作的第一步，加载并标记地址为独占访问
  *

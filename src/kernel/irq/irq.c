@@ -31,23 +31,31 @@ static irq_desc_t *g_irq_table[1020] = {NULL};
  * @brief Per-CPU 中断嵌套深度
  * @details 每个CPU维护独立的中断深度计数器
  *
- * @note 简单实现：使用数组支持多核（MAX_CPUS=8）
- * @note 未来可优化为真正的 per-CPU 变量
+ * @note 使用 MAX_CPUS 宏，避免硬编码
+ * @note TODO: 未来升级为真正的编译器 per-CPU 变量
  */
-static uint32_t irq_depth_per_cpu[8] = {0};
+static uint32_t irq_depth_per_cpu[MAX_CPUS] = {0};
 
 /**
  * @brief 获取当前CPU的中断深度指针
  * @return 指向当前CPU中断深度的指针
+ *
+ * @note 如果 CPU ID 超出范围，触发 panic 而不是静默失败
  */
 static inline uint32_t *this_cpu_irq_depth(void)
 {
     uint32_t cpu = smp_processor_id();
-    if (cpu >= 8U)
+
+    /* 验证 CPU ID 范围 */
+    if (cpu >= MAX_CPUS)
     {
-        /* 不应该发生：CPU ID 超出范围 */
-        return &irq_depth_per_cpu[0];
+        /* 致命错误：CPU ID 无效，系统状态异常 */
+        printk("[IRQ] FATAL: Invalid CPU ID %u (MAX_CPUS=%u)\n", cpu, MAX_CPUS);
+        /* 触发系统停机，不要静默返回错误的指针 */
+        __asm__ volatile("brk #0xF000" ::: "memory"); /* BRK 指令触发异常 */
+        __builtin_unreachable();
     }
+
     return &irq_depth_per_cpu[cpu];
 }
 
@@ -206,7 +214,8 @@ void irq_handler(void)
 {
     /* 增加中断深度（进入中断上下文） */
     uint32_t *depth_ptr = this_cpu_irq_depth();
-    (*depth_ptr)++;
+    /* 使用原子操作保证嵌套中断的安全性 */
+    atomic_fetch_add_u32((volatile uint32_t *)depth_ptr, 1U);
 
     /* 读取中断确认寄存器 */
     uint32_t iar = gic_read_iar();
@@ -217,7 +226,8 @@ void irq_handler(void)
     {
         /* 伪中断，直接结束 */
         gic_write_eoir(iar);
-        (*depth_ptr)--;
+        /* 使用原子操作减少深度 */
+        atomic_fetch_sub_u32((volatile uint32_t *)depth_ptr, 1U);
         return;
     }
 
@@ -248,7 +258,8 @@ void irq_handler(void)
     }
 
     /* 减少中断深度（退出中断上下文） */
-    (*depth_ptr)--;
+    /* 使用原子操作保证嵌套中断的安全性 */
+    atomic_fetch_sub_u32((volatile uint32_t *)depth_ptr, 1U);
 }
 
 /**
