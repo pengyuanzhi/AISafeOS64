@@ -23,6 +23,7 @@ ASM_SOURCES = $(SRC_DIR)/arch/arm64/boot/start.S
 
 # C源文件
 C_SOURCES = $(SRC_DIR)/kernel/main.c \
+           $(SRC_DIR)/kernel/syscall.c \
            $(SRC_DIR)/kernel/mm/page.c \
            $(SRC_DIR)/kernel/mm/kheap.c \
            $(SRC_DIR)/lib/printk.c \

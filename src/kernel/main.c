@@ -22,7 +22,6 @@
  */
 extern int printk_init(void);
 extern void printk(const char *fmt, ...);
-extern void syscall_handler(uint64_t syscall_nr, uint64_t *params);
 
 /* 内存管理 */
 extern int page_allocator_init(uint64_t base_addr, uint64_t size);
@@ -152,23 +151,6 @@ kernel_halt:
     while (true) {
         __asm__ volatile("wfe");
     }
-}
-
-/**
- * @brief 系统调用处理函数（占位符）
- * @param syscall_nr 系统调用号
- * @param params 参数数组
- *
- * @details 由异常向量表调用
- *          - 后续实现完整的系统调用处理
- *          - 当前只打印调试信息
- */
-void syscall_handler(uint64_t syscall_nr, uint64_t *params) {
-    (void)params;  /* 未使用参数 */
-
-    printk("[SYSCALL] System call %lu\n", syscall_nr);
-
-    /* TODO: 实现系统调用处理 */
 }
 
 /**
