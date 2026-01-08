@@ -24,7 +24,7 @@
  * @brief 中断描述符表
  * @details 索引对应中断号
  */
-static irq_desc_t *g_irq_table[1020] = { NULL };
+static irq_desc_t *g_irq_table[1020] = {NULL};
 
 /**
  * @brief GIC CPU Interface寄存器地址（System Register访问）
@@ -34,7 +34,8 @@ static irq_desc_t *g_irq_table[1020] = { NULL };
  * @brief 读取中断确认寄存器
  * @return 中断号（含CPUID）
  */
-static inline uint32_t gic_read_iar(void) {
+static inline uint32_t gic_read_iar(void)
+{
     uint32_t iar;
     __asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(iar));
     return iar;
@@ -44,22 +45,25 @@ static inline uint32_t gic_read_iar(void) {
  * @brief 写入中断结束寄存器
  * @param eoir 中断号（含CPUID）
  */
-static inline void gic_write_eoir(uint32_t eoir) {
-    __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"(eoir));
+static inline void gic_write_eoir(uint32_t eoir)
+{
+    __asm__ volatile("msr ICC_EOIR1_EL1, %0" ::"r"(eoir));
 }
 
 /**
  * @brief 写入中断停用寄存器
  * @param dir 中断号（含CPUID）
  */
-static inline void gic_write_dir(uint32_t dir) {
-    __asm__ volatile("msr ICC_DIR_EL1, %0" :: "r"(dir));
+static inline void gic_write_dir(uint32_t dir)
+{
+    __asm__ volatile("msr ICC_DIR_EL1, %0" ::"r"(dir));
 }
 
 /**
  * @brief 使能Group 0中断（System Register访问）
  */
-static inline void gic_enable_group0(void) {
+static inline void gic_enable_group0(void)
+{
     __asm__ volatile("msr ICC_IGRPEN1_EL1, #1" ::: "memory");
 }
 
@@ -67,8 +71,9 @@ static inline void gic_enable_group0(void) {
  * @brief 设置中断优先级掩码（System Register访问）
  * @param mask 优先级掩码
  */
-static inline void gic_set_priority_mask(uint32_t mask) {
-    __asm__ volatile("msr ICC_PMR_EL1, %0" :: "r"(mask));
+static inline void gic_set_priority_mask(uint32_t mask)
+{
+    __asm__ volatile("msr ICC_PMR_EL1, %0" ::"r"(mask));
 }
 
 /**
@@ -78,7 +83,8 @@ static inline void gic_set_priority_mask(uint32_t mask) {
  * @param arg 参数
  * @return 成功返回0，失败返回负错误码
  */
-int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg) {
+int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -132,7 +138,8 @@ int irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg) {
  * @param irq 中断号
  * @return 成功返回0，失败返回负错误码
  */
-int irq_unregister_handler(uint32_t irq) {
+int irq_unregister_handler(uint32_t irq)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -158,7 +165,8 @@ int irq_unregister_handler(uint32_t irq) {
  * @brief 中断处理入口（汇编调用）
  * @details 由start.S的IRQ异常处理调用
  */
-void irq_handler(void) {
+void irq_handler(void)
+{
     /* 读取中断确认寄存器 */
     uint32_t iar = gic_read_iar();
     uint32_t irq = iar & 0x3FF;
@@ -197,7 +205,8 @@ void irq_handler(void) {
  * @brief 初始化中断子系统
  * @return 成功返回0，失败返回负错误码
  */
-int irq_init_subsystem(void) {
+int irq_init_subsystem(void)
+{
     /* 初始化GIC */
     int ret = gic_init();
     if (ret != 0) {

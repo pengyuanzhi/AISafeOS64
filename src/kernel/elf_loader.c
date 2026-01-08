@@ -22,10 +22,9 @@
 
 /* ELF magic number */
 static const uint8_t g_elf_magic[] = {
-    0x7F, 'E', 'L', 'F',
-    ELFCLASS64,     /* 64-bit */
-    ELFDATA2LSB,    /* Little-endian */
-    EV_CURRENT      /* Current version */
+    0x7F,        'E', 'L', 'F', ELFCLASS64, /* 64-bit */
+    ELFDATA2LSB,                            /* Little-endian */
+    EV_CURRENT                              /* Current version */
 };
 
 /* Module state */
@@ -34,7 +33,8 @@ static bool g_elf_loader_initialized = false;
 /**
  * @brief Initialize ELF loader
  */
-int elf_loader_init(void) {
+int elf_loader_init(void)
+{
     if (g_elf_loader_initialized) {
         return 0;
     }
@@ -48,7 +48,8 @@ int elf_loader_init(void) {
 /**
  * @brief Validate ELF magic number
  */
-bool elf_validate_magic(const uint8_t *data, uint32_t size) {
+bool elf_validate_magic(const uint8_t *data, uint32_t size)
+{
     /* Parameter validation */
     if (data == NULL) {
         return false;
@@ -70,8 +71,8 @@ bool elf_validate_magic(const uint8_t *data, uint32_t size) {
 /**
  * @brief Read and validate ELF64 header
  */
-int elf_read_header(const uint8_t *data, uint32_t size,
-                    const Elf64_Ehdr **ehdr) {
+int elf_read_header(const uint8_t *data, uint32_t size, const Elf64_Ehdr **ehdr)
+{
     const Elf64_Ehdr *header;
     uint64_t phdr_end;
     uint64_t shdr_end;
@@ -116,8 +117,7 @@ int elf_read_header(const uint8_t *data, uint32_t size,
     }
 
     if (header->e_phnum > 0U) {
-        phdr_end = header->e_phoff +
-                   ((uint64_t)header->e_phentsize * (uint64_t)header->e_phnum);
+        phdr_end = header->e_phoff + ((uint64_t)header->e_phentsize * (uint64_t)header->e_phnum);
 
         if (phdr_end > (uint64_t)size) {
             return -EINVAL;
@@ -130,8 +130,7 @@ int elf_read_header(const uint8_t *data, uint32_t size,
     }
 
     if (header->e_shnum > 0U) {
-        shdr_end = header->e_shoff +
-                   ((uint64_t)header->e_shentsize * (uint64_t)header->e_shnum);
+        shdr_end = header->e_shoff + ((uint64_t)header->e_shentsize * (uint64_t)header->e_shnum);
 
         if (shdr_end > (uint64_t)size) {
             return -EINVAL;
@@ -146,7 +145,8 @@ int elf_read_header(const uint8_t *data, uint32_t size,
 /**
  * @brief Load ELF from file
  */
-int elf_load_from_file(const char *path, ElfLoadContext_t *ctx) {
+int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
+{
     int fd;
     ssize_t ret;
     uint8_t *data;
@@ -212,7 +212,7 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx) {
     ctx->phdr_offset = ehdr->e_phoff;
     ctx->phdr_count = ehdr->e_phnum;
     ctx->shdr_count = ehdr->e_shnum;
-    ctx->is_pie = (ehdr->e_type == 3U);  /* ET_DYN */
+    ctx->is_pie = (ehdr->e_type == 3U); /* ET_DYN */
 
     return 0;
 }
@@ -220,10 +220,9 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx) {
 /**
  * @brief Load ELF segments into memory
  */
-int elf_load_segments(ElfLoadContext_t *ctx,
-                      ElfSegmentInfo_t *segments,
-                      uint32_t max_segments,
-                      uint32_t *segment_count) {
+int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_t max_segments,
+                      uint32_t *segment_count)
+{
     const Elf64_Ehdr *ehdr;
     const Elf64_Phdr *phdr;
     uint32_t i;
@@ -293,8 +292,7 @@ int elf_load_segments(ElfLoadContext_t *ctx,
                 }
 
                 /* Map pages */
-                mmu_map_user_range((uint64_t)vaddr, (uint64_t)vaddr,
-                                   memsz, mmu_flags);
+                mmu_map_user_range((uint64_t)vaddr, (uint64_t)vaddr, memsz, mmu_flags);
             }
 
             /* Record segment info */
@@ -315,10 +313,9 @@ int elf_load_segments(ElfLoadContext_t *ctx,
 /**
  * @brief Perform ELF relocations
  */
-int elf_relocate(ElfLoadContext_t *ctx,
-                 const ElfSegmentInfo_t *segments,
-                 uint32_t segment_count,
-                 uint64_t load_base) {
+int elf_relocate(ElfLoadContext_t *ctx, const ElfSegmentInfo_t *segments, uint32_t segment_count,
+                 uint64_t load_base)
+{
     const Elf64_Ehdr *ehdr;
     const Elf64_Shdr *shdr;
     uint32_t i;
@@ -402,7 +399,8 @@ int elf_relocate(ElfLoadContext_t *ctx,
 /**
  * @brief Calculate SHA-256 hash
  */
-int elf_calc_hash(const uint8_t *data, uint32_t size, uint8_t *hash) {
+int elf_calc_hash(const uint8_t *data, uint32_t size, uint8_t *hash)
+{
     /* Parameter validation */
     if (data == NULL) {
         return -EINVAL;
@@ -425,9 +423,9 @@ int elf_calc_hash(const uint8_t *data, uint32_t size, uint8_t *hash) {
 /**
  * @brief Verify ELF signature
  */
-int elf_verify_signature(const uint8_t *data, uint32_t size,
-                          const uint8_t *signature,
-                          const uint8_t *pubkey) {
+int elf_verify_signature(const uint8_t *data, uint32_t size, const uint8_t *signature,
+                         const uint8_t *pubkey)
+{
     uint8_t hash[32];
     int ret;
 
@@ -463,7 +461,8 @@ int elf_verify_signature(const uint8_t *data, uint32_t size,
 /**
  * @brief Get ELF entry point
  */
-uint64_t elf_get_entry_point(const ElfLoadContext_t *ctx) {
+uint64_t elf_get_entry_point(const ElfLoadContext_t *ctx)
+{
     if (ctx == NULL) {
         return 0UL;
     }
@@ -474,7 +473,8 @@ uint64_t elf_get_entry_point(const ElfLoadContext_t *ctx) {
 /**
  * @brief Free ELF context resources
  */
-void elf_free_context(ElfLoadContext_t *ctx) {
+void elf_free_context(ElfLoadContext_t *ctx)
+{
     if (ctx == NULL) {
         return;
     }

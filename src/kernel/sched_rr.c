@@ -21,7 +21,7 @@
  * RR Constants
  */
 
-#define RR_TIME_SLICE  10U  /**< Time slice in ticks (10ms) */
+#define RR_TIME_SLICE 10U /**< Time slice in ticks (10ms) */
 
 /*
  * RR-specific Data Structures
@@ -30,9 +30,10 @@
 /**
  * @brief RR run queue
  */
-typedef struct rr_rq {
-    struct list_head queue;       /**< Circular queue of tasks */
-    uint32_t nr_running;          /**< Number of running tasks */
+typedef struct rr_rq
+{
+    struct list_head queue; /**< Circular queue of tasks */
+    uint32_t nr_running;    /**< Number of running tasks */
 } rr_rq_t;
 
 /*
@@ -47,35 +48,32 @@ static void rr_sched_tick(struct rq *rq, TCB_t *task);
 static void rr_sched_update_curr(struct rq *rq);
 static void rr_sched_yield(struct rq *rq, TCB_t *task);
 static int rr_sched_can_preempt(const struct rq *rq, const TCB_t *task);
-static int rr_sched_switch_to(struct rq *rq, TCB_t *task,
-                               const struct SchedClass *new_class);
+static int rr_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class);
 static int rr_sched_get_stats(const struct rq *rq, void *stats);
 
 /*
  * RR Scheduling Class Definition
  */
 
-const SchedClass_t sched_class_rr = {
-    .name = "RR",
-    .priority = 40U,
-    .flags = SCHED_CLASS_FLAG_FAIR | SCHED_CLASS_FLAG_PREEMPT,
-    .id = SCHED_RR,
+const SchedClass_t sched_class_rr = {.name = "RR",
+                                     .priority = 40U,
+                                     .flags = SCHED_CLASS_FLAG_FAIR | SCHED_CLASS_FLAG_PREEMPT,
+                                     .id = SCHED_RR,
 
-    /* Core operations */
-    .init = rr_sched_init,
-    .enqueue = rr_sched_enqueue,
-    .dequeue = rr_sched_dequeue,
-    .pick_next = rr_sched_pick_next,
-    .task_tick = rr_sched_tick,
-    .update_curr = rr_sched_update_curr,
+                                     /* Core operations */
+                                     .init = rr_sched_init,
+                                     .enqueue = rr_sched_enqueue,
+                                     .dequeue = rr_sched_dequeue,
+                                     .pick_next = rr_sched_pick_next,
+                                     .task_tick = rr_sched_tick,
+                                     .update_curr = rr_sched_update_curr,
 
-    /* Optional operations */
-    .yield = rr_sched_yield,
-    .can_preempt = rr_sched_can_preempt,
-    .task_fork = NULL,
-    .switch_to = rr_sched_switch_to,
-    .get_stats = rr_sched_get_stats
-};
+                                     /* Optional operations */
+                                     .yield = rr_sched_yield,
+                                     .can_preempt = rr_sched_can_preempt,
+                                     .task_fork = NULL,
+                                     .switch_to = rr_sched_switch_to,
+                                     .get_stats = rr_sched_get_stats};
 
 /*
  * Helper Functions
@@ -86,7 +84,8 @@ const SchedClass_t sched_class_rr = {
  * @param rq Generic run queue
  * @return RR run queue pointer
  */
-static rr_rq_t *get_rr_rq(struct rq *rq) {
+static rr_rq_t *get_rr_rq(struct rq *rq)
+{
     if (rq == NULL) {
         return NULL;
     }
@@ -102,13 +101,14 @@ static rr_rq_t *get_rr_rq(struct rq *rq) {
  * @param rq Run queue pointer
  * @return 0 on success
  */
-static int rr_sched_init(struct rq *rq) {
+static int rr_sched_init(struct rq *rq)
+{
     rr_rq_t *rr_rq;
 
     /* Allocate RR run queue */
     rr_rq = (rr_rq_t *)malloc(sizeof(rr_rq_t));
     if (rr_rq == NULL) {
-        return -1;  /* ENOMEM */
+        return -1; /* ENOMEM */
     }
 
     /* Initialize circular queue */
@@ -128,7 +128,8 @@ static int rr_sched_init(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void rr_sched_enqueue(struct rq *rq, TCB_t *task) {
+static void rr_sched_enqueue(struct rq *rq, TCB_t *task)
+{
     rr_rq_t *rr_rq;
 
     /* Get RR run queue */
@@ -152,7 +153,8 @@ static void rr_sched_enqueue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void rr_sched_dequeue(struct rq *rq, TCB_t *task) {
+static void rr_sched_dequeue(struct rq *rq, TCB_t *task)
+{
     rr_rq_t *rr_rq;
 
     /* Get RR run queue */
@@ -175,7 +177,8 @@ static void rr_sched_dequeue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @return Task control block pointer, NULL if no task
  */
-static TCB_t *rr_sched_pick_next(struct rq *rq) {
+static TCB_t *rr_sched_pick_next(struct rq *rq)
+{
     rr_rq_t *rr_rq;
     TCB_t *task;
 
@@ -206,7 +209,8 @@ static TCB_t *rr_sched_pick_next(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Current task
  */
-static void rr_sched_tick(struct rq *rq, TCB_t *task) {
+static void rr_sched_tick(struct rq *rq, TCB_t *task)
+{
     rr_rq_t *rr_rq;
 
     /* Get RR run queue */
@@ -235,7 +239,8 @@ static void rr_sched_tick(struct rq *rq, TCB_t *task) {
  * @brief Update current task runtime
  * @param rq Run queue pointer
  */
-static void rr_sched_update_curr(struct rq *rq) {
+static void rr_sched_update_curr(struct rq *rq)
+{
     TCB_t *curr;
     uint64_t now;
     uint64_t delta;
@@ -264,7 +269,8 @@ static void rr_sched_update_curr(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task yielding
  */
-static void rr_sched_yield(struct rq *rq, TCB_t *task) {
+static void rr_sched_yield(struct rq *rq, TCB_t *task)
+{
     rr_rq_t *rr_rq;
 
     /* Get RR run queue */
@@ -286,7 +292,8 @@ static void rr_sched_yield(struct rq *rq, TCB_t *task) {
  * @param task Task to check
  * @return 1 if can preempt, 0 otherwise
  */
-static int rr_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
+static int rr_sched_can_preempt(const struct rq *rq, const TCB_t *task)
+{
     const rr_rq_t *rr_rq;
 
     /* Get RR run queue */
@@ -310,8 +317,8 @@ static int rr_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
  * @param new_class New scheduling class
  * @return 0 on success
  */
-static int rr_sched_switch_to(struct rq *rq, TCB_t *task,
-                               const struct SchedClass *new_class) {
+static int rr_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class)
+{
     /* Dequeue from RR */
     rr_sched_dequeue(rq, task);
 
@@ -334,7 +341,8 @@ static int rr_sched_switch_to(struct rq *rq, TCB_t *task,
  * @param stats Output: statistics
  * @return 0 on success
  */
-static int rr_sched_get_stats(const struct rq *rq, void *stats) {
+static int rr_sched_get_stats(const struct rq *rq, void *stats)
+{
     const rr_rq_t *rr_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 

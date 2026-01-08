@@ -24,8 +24,7 @@
  */
 void spinlock_init(spinlock_t *lock)
 {
-    if (lock == NULL)
-    {
+    if (lock == NULL) {
         return;
     }
 
@@ -46,8 +45,7 @@ void spinlock_init(spinlock_t *lock)
  */
 void spinlock_lock(spinlock_t *lock)
 {
-    if (lock == NULL)
-    {
+    if (lock == NULL) {
         return;
     }
 
@@ -60,8 +58,7 @@ void spinlock_lock(spinlock_t *lock)
     MEMORY_BARRIER();
 
     /* 忙等待直到轮到自己 */
-    while (lock->serving_ticket != ticket)
-    {
+    while (lock->serving_ticket != ticket) {
         /* 降低功耗的等待循环 */
         WFE();
     }
@@ -76,8 +73,7 @@ void spinlock_lock(spinlock_t *lock)
  */
 bool spinlock_trylock(spinlock_t *lock)
 {
-    if (lock == NULL)
-    {
+    if (lock == NULL) {
         return false;
     }
 
@@ -90,8 +86,7 @@ bool spinlock_trylock(spinlock_t *lock)
     MEMORY_BARRIER();
 
     /* 检查是否立即轮到自己 */
-    if (lock->serving_ticket == ticket)
-    {
+    if (lock->serving_ticket == ticket) {
         return true;
     }
 
@@ -108,8 +103,7 @@ bool spinlock_trylock(spinlock_t *lock)
  */
 void spinlock_unlock(spinlock_t *lock)
 {
-    if (lock == NULL)
-    {
+    if (lock == NULL) {
         return;
     }
 

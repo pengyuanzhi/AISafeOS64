@@ -24,9 +24,10 @@
 /**
  * @brief Idle run queue
  */
-typedef struct idle_rq {
-    struct list_head queue;       /**< Queue of idle tasks */
-    uint32_t nr_running;          /**< Number of idle tasks */
+typedef struct idle_rq
+{
+    struct list_head queue; /**< Queue of idle tasks */
+    uint32_t nr_running;    /**< Number of idle tasks */
 } idle_rq_t;
 
 /*
@@ -45,27 +46,25 @@ static int idle_sched_get_stats(const struct rq *rq, void *stats);
  * Idle Scheduling Class Definition
  */
 
-const SchedClass_t sched_class_idle = {
-    .name = "IDLE",
-    .priority = 255U,
-    .flags = SCHED_CLASS_FLAG_IDLE,
-    .id = SCHED_IDLE,
+const SchedClass_t sched_class_idle = {.name = "IDLE",
+                                       .priority = 255U,
+                                       .flags = SCHED_CLASS_FLAG_IDLE,
+                                       .id = SCHED_IDLE,
 
-    /* Core operations */
-    .init = idle_sched_init,
-    .enqueue = idle_sched_enqueue,
-    .dequeue = idle_sched_dequeue,
-    .pick_next = idle_sched_pick_next,
-    .task_tick = idle_sched_tick,
-    .update_curr = idle_sched_update_curr,
+                                       /* Core operations */
+                                       .init = idle_sched_init,
+                                       .enqueue = idle_sched_enqueue,
+                                       .dequeue = idle_sched_dequeue,
+                                       .pick_next = idle_sched_pick_next,
+                                       .task_tick = idle_sched_tick,
+                                       .update_curr = idle_sched_update_curr,
 
-    /* Optional operations */
-    .yield = NULL,
-    .can_preempt = NULL,
-    .task_fork = NULL,
-    .switch_to = NULL,
-    .get_stats = idle_sched_get_stats
-};
+                                       /* Optional operations */
+                                       .yield = NULL,
+                                       .can_preempt = NULL,
+                                       .task_fork = NULL,
+                                       .switch_to = NULL,
+                                       .get_stats = idle_sched_get_stats};
 
 /*
  * Helper Functions
@@ -76,7 +75,8 @@ const SchedClass_t sched_class_idle = {
  * @param rq Generic run queue
  * @return Idle run queue pointer
  */
-static idle_rq_t *get_idle_rq(struct rq *rq) {
+static idle_rq_t *get_idle_rq(struct rq *rq)
+{
     if (rq == NULL) {
         return NULL;
     }
@@ -92,13 +92,14 @@ static idle_rq_t *get_idle_rq(struct rq *rq) {
  * @param rq Run queue pointer
  * @return 0 on success
  */
-static int idle_sched_init(struct rq *rq) {
+static int idle_sched_init(struct rq *rq)
+{
     idle_rq_t *idle_rq;
 
     /* Allocate idle run queue */
     idle_rq = (idle_rq_t *)malloc(sizeof(idle_rq_t));
     if (idle_rq == NULL) {
-        return -1;  /* ENOMEM */
+        return -1; /* ENOMEM */
     }
 
     /* Initialize queue */
@@ -118,7 +119,8 @@ static int idle_sched_init(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void idle_sched_enqueue(struct rq *rq, TCB_t *task) {
+static void idle_sched_enqueue(struct rq *rq, TCB_t *task)
+{
     idle_rq_t *idle_rq;
 
     /* Get idle run queue */
@@ -139,7 +141,8 @@ static void idle_sched_enqueue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void idle_sched_dequeue(struct rq *rq, TCB_t *task) {
+static void idle_sched_dequeue(struct rq *rq, TCB_t *task)
+{
     idle_rq_t *idle_rq;
 
     /* Get idle run queue */
@@ -162,7 +165,8 @@ static void idle_sched_dequeue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @return Task control block pointer, NULL if no task
  */
-static TCB_t *idle_sched_pick_next(struct rq *rq) {
+static TCB_t *idle_sched_pick_next(struct rq *rq)
+{
     idle_rq_t *idle_rq;
     TCB_t *task;
 
@@ -195,7 +199,8 @@ static TCB_t *idle_sched_pick_next(struct rq *rq) {
  *
  * @note Idle tasks typically execute WFI instruction
  */
-static void idle_sched_tick(struct rq *rq, TCB_t *task) {
+static void idle_sched_tick(struct rq *rq, TCB_t *task)
+{
     /* Idle tasks don't need tick handling */
     /* They typically execute WFI (Wait For Interrupt) */
     (void)rq;
@@ -206,7 +211,8 @@ static void idle_sched_tick(struct rq *rq, TCB_t *task) {
  * @brief Update current task runtime
  * @param rq Run queue pointer
  */
-static void idle_sched_update_curr(struct rq *rq) {
+static void idle_sched_update_curr(struct rq *rq)
+{
     TCB_t *curr;
     uint64_t now;
     uint64_t delta;
@@ -236,7 +242,8 @@ static void idle_sched_update_curr(struct rq *rq) {
  * @param stats Output: statistics
  * @return 0 on success
  */
-static int idle_sched_get_stats(const struct rq *rq, void *stats) {
+static int idle_sched_get_stats(const struct rq *rq, void *stats)
+{
     const idle_rq_t *idle_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 

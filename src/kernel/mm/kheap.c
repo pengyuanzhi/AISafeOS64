@@ -21,21 +21,23 @@
 /**
  * @brief 堆块头
  */
-typedef struct HeapBlock {
-    uint64_t size;                  /**< 块大小（包含头部） */
-    bool used;                      /**< 是否使用 */
-    struct HeapBlock *next;         /**< 下一个块 */
+typedef struct HeapBlock
+{
+    uint64_t size;          /**< 块大小（包含头部） */
+    bool used;              /**< 是否使用 */
+    struct HeapBlock *next; /**< 下一个块 */
 } HeapBlock_t;
 
 /**
  * @brief 堆管理器
  */
-typedef struct {
-    void *start;                    /**< 堆起始地址 */
-    uint64_t size;                  /**< 堆大小 */
-    HeapBlock_t *first_block;        /**< 第一个块 */
-    uint64_t total_allocated;        /**< 总分配大小 */
-    uint64_t total_free;             /**< 总空闲大小 */
+typedef struct
+{
+    void *start;              /**< 堆起始地址 */
+    uint64_t size;            /**< 堆大小 */
+    HeapBlock_t *first_block; /**< 第一个块 */
+    uint64_t total_allocated; /**< 总分配大小 */
+    uint64_t total_free;      /**< 总空闲大小 */
 } HeapManager_t;
 
 /**
@@ -46,8 +48,8 @@ static HeapManager_t g_heap;
 /**
  * @brief 最小分配单元
  */
-#define HEAP_MIN_ALIGN  16U
-#define HEAP_MIN_SIZE    (sizeof(HeapBlock_t) + HEAP_MIN_ALIGN)
+#define HEAP_MIN_ALIGN 16U
+#define HEAP_MIN_SIZE (sizeof(HeapBlock_t) + HEAP_MIN_ALIGN)
 
 /**
  * @brief 内核堆初始化
@@ -59,7 +61,8 @@ static HeapManager_t g_heap;
  *          - 验证参数
  *          - 创建初始空闲块
  */
-int kheap_init(void *start, uint64_t size) {
+int kheap_init(void *start, uint64_t size)
+{
     /* 参数验证 */
     if (start == NULL) {
         return -ERROR_INVALID_PARAM;
@@ -101,7 +104,8 @@ int kheap_init(void *start, uint64_t size) {
  *          - 找到第一个合适的块
  *          - 如果需要，分割块
  */
-void *kmalloc(uint64_t size) {
+void *kmalloc(uint64_t size)
+{
     /* 参数验证 */
     if (size == 0UL) {
         return NULL;
@@ -171,7 +175,8 @@ void *kmalloc(uint64_t size) {
  *          - 标记为空闲
  *          - 合并相邻空闲块
  */
-void kfree(void *ptr) {
+void kfree(void *ptr)
+{
     /* 参数验证 */
     if (ptr == NULL) {
         return;

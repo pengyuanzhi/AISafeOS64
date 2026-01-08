@@ -22,8 +22,8 @@
  * CFS Constants
  */
 
-#define NICE_0_LOAD       1024U   /**< Load weight for nice 0 */
-#define CFS_GRANULARITY_NS 1000000ULL  /**< 1ms granularity */
+#define NICE_0_LOAD 1024U             /**< Load weight for nice 0 */
+#define CFS_GRANULARITY_NS 1000000ULL /**< 1ms granularity */
 
 /*
  * CFS-specific Data Structures
@@ -32,11 +32,12 @@
 /**
  * @brief CFS run queue
  */
-typedef struct cfs_rq {
-    struct rb_root tasks_timeline;    /**< Red-black tree sorted by vruntime */
-    uint64_t min_vruntime;            /**< Minimum vruntime in queue */
-    uint32_t nr_running;              /**< Number of running tasks */
-    uint64_t exec_clock;              /**< Execution clock */
+typedef struct cfs_rq
+{
+    struct rb_root tasks_timeline; /**< Red-black tree sorted by vruntime */
+    uint64_t min_vruntime;         /**< Minimum vruntime in queue */
+    uint32_t nr_running;           /**< Number of running tasks */
+    uint64_t exec_clock;           /**< Execution clock */
 } cfs_rq_t;
 
 /*
@@ -51,35 +52,32 @@ static void cfs_sched_tick(struct rq *rq, TCB_t *task);
 static void cfs_sched_update_curr(struct rq *rq);
 static void cfs_sched_yield(struct rq *rq, TCB_t *task);
 static int cfs_sched_can_preempt(const struct rq *rq, const TCB_t *task);
-static int cfs_sched_switch_to(struct rq *rq, TCB_t *task,
-                                const struct SchedClass *new_class);
+static int cfs_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class);
 static int cfs_sched_get_stats(const struct rq *rq, void *stats);
 
 /*
  * CFS Scheduling Class Definition
  */
 
-const SchedClass_t sched_class_cfs = {
-    .name = "CFS",
-    .priority = 30U,
-    .flags = SCHED_CLASS_FLAG_FAIR | SCHED_CLASS_FLAG_PREEMPT,
-    .id = SCHED_CFS,
+const SchedClass_t sched_class_cfs = {.name = "CFS",
+                                      .priority = 30U,
+                                      .flags = SCHED_CLASS_FLAG_FAIR | SCHED_CLASS_FLAG_PREEMPT,
+                                      .id = SCHED_CFS,
 
-    /* Core operations */
-    .init = cfs_sched_init,
-    .enqueue = cfs_sched_enqueue,
-    .dequeue = cfs_sched_dequeue,
-    .pick_next = cfs_sched_pick_next,
-    .task_tick = cfs_sched_tick,
-    .update_curr = cfs_sched_update_curr,
+                                      /* Core operations */
+                                      .init = cfs_sched_init,
+                                      .enqueue = cfs_sched_enqueue,
+                                      .dequeue = cfs_sched_dequeue,
+                                      .pick_next = cfs_sched_pick_next,
+                                      .task_tick = cfs_sched_tick,
+                                      .update_curr = cfs_sched_update_curr,
 
-    /* Optional operations */
-    .yield = cfs_sched_yield,
-    .can_preempt = cfs_sched_can_preempt,
-    .task_fork = NULL,
-    .switch_to = cfs_sched_switch_to,
-    .get_stats = cfs_sched_get_stats
-};
+                                      /* Optional operations */
+                                      .yield = cfs_sched_yield,
+                                      .can_preempt = cfs_sched_can_preempt,
+                                      .task_fork = NULL,
+                                      .switch_to = cfs_sched_switch_to,
+                                      .get_stats = cfs_sched_get_stats};
 
 /*
  * Helper Functions
@@ -90,7 +88,8 @@ const SchedClass_t sched_class_cfs = {
  * @param rq Generic run queue
  * @return CFS run queue pointer
  */
-static cfs_rq_t *get_cfs_rq(struct rq *rq) {
+static cfs_rq_t *get_cfs_rq(struct rq *rq)
+{
     if (rq == NULL) {
         return NULL;
     }
@@ -106,13 +105,14 @@ static cfs_rq_t *get_cfs_rq(struct rq *rq) {
  * @param rq Run queue pointer
  * @return 0 on success
  */
-static int cfs_sched_init(struct rq *rq) {
+static int cfs_sched_init(struct rq *rq)
+{
     cfs_rq_t *cfs_rq;
 
     /* Allocate CFS run queue */
     cfs_rq = (cfs_rq_t *)malloc(sizeof(cfs_rq_t));
     if (cfs_rq == NULL) {
-        return -1;  /* ENOMEM */
+        return -1; /* ENOMEM */
     }
 
     /* Initialize red-black tree */
@@ -134,7 +134,8 @@ static int cfs_sched_init(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void cfs_sched_enqueue(struct rq *rq, TCB_t *task) {
+static void cfs_sched_enqueue(struct rq *rq, TCB_t *task)
+{
     cfs_rq_t *cfs_rq;
     struct rb_node **link;
     struct rb_node *parent;
@@ -185,7 +186,8 @@ static void cfs_sched_enqueue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void cfs_sched_dequeue(struct rq *rq, TCB_t *task) {
+static void cfs_sched_dequeue(struct rq *rq, TCB_t *task)
+{
     cfs_rq_t *cfs_rq;
     struct rb_node *node;
 
@@ -216,7 +218,8 @@ static void cfs_sched_dequeue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @return Task control block pointer, NULL if no task
  */
-static TCB_t *cfs_sched_pick_next(struct rq *rq) {
+static TCB_t *cfs_sched_pick_next(struct rq *rq)
+{
     cfs_rq_t *cfs_rq;
     struct rb_node *leftmost;
     TCB_t *task;
@@ -249,7 +252,8 @@ static TCB_t *cfs_sched_pick_next(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Current task
  */
-static void cfs_sched_tick(struct rq *rq, TCB_t *task) {
+static void cfs_sched_tick(struct rq *rq, TCB_t *task)
+{
     /* CFS uses update_curr for runtime tracking */
     /* Just update current task here */
     (void)task;
@@ -260,7 +264,8 @@ static void cfs_sched_tick(struct rq *rq, TCB_t *task) {
  * @brief Update current task runtime
  * @param rq Run queue pointer
  */
-static void cfs_sched_update_curr(struct rq *rq) {
+static void cfs_sched_update_curr(struct rq *rq)
+{
     cfs_rq_t *cfs_rq;
     TCB_t *curr;
     uint64_t now;
@@ -323,7 +328,8 @@ static void cfs_sched_update_curr(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task yielding
  */
-static void cfs_sched_yield(struct rq *rq, TCB_t *task) {
+static void cfs_sched_yield(struct rq *rq, TCB_t *task)
+{
     /* Dequeue and re-enqueue */
     /* This moves task to right of tree */
     cfs_sched_dequeue(rq, task);
@@ -336,7 +342,8 @@ static void cfs_sched_yield(struct rq *rq, TCB_t *task) {
  * @param task Task to check
  * @return 1 if can preempt, 0 otherwise
  */
-static int cfs_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
+static int cfs_sched_can_preempt(const struct rq *rq, const TCB_t *task)
+{
     const cfs_rq_t *cfs_rq;
     struct rb_node *leftmost;
     TCB_t *first;
@@ -378,8 +385,8 @@ static int cfs_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
  * @param new_class New scheduling class
  * @return 0 on success
  */
-static int cfs_sched_switch_to(struct rq *rq, TCB_t *task,
-                                const struct SchedClass *new_class) {
+static int cfs_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class)
+{
     /* Dequeue from CFS */
     cfs_sched_dequeue(rq, task);
 
@@ -402,7 +409,8 @@ static int cfs_sched_switch_to(struct rq *rq, TCB_t *task,
  * @param stats Output: statistics
  * @return 0 on success
  */
-static int cfs_sched_get_stats(const struct rq *rq, void *stats) {
+static int cfs_sched_get_stats(const struct rq *rq, void *stats)
+{
     const cfs_rq_t *cfs_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 

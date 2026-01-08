@@ -23,16 +23,16 @@ extern "C" {
 /**
  * @brief 页大小定义
  */
-#define PAGE_SIZE       4096U           /**< 4KB页 */
-#define PAGE_SHIFT      12U             /**< 页偏移量 */
+#define PAGE_SIZE 4096U /**< 4KB页 */
+#define PAGE_SHIFT 12U  /**< 页偏移量 */
 #define PAGE_ALIGN(addr) (((addr) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
 
 /**
  * @brief 物理内存配置
  */
-#define PHYS_MEMORY_SIZE  (1024 * 1024 * 1024)  /**< 1GB物理内存 */
-#define PHYS_MEMORY_BASE  0x40000000UL          /**< 物理内存基址 */
-#define MAX_PAGES         (PHYS_MEMORY_SIZE / PAGE_SIZE)
+#define PHYS_MEMORY_SIZE (1024 * 1024 * 1024) /**< 1GB物理内存 */
+#define PHYS_MEMORY_BASE 0x40000000UL         /**< 物理内存基址 */
+#define MAX_PAGES (PHYS_MEMORY_SIZE / PAGE_SIZE)
 
 /**
  * @brief 页分配器初始化

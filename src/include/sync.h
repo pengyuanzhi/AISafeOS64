@@ -44,11 +44,11 @@ typedef struct
  */
 typedef struct
 {
-    volatile uint32_t locked;         /**< 锁状态 */
-    void *owner;                      /**< 持有者任务 */
-    uint32_t owner_priority;          /**< 持有者优先级 */
-    uint32_t ceiling_priority;        /**< 优先级天花板 */
-    uint32_t lock_count;              /**< 递归锁计数 */
+    volatile uint32_t locked;  /**< 锁状态 */
+    void *owner;               /**< 持有者任务 */
+    uint32_t owner_priority;   /**< 持有者优先级 */
+    uint32_t ceiling_priority; /**< 优先级天花板 */
+    uint32_t lock_count;       /**< 递归锁计数 */
 } mutex_t;
 
 /**
@@ -57,8 +57,8 @@ typedef struct
  */
 typedef struct
 {
-    volatile int32_t count;           /**< 计数 */
-    uint32_t max_count;               /**< 最大计数 */
+    volatile int32_t count; /**< 计数 */
+    uint32_t max_count;     /**< 最大计数 */
 } semaphore_t;
 
 /**
@@ -169,16 +169,14 @@ int32_t semaphore_getcount(semaphore_t *sem);
 /**
  * @brief 临界区保护宏（自旋锁）
  */
-#define CRITICAL_ENTER(lock) \
-    spinlock_lock(lock)
+#define CRITICAL_ENTER(lock) spinlock_lock(lock)
 
-#define CRITICAL_EXIT(lock) \
-    spinlock_unlock(lock)
+#define CRITICAL_EXIT(lock) spinlock_unlock(lock)
 
 /**
  * @brief RAII风格的自旋锁（需要编译器支持cleanup属性）
  */
-#define SCOPE_SPINLOCK(lock) \
+#define SCOPE_SPINLOCK(lock)                                                       \
     spinlock_t *__scope_lock __attribute__((cleanup(spinlock_cleanup))) = &(lock); \
     spinlock_lock(__scope_lock)
 
@@ -187,8 +185,7 @@ int32_t semaphore_getcount(semaphore_t *sem);
  */
 static inline void spinlock_cleanup(spinlock_t **lock)
 {
-    if (lock != NULL && *lock != NULL)
-    {
+    if (lock != NULL && *lock != NULL) {
         spinlock_unlock(*lock);
     }
 }
@@ -201,50 +198,48 @@ static inline void spinlock_cleanup(spinlock_t **lock)
 /**
  * @brief 保存中断状态并加锁
  */
-#define spin_lock_irqsave(lock, flags) \
-    do { \
+#define spin_lock_irqsave(lock, flags)  \
+    do {                                \
         flags = irq_save_and_disable(); \
-        spinlock_lock(&(lock)); \
+        spinlock_lock(&(lock));         \
     } while (0)
 
 /**
  * @brief 恢复中断状态并解锁
  */
 #define spin_unlock_irqrestore(lock, flags) \
-    do { \
-        spinlock_unlock(&(lock)); \
-        irq_restore(flags); \
+    do {                                    \
+        spinlock_unlock(&(lock));           \
+        irq_restore(flags);                 \
     } while (0)
 
 /**
  * @brief 禁用中断并加锁
  */
-#define spin_lock_irq(lock) \
-    do { \
-        irq_disable_global(); \
+#define spin_lock_irq(lock)     \
+    do {                        \
+        irq_disable_global();   \
         spinlock_lock(&(lock)); \
     } while (0)
 
 /**
  * @brief 解锁并使能中断
  */
-#define spin_unlock_irq(lock) \
-    do { \
+#define spin_unlock_irq(lock)     \
+    do {                          \
         spinlock_unlock(&(lock)); \
-        irq_enable_global(); \
+        irq_enable_global();      \
     } while (0)
 
 /**
  * @brief 禁用底部中断并加锁
  */
-#define spin_lock_bh(lock) \
-    spin_lock_irqsave((lock), flags)
+#define spin_lock_bh(lock) spin_lock_irqsave((lock), flags)
 
 /**
  * @brief 解锁并使能底部中断
  */
-#define spin_unlock_bh(lock) \
-    spin_unlock_irqrestore((lock), flags)
+#define spin_unlock_bh(lock) spin_unlock_irqrestore((lock), flags)
 
 #ifdef __cplusplus
 }

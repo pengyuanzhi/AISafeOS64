@@ -28,7 +28,8 @@ volatile uint64_t g_jiffies = 0UL;
  * @brief ARMv8-A Generic Timer频率读取
  * @return 定时器频率（Hz）
  */
-static uint64_t read_timer_freq(void) {
+static uint64_t read_timer_freq(void)
+{
     uint64_t freq;
     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
     return freq;
@@ -38,7 +39,8 @@ static uint64_t read_timer_freq(void) {
  * @brief ARMv8-A Generic Timer计数读取
  * @return 当前计数值
  */
-static uint64_t read_timer_count(void) {
+static uint64_t read_timer_count(void)
+{
     uint64_t count;
     __asm__ volatile("mrs %0, cntvct_el0" : "=r"(count));
     return count;
@@ -50,7 +52,8 @@ static uint64_t read_timer_count(void) {
  *
  * @details 使用ARMv8-A Generic Timer实现精确延迟
  */
-void udelay(uint64_t us) {
+void udelay(uint64_t us)
+{
     uint64_t freq = read_timer_freq();
     uint64_t start = read_timer_count();
     uint64_t ticks = (freq * us) / 1000000UL;
@@ -66,7 +69,8 @@ void udelay(uint64_t us) {
  *
  * @details 基于udelay实现
  */
-void mdelay(uint64_t ms) {
+void mdelay(uint64_t ms)
+{
     for (uint64_t i = 0UL; i < ms; i++) {
         udelay(1000UL);
     }
@@ -78,14 +82,14 @@ void mdelay(uint64_t ms) {
  *
  * @details 初始化系统滴答和定时器管理
  */
-int time_init(void) {
+int time_init(void)
+{
     g_jiffies = 0UL;
 
     /* 打印定时器信息 */
     uint64_t freq = read_timer_freq();
     printk("[INIT] ARMv8-A Generic Timer frequency: %lu Hz\n", freq);
-    printk("[INIT] System tick rate: %lu Hz (%lu ms per tick)\n",
-           CONFIG_HZ, 1000UL / CONFIG_HZ);
+    printk("[INIT] System tick rate: %lu Hz (%lu ms per tick)\n", CONFIG_HZ, 1000UL / CONFIG_HZ);
 
     /* TODO: 初始化硬件定时器以产生周期性中断 */
     printk("[WARNING] Hardware timer not initialized yet\n");

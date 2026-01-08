@@ -53,8 +53,7 @@ void test_init(void)
  */
 void test_run(const char *name, void (*test_func)(void))
 {
-    if (name == NULL || test_func == NULL)
-    {
+    if (name == NULL || test_func == NULL) {
         return;
     }
 
@@ -67,13 +66,10 @@ void test_run(const char *name, void (*test_func)(void))
     /* 运行测试函数 */
     test_func();
 
-    if (!g_test_failed)
-    {
+    if (!g_test_failed) {
         g_test_stats.passed_tests++;
         printk("  [PASS] %s\n", name);
-    }
-    else
-    {
+    } else {
         g_test_stats.failed_tests++;
         printk("  [FAIL] %s\n", name);
     }
@@ -115,12 +111,9 @@ void test_report(void)
     printk("Failed:       %u\n", g_test_stats.failed_tests);
     printk("Skipped:      %u\n", g_test_stats.skipped_tests);
 
-    if (g_test_stats.failed_tests == 0U)
-    {
+    if (g_test_stats.failed_tests == 0U) {
         printk("\n*** ALL TESTS PASSED ***\n");
-    }
-    else
-    {
+    } else {
         printk("\n*** SOME TESTS FAILED ***\n");
     }
 
@@ -130,9 +123,7 @@ void test_report(void)
 /**
  * @brief 打印失败信息
  */
-static void test_fail(const char *msg,
-                      const char *file,
-                      uint32_t line)
+static void test_fail(const char *msg, const char *file, uint32_t line)
 {
     g_test_failed = true;
     printk("        FAILED at %s:%u\n", file, line);
@@ -142,16 +133,13 @@ static void test_fail(const char *msg,
 /**
  * @brief 相等断言实现
  */
-void test_assert_eq(uint64_t actual, uint64_t expected,
-                    const char *actual_str, const char *expected_str,
-                    const char *file, uint32_t line)
+void test_assert_eq(uint64_t actual, uint64_t expected, const char *actual_str,
+                    const char *expected_str, const char *file, uint32_t line)
 {
-    if (actual != expected)
-    {
+    if (actual != expected) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected: %s = 0x%lx, but got: %s = 0x%lx",
-                       expected_str, expected, actual_str, actual);
+        (void)snprintf(msg, sizeof(msg), "Expected: %s = 0x%lx, but got: %s = 0x%lx", expected_str,
+                       expected, actual_str, actual);
         test_fail(msg, file, line);
     }
 }
@@ -159,16 +147,13 @@ void test_assert_eq(uint64_t actual, uint64_t expected,
 /**
  * @brief 指针相等断言实现
  */
-void test_assert_eq_ptr(const void *actual, const void *expected,
-                        const char *actual_str, const char *expected_str,
-                        const char *file, uint32_t line)
+void test_assert_eq_ptr(const void *actual, const void *expected, const char *actual_str,
+                        const char *expected_str, const char *file, uint32_t line)
 {
-    if (actual != expected)
-    {
+    if (actual != expected) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected: %s = %p, but got: %s = %p",
-                       expected_str, expected, actual_str, actual);
+        (void)snprintf(msg, sizeof(msg), "Expected: %s = %p, but got: %s = %p", expected_str,
+                       expected, actual_str, actual);
         test_fail(msg, file, line);
     }
 }
@@ -176,16 +161,13 @@ void test_assert_eq_ptr(const void *actual, const void *expected,
 /**
  * @brief 不等断言实现
  */
-void test_assert_ne(uint64_t actual, uint64_t unexpected,
-                    const char *actual_str, const char *unexpected_str,
-                    const char *file, uint32_t line)
+void test_assert_ne(uint64_t actual, uint64_t unexpected, const char *actual_str,
+                    const char *unexpected_str, const char *file, uint32_t line)
 {
-    if (actual == unexpected)
-    {
+    if (actual == unexpected) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected: %s != 0x%lx, but got: %s = 0x%lx",
-                       actual_str, unexpected, actual_str, actual);
+        (void)snprintf(msg, sizeof(msg), "Expected: %s != 0x%lx, but got: %s = 0x%lx", actual_str,
+                       unexpected, actual_str, actual);
         test_fail(msg, file, line);
     }
 }
@@ -193,16 +175,13 @@ void test_assert_ne(uint64_t actual, uint64_t unexpected,
 /**
  * @brief 大于断言实现
  */
-void test_assert_gt(uint64_t actual, uint64_t min,
-                    const char *actual_str, const char *min_str,
+void test_assert_gt(uint64_t actual, uint64_t min, const char *actual_str, const char *min_str,
                     const char *file, uint32_t line)
 {
-    if (actual <= min)
-    {
+    if (actual <= min) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected: %s > 0x%lx, but got: %s = 0x%lx",
-                       actual_str, min, actual_str, actual);
+        (void)snprintf(msg, sizeof(msg), "Expected: %s > 0x%lx, but got: %s = 0x%lx", actual_str,
+                       min, actual_str, actual);
         test_fail(msg, file, line);
     }
 }
@@ -210,16 +189,13 @@ void test_assert_gt(uint64_t actual, uint64_t min,
 /**
  * @brief 小于断言实现
  */
-void test_assert_lt(uint64_t actual, uint64_t max,
-                    const char *actual_str, const char *max_str,
+void test_assert_lt(uint64_t actual, uint64_t max, const char *actual_str, const char *max_str,
                     const char *file, uint32_t line)
 {
-    if (actual >= max)
-    {
+    if (actual >= max) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected: %s < 0x%lx, but got: %s = 0x%lx",
-                       actual_str, max, actual_str, actual);
+        (void)snprintf(msg, sizeof(msg), "Expected: %s < 0x%lx, but got: %s = 0x%lx", actual_str,
+                       max, actual_str, actual);
         test_fail(msg, file, line);
     }
 }
@@ -227,15 +203,11 @@ void test_assert_lt(uint64_t actual, uint64_t max,
 /**
  * @brief 真值断言实现
  */
-void test_assert_true(bool condition,
-                      const char *condition_str,
-                      const char *file, uint32_t line)
+void test_assert_true(bool condition, const char *condition_str, const char *file, uint32_t line)
 {
-    if (!condition)
-    {
+    if (!condition) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected true: %s", condition_str);
+        (void)snprintf(msg, sizeof(msg), "Expected true: %s", condition_str);
         test_fail(msg, file, line);
     }
 }
@@ -243,15 +215,11 @@ void test_assert_true(bool condition,
 /**
  * @brief 假值断言实现
  */
-void test_assert_false(bool condition,
-                       const char *condition_str,
-                       const char *file, uint32_t line)
+void test_assert_false(bool condition, const char *condition_str, const char *file, uint32_t line)
 {
-    if (condition)
-    {
+    if (condition) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected false: %s", condition_str);
+        (void)snprintf(msg, sizeof(msg), "Expected false: %s", condition_str);
         test_fail(msg, file, line);
     }
 }
@@ -259,15 +227,11 @@ void test_assert_false(bool condition,
 /**
  * @brief NULL指针断言实现
  */
-void test_assert_null(const void *ptr,
-                      const char *ptr_str,
-                      const char *file, uint32_t line)
+void test_assert_null(const void *ptr, const char *ptr_str, const char *file, uint32_t line)
 {
-    if (ptr != NULL)
-    {
+    if (ptr != NULL) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected NULL: %s = %p", ptr_str, ptr);
+        (void)snprintf(msg, sizeof(msg), "Expected NULL: %s = %p", ptr_str, ptr);
         test_fail(msg, file, line);
     }
 }
@@ -275,15 +239,11 @@ void test_assert_null(const void *ptr,
 /**
  * @brief 非NULL指针断言实现
  */
-void test_assert_not_null(const void *ptr,
-                          const char *ptr_str,
-                          const char *file, uint32_t line)
+void test_assert_not_null(const void *ptr, const char *ptr_str, const char *file, uint32_t line)
 {
-    if (ptr == NULL)
-    {
+    if (ptr == NULL) {
         char msg[256];
-        (void)snprintf(msg, sizeof(msg),
-                       "Expected non-NULL: %s", ptr_str);
+        (void)snprintf(msg, sizeof(msg), "Expected non-NULL: %s", ptr_str);
         test_fail(msg, file, line);
     }
 }

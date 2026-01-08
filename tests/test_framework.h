@@ -28,10 +28,10 @@ extern "C" {
  */
 typedef struct
 {
-    uint32_t total_tests;       /**< 总测试数 */
-    uint32_t passed_tests;      /**< 通过测试数 */
-    uint32_t failed_tests;      /**< 失败测试数 */
-    uint32_t skipped_tests;     /**< 跳过测试数 */
+    uint32_t total_tests;   /**< 总测试数 */
+    uint32_t passed_tests;  /**< 通过测试数 */
+    uint32_t failed_tests;  /**< 失败测试数 */
+    uint32_t skipped_tests; /**< 跳过测试数 */
 } test_stats_t;
 
 /**
@@ -45,39 +45,33 @@ extern test_stats_t g_test_stats;
 
 /* 相等断言 */
 #define TEST_ASSERT_EQ(actual, expected) \
-    test_assert_eq((uint64_t)(actual), (uint64_t)(expected), \
-                   #actual, #expected, __FILE__, __LINE__)
+    test_assert_eq((uint64_t)(actual), (uint64_t)(expected), #actual, #expected, __FILE__, __LINE__)
 
-#define TEST_ASSERT_EQ_PTR(actual, expected) \
-    test_assert_eq_ptr((const void *)(actual), (const void *)(expected), \
-                       #actual, #expected, __FILE__, __LINE__)
+#define TEST_ASSERT_EQ_PTR(actual, expected)                                                 \
+    test_assert_eq_ptr((const void *)(actual), (const void *)(expected), #actual, #expected, \
+                       __FILE__, __LINE__)
 
 /* 不等断言 */
-#define TEST_ASSERT_NE(actual, unexpected) \
-    test_assert_ne((uint64_t)(actual), (uint64_t)(unexpected), \
-                   #actual, #unexpected, __FILE__, __LINE__)
+#define TEST_ASSERT_NE(actual, unexpected)                                                     \
+    test_assert_ne((uint64_t)(actual), (uint64_t)(unexpected), #actual, #unexpected, __FILE__, \
+                   __LINE__)
 
 /* 大于断言 */
 #define TEST_ASSERT_GT(actual, min) \
-    test_assert_gt((uint64_t)(actual), (uint64_t)(min), \
-                   #actual, #min, __FILE__, __LINE__)
+    test_assert_gt((uint64_t)(actual), (uint64_t)(min), #actual, #min, __FILE__, __LINE__)
 
 /* 小于断言 */
 #define TEST_ASSERT_LT(actual, max) \
-    test_assert_lt((uint64_t)(actual), (uint64_t)(max), \
-                   #actual, #max, __FILE__, __LINE__)
+    test_assert_lt((uint64_t)(actual), (uint64_t)(max), #actual, #max, __FILE__, __LINE__)
 
 /* 真值断言 */
-#define TEST_ASSERT_TRUE(condition) \
-    test_assert_true((condition), #condition, __FILE__, __LINE__)
+#define TEST_ASSERT_TRUE(condition) test_assert_true((condition), #condition, __FILE__, __LINE__)
 
 /* 假值断言 */
-#define TEST_ASSERT_FALSE(condition) \
-    test_assert_false((condition), #condition, __FILE__, __LINE__)
+#define TEST_ASSERT_FALSE(condition) test_assert_false((condition), #condition, __FILE__, __LINE__)
 
 /* NULL指针断言 */
-#define TEST_ASSERT_NULL(ptr) \
-    test_assert_null((const void *)(ptr), #ptr, __FILE__, __LINE__)
+#define TEST_ASSERT_NULL(ptr) test_assert_null((const void *)(ptr), #ptr, __FILE__, __LINE__)
 
 /* 非NULL指针断言 */
 #define TEST_ASSERT_NOT_NULL(ptr) \
@@ -88,23 +82,23 @@ extern test_stats_t g_test_stats;
  */
 
 /* 测试用例定义 */
-#define TEST_CASE(name) \
-    void test_##name(void)
+#define TEST_CASE(name) void test_##name(void)
 
 /* 测试运行器 */
-#define TEST_RUN(name) \
-    do { \
+#define TEST_RUN(name)                \
+    do {                              \
         test_run(#name, test_##name); \
     } while (0)
 
 /* 测试套件开始 */
-#define TEST_SUITE_START(suite_name) \
-    void test_suite_##suite_name(void) { \
+#define TEST_SUITE_START(suite_name)   \
+    void test_suite_##suite_name(void) \
+    {                                  \
         test_suite_start(suite_name);
 
 /* 测试套件结束 */
 #define TEST_SUITE_END() \
-        test_suite_end(); \
+    test_suite_end();    \
     }
 
 /**
@@ -142,65 +136,52 @@ void test_report(void);
 /**
  * @brief 相等断言实现
  */
-void test_assert_eq(uint64_t actual, uint64_t expected,
-                    const char *actual_str, const char *expected_str,
-                    const char *file, uint32_t line);
+void test_assert_eq(uint64_t actual, uint64_t expected, const char *actual_str,
+                    const char *expected_str, const char *file, uint32_t line);
 
 /**
  * @brief 指针相等断言实现
  */
-void test_assert_eq_ptr(const void *actual, const void *expected,
-                        const char *actual_str, const char *expected_str,
-                        const char *file, uint32_t line);
+void test_assert_eq_ptr(const void *actual, const void *expected, const char *actual_str,
+                        const char *expected_str, const char *file, uint32_t line);
 
 /**
  * @brief 不等断言实现
  */
-void test_assert_ne(uint64_t actual, uint64_t unexpected,
-                    const char *actual_str, const char *unexpected_str,
-                    const char *file, uint32_t line);
+void test_assert_ne(uint64_t actual, uint64_t unexpected, const char *actual_str,
+                    const char *unexpected_str, const char *file, uint32_t line);
 
 /**
  * @brief 大于断言实现
  */
-void test_assert_gt(uint64_t actual, uint64_t min,
-                    const char *actual_str, const char *min_str,
+void test_assert_gt(uint64_t actual, uint64_t min, const char *actual_str, const char *min_str,
                     const char *file, uint32_t line);
 
 /**
  * @brief 小于断言实现
  */
-void test_assert_lt(uint64_t actual, uint64_t max,
-                    const char *actual_str, const char *max_str,
+void test_assert_lt(uint64_t actual, uint64_t max, const char *actual_str, const char *max_str,
                     const char *file, uint32_t line);
 
 /**
  * @brief 真值断言实现
  */
-void test_assert_true(bool condition,
-                      const char *condition_str,
-                      const char *file, uint32_t line);
+void test_assert_true(bool condition, const char *condition_str, const char *file, uint32_t line);
 
 /**
  * @brief 假值断言实现
  */
-void test_assert_false(bool condition,
-                       const char *condition_str,
-                       const char *file, uint32_t line);
+void test_assert_false(bool condition, const char *condition_str, const char *file, uint32_t line);
 
 /**
  * @brief NULL指针断言实现
  */
-void test_assert_null(const void *ptr,
-                      const char *ptr_str,
-                      const char *file, uint32_t line);
+void test_assert_null(const void *ptr, const char *ptr_str, const char *file, uint32_t line);
 
 /**
  * @brief 非NULL指针断言实现
  */
-void test_assert_not_null(const void *ptr,
-                          const char *ptr_str,
-                          const char *file, uint32_t line);
+void test_assert_not_null(const void *ptr, const char *ptr_str, const char *file, uint32_t line);
 
 #ifdef __cplusplus
 }

@@ -33,7 +33,8 @@ static swtimer_t *g_timer_list = NULL;
  *
  * @details 初始化软件定时器结构
  */
-void swtimer_init(swtimer_t *timer, void (*callback)(void *arg), void *arg) {
+void swtimer_init(swtimer_t *timer, void (*callback)(void *arg), void *arg)
+{
     if (timer == NULL) {
         return;
     }
@@ -52,7 +53,8 @@ void swtimer_init(swtimer_t *timer, void (*callback)(void *arg), void *arg) {
  * @param timer 定时器指针
  * @return 成功返回0，失败返回负错误码
  */
-static int timer_remove(swtimer_t *timer) {
+static int timer_remove(swtimer_t *timer)
+{
     if (timer == NULL) {
         return -ERROR_INVALID_PARAM;
     }
@@ -91,7 +93,8 @@ static int timer_remove(swtimer_t *timer) {
  * @brief 将定时器插入链表（按过期时间排序）
  * @param timer 定时器指针
  */
-static void timer_insert(swtimer_t *timer) {
+static void timer_insert(swtimer_t *timer)
+{
     if (timer == NULL) {
         return;
     }
@@ -105,8 +108,7 @@ static void timer_insert(swtimer_t *timer) {
 
     /* 查找插入位置 */
     swtimer_t *current = g_timer_list;
-    while ((current->next != NULL) &&
-           (current->next->expire_ticks <= timer->expire_ticks)) {
+    while ((current->next != NULL) && (current->next->expire_ticks <= timer->expire_ticks)) {
         current = current->next;
     }
 
@@ -122,7 +124,8 @@ static void timer_insert(swtimer_t *timer) {
  * @param period_ms 周期时间（毫秒），0表示一次性定时器
  * @return 成功返回0，失败返回负错误码
  */
-static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms) {
+static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms)
+{
     if (timer == NULL) {
         return -ERROR_INVALID_PARAM;
     }
@@ -154,7 +157,8 @@ static int swtimer_start_internal(swtimer_t *timer, uint64_t delay_ms, uint64_t 
  * @param delay_ms 延迟时间（毫秒）
  * @return 成功返回0，失败返回负错误码
  */
-int swtimer_start(swtimer_t *timer, uint64_t delay_ms) {
+int swtimer_start(swtimer_t *timer, uint64_t delay_ms)
+{
     return swtimer_start_internal(timer, delay_ms, 0UL);
 }
 
@@ -165,7 +169,8 @@ int swtimer_start(swtimer_t *timer, uint64_t delay_ms) {
  * @param period_ms 周期时间（毫秒）
  * @return 成功返回0，失败返回负错误码
  */
-int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms) {
+int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_ms)
+{
     if (period_ms == 0UL) {
         return -ERROR_INVALID_PARAM;
     }
@@ -178,7 +183,8 @@ int swtimer_start_periodic(swtimer_t *timer, uint64_t delay_ms, uint64_t period_
  * @param timer 定时器指针
  * @return 成功返回0，失败返回负错误码
  */
-int swtimer_stop(swtimer_t *timer) {
+int swtimer_stop(swtimer_t *timer)
+{
     if (timer == NULL) {
         return -ERROR_INVALID_PARAM;
     }
@@ -201,7 +207,8 @@ int swtimer_stop(swtimer_t *timer) {
  * @param timer 定时器指针
  * @return 成功返回0，失败返回负错误码
  */
-int swtimer_delete(swtimer_t *timer) {
+int swtimer_delete(swtimer_t *timer)
+{
     if (timer == NULL) {
         return -ERROR_INVALID_PARAM;
     }
@@ -228,7 +235,8 @@ int swtimer_delete(swtimer_t *timer) {
  * @param timer 定时器指针
  * @return 激活返回true
  */
-bool swtimer_is_active(swtimer_t *timer) {
+bool swtimer_is_active(swtimer_t *timer)
+{
     if (timer == NULL) {
         return false;
     }
@@ -240,7 +248,8 @@ bool swtimer_is_active(swtimer_t *timer) {
  * @brief 软件定时器滴答处理函数
  * @details 由timer_tick()调用，处理过期的定时器
  */
-void swtimer_tick_handler(void) {
+void swtimer_tick_handler(void)
+{
     swtimer_t *current = g_timer_list;
 
     while (current != NULL) {
@@ -292,8 +301,7 @@ void swtimer_tick_handler(void) {
  */
 int msleep(uint64_t ms)
 {
-    if (ms == 0UL)
-    {
+    if (ms == 0UL) {
         return ERROR_SUCCESS;
     }
 
@@ -306,6 +314,7 @@ int msleep(uint64_t ms)
  * @param sec 睡眠时间（秒）
  * @return 成功返回0，失败返回负错误码
  */
-int ssleep(uint64_t sec) {
+int ssleep(uint64_t sec)
+{
     return msleep(sec * 1000UL);
 }

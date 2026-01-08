@@ -18,7 +18,8 @@
 /**
  * @brief 红黑树左旋转
  */
-static void rb_rotate_left(struct rb_node *node, struct rb_root *root) {
+static void rb_rotate_left(struct rb_node *node, struct rb_root *root)
+{
     struct rb_node *right = node->rb_right;
     struct rb_node *parent = rb_parent(node);
 
@@ -49,7 +50,8 @@ static void rb_rotate_left(struct rb_node *node, struct rb_root *root) {
 /**
  * @brief 红黑树右旋转
  */
-static void rb_rotate_right(struct rb_node *node, struct rb_root *root) {
+static void rb_rotate_right(struct rb_node *node, struct rb_root *root)
+{
     struct rb_node *left = node->rb_left;
     struct rb_node *parent = rb_parent(node);
 
@@ -80,12 +82,11 @@ static void rb_rotate_right(struct rb_node *node, struct rb_root *root) {
 /**
  * @brief 红黑树插入修复
  */
-static void rb_insert_fixup(struct rb_node *node, struct rb_root *root) {
+static void rb_insert_fixup(struct rb_node *node, struct rb_root *root)
+{
     struct rb_node *parent, *gparent;
 
-    while ((parent = rb_parent(node)) != NULL &&
-           rb_is_red(parent)) {
-
+    while ((parent = rb_parent(node)) != NULL && rb_is_red(parent)) {
         gparent = rb_parent(parent);
 
         if (parent == gparent->rb_left) {
@@ -137,9 +138,9 @@ static void rb_insert_fixup(struct rb_node *node, struct rb_root *root) {
 /**
  * @brief 红黑树查找
  */
-struct rb_node *rb_find(const struct rb_root *root,
-                        const struct rb_node *node,
-                        rb_compare_func compare) {
+struct rb_node *rb_find(const struct rb_root *root, const struct rb_node *node,
+                        rb_compare_func compare)
+{
     struct rb_node *current = root->rb_node;
 
     while (current != NULL) {
@@ -160,9 +161,8 @@ struct rb_node *rb_find(const struct rb_root *root,
 /**
  * @brief 红黑树插入
  */
-void rb_insert(struct rb_root *root,
-               struct rb_node *node,
-               rb_compare_func compare) {
+void rb_insert(struct rb_root *root, struct rb_node *node, rb_compare_func compare)
+{
     struct rb_node *parent = NULL;
     struct rb_node **link = &root->rb_node;
 
@@ -195,8 +195,8 @@ void rb_insert(struct rb_root *root,
 /**
  * @brief 红黑树删除修复
  */
-static void rb_erase_fixup(struct rb_node *node, struct rb_node *parent,
-                            struct rb_root *root) {
+static void rb_erase_fixup(struct rb_node *node, struct rb_node *parent, struct rb_root *root)
+{
     struct rb_node *other;
 
     while ((node == NULL || rb_is_black(node)) && node != root->rb_node) {
@@ -265,7 +265,8 @@ static void rb_erase_fixup(struct rb_node *node, struct rb_node *parent,
 /**
  * @brief 红黑树删除
  */
-void rb_erase(struct rb_root *root, struct rb_node *node) {
+void rb_erase(struct rb_root *root, struct rb_node *node)
+{
     struct rb_node *child, *parent;
     int color;
 
@@ -344,7 +345,8 @@ color:
 /**
  * @brief 获取第一个节点（最左节点）
  */
-struct rb_node *rb_first(const struct rb_root *root) {
+struct rb_node *rb_first(const struct rb_root *root)
+{
     struct rb_node *node = root->rb_node;
 
     if (node == NULL) {
@@ -361,7 +363,8 @@ struct rb_node *rb_first(const struct rb_root *root) {
 /**
  * @brief 获取最后一个节点（最右节点）
  */
-struct rb_node *rb_last(const struct rb_root *root) {
+struct rb_node *rb_last(const struct rb_root *root)
+{
     struct rb_node *node = root->rb_node;
 
     if (node == NULL) {
@@ -378,7 +381,8 @@ struct rb_node *rb_last(const struct rb_root *root) {
 /**
  * @brief 获取下一个节点
  */
-struct rb_node *rb_next(const struct rb_node *node) {
+struct rb_node *rb_next(const struct rb_node *node)
+{
     struct rb_node *parent;
 
     if (node->rb_right != NULL) {
@@ -389,8 +393,7 @@ struct rb_node *rb_next(const struct rb_node *node) {
         return (struct rb_node *)node;
     }
 
-    while ((parent = rb_parent(node)) != NULL &&
-           node == parent->rb_right) {
+    while ((parent = rb_parent(node)) != NULL && node == parent->rb_right) {
         node = parent;
     }
 
@@ -400,7 +403,8 @@ struct rb_node *rb_next(const struct rb_node *node) {
 /**
  * @brief 获取前一个节点
  */
-struct rb_node *rb_prev(const struct rb_node *node) {
+struct rb_node *rb_prev(const struct rb_node *node)
+{
     struct rb_node *parent;
 
     if (node->rb_left != NULL) {
@@ -411,8 +415,7 @@ struct rb_node *rb_prev(const struct rb_node *node) {
         return (struct rb_node *)node;
     }
 
-    while ((parent = rb_parent(node)) != NULL &&
-           node == parent->rb_left) {
+    while ((parent = rb_parent(node)) != NULL && node == parent->rb_left) {
         node = parent;
     }
 
@@ -422,9 +425,8 @@ struct rb_node *rb_prev(const struct rb_node *node) {
 /**
  * @brief 替换节点
  */
-void rb_replace_node(struct rb_node *victim,
-                     struct rb_node *new_node,
-                     struct rb_root *root) {
+void rb_replace_node(struct rb_node *victim, struct rb_node *new_node, struct rb_root *root)
+{
     struct rb_node *parent = rb_parent(victim);
 
     if (parent != NULL) {
@@ -451,8 +453,8 @@ void rb_replace_node(struct rb_node *victim,
 /**
  * @brief 后序遍历释放红黑树
  */
-void rb_free_subtree(struct rb_node *node,
-                     void (*free_func)(struct rb_node *node)) {
+void rb_free_subtree(struct rb_node *node, void (*free_func)(struct rb_node *node))
+{
     if (node == NULL) {
         return;
     }

@@ -30,7 +30,7 @@ TEST_CASE(atomic_add_u32_basic)
     uint32_t result = atomic_add_u32(&value, 5U);
 
     TEST_ASSERT_EQ(value, 15U);
-    TEST_ASSERT_EQ(result, 10U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 10U); /* 返回旧值 */
 }
 
 /**
@@ -43,7 +43,7 @@ TEST_CASE(atomic_sub_u32_basic)
     uint32_t result = atomic_sub_u32(&value, 7U);
 
     TEST_ASSERT_EQ(value, 13U);
-    TEST_ASSERT_EQ(result, 20U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 20U); /* 返回旧值 */
 }
 
 /**
@@ -56,7 +56,7 @@ TEST_CASE(atomic_inc_u32_basic)
     uint32_t result = atomic_inc_u32(&value);
 
     TEST_ASSERT_EQ(value, 100U);
-    TEST_ASSERT_EQ(result, 99U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 99U); /* 返回旧值 */
 }
 
 /**
@@ -69,7 +69,7 @@ TEST_CASE(atomic_dec_u32_basic)
     uint32_t result = atomic_dec_u32(&value);
 
     TEST_ASSERT_EQ(value, 49U);
-    TEST_ASSERT_EQ(result, 50U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 50U); /* 返回旧值 */
 }
 
 /**
@@ -82,7 +82,7 @@ TEST_CASE(atomic_xchg_u32_basic)
     uint32_t result = atomic_xchg_u32(&value, 200U);
 
     TEST_ASSERT_EQ(value, 200U);
-    TEST_ASSERT_EQ(result, 100U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 100U); /* 返回旧值 */
 }
 
 /**
@@ -108,7 +108,7 @@ TEST_CASE(atomic_cas_u32_fail)
     bool result = atomic_cas_u32(&value, 60U, 100U);
 
     TEST_ASSERT_FALSE(result);
-    TEST_ASSERT_EQ(value, 50U);  /* 值不变 */
+    TEST_ASSERT_EQ(value, 50U); /* 值不变 */
 }
 
 /**
@@ -130,8 +130,8 @@ TEST_CASE(atomic_compare_exchange_strong_u32)
     result = atomic_compare_exchange_strong(&value, &expected, 200U);
 
     TEST_ASSERT_FALSE(result);
-    TEST_ASSERT_EQ(value, 100U);  /* 值不变 */
-    TEST_ASSERT_EQ(expected, 100U);  /* expected被更新 */
+    TEST_ASSERT_EQ(value, 100U);    /* 值不变 */
+    TEST_ASSERT_EQ(expected, 100U); /* expected被更新 */
 }
 
 /**
@@ -143,7 +143,7 @@ TEST_CASE(atomic_add_u64_basic)
 
     uint64_t result = atomic_add_u64(&value, 500UL);
 
-    TEST_ASSERT_EQ(result, 1000UL);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 1000UL); /* 返回旧值 */
     TEST_ASSERT_EQ(value, 1500UL);
 }
 
@@ -156,7 +156,7 @@ TEST_CASE(atomic_inc_u64_basic)
 
     uint64_t result = atomic_inc_u64(&value);
 
-    TEST_ASSERT_EQ(result, 0xFFFFFFFFUL);  /* 返回旧值 */
+    TEST_ASSERT_EQ(result, 0xFFFFFFFFUL); /* 返回旧值 */
     TEST_ASSERT_EQ(value, 0x100000000UL);
 }
 
@@ -182,7 +182,7 @@ TEST_CASE(atomic_inc_fetch_u32_basic)
 
     uint32_t result = atomic_inc_fetch_u32(&value);
 
-    TEST_ASSERT_EQ(result, 100U);  /* 返回新值 */
+    TEST_ASSERT_EQ(result, 100U); /* 返回新值 */
     TEST_ASSERT_EQ(value, 100U);
 }
 
@@ -195,7 +195,7 @@ TEST_CASE(atomic_dec_fetch_u32_basic)
 
     uint32_t result = atomic_dec_fetch_u32(&value);
 
-    TEST_ASSERT_EQ(result, 49U);  /* 返回新值 */
+    TEST_ASSERT_EQ(result, 49U); /* 返回新值 */
     TEST_ASSERT_EQ(value, 49U);
 }
 
@@ -208,7 +208,7 @@ TEST_CASE(atomic_add_fetch_u32_basic)
 
     uint32_t result = atomic_add_fetch_u32(&value, 5U);
 
-    TEST_ASSERT_EQ(result, 15U);  /* 返回新值 */
+    TEST_ASSERT_EQ(result, 15U); /* 返回新值 */
     TEST_ASSERT_EQ(value, 15U);
 }
 
@@ -221,7 +221,7 @@ TEST_CASE(atomic_sub_fetch_u32_basic)
 
     uint32_t result = atomic_sub_fetch_u32(&value, 7U);
 
-    TEST_ASSERT_EQ(result, 13U);  /* 返回新值 */
+    TEST_ASSERT_EQ(result, 13U); /* 返回新值 */
     TEST_ASSERT_EQ(value, 13U);
 }
 
@@ -235,13 +235,13 @@ TEST_CASE(atomic_test_and_set_u32_basic)
     /* 设置第8位（bit 8） */
     bool was_set = atomic_test_and_set_u32(&value, 8U);
 
-    TEST_ASSERT_FALSE(was_set);  /* 原来未设置 */
-    TEST_ASSERT_EQ(value, 0x0001F0F0U);  /* bit 8 被设置 */
+    TEST_ASSERT_FALSE(was_set);         /* 原来未设置 */
+    TEST_ASSERT_EQ(value, 0x0001F0F0U); /* bit 8 被设置 */
 
     /* 再次设置第8位 */
     was_set = atomic_test_and_set_u32(&value, 8U);
 
-    TEST_ASSERT_TRUE(was_set);  /* 已经设置 */
+    TEST_ASSERT_TRUE(was_set); /* 已经设置 */
 }
 
 /**
@@ -254,13 +254,13 @@ TEST_CASE(atomic_test_and_clear_u32_basic)
     /* 清除第16位（bit 16） */
     bool was_set = atomic_test_and_clear_u32(&value, 16U);
 
-    TEST_ASSERT_TRUE(was_set);  /* 原来已设置 */
-    TEST_ASSERT_EQ(value, 0xFFFE00FFU);  /* bit 16 被清除 */
+    TEST_ASSERT_TRUE(was_set);          /* 原来已设置 */
+    TEST_ASSERT_EQ(value, 0xFFFE00FFU); /* bit 16 被清除 */
 
     /* 再次清除第16位 */
     was_set = atomic_test_and_clear_u32(&value, 16U);
 
-    TEST_ASSERT_FALSE(was_set);  /* 已经清除 */
+    TEST_ASSERT_FALSE(was_set); /* 已经清除 */
 }
 
 /**
@@ -273,14 +273,14 @@ TEST_CASE(atomic_test_and_toggle_u32_basic)
     /* 翻转第0位 */
     bool was_set = atomic_test_and_toggle_u32(&value, 0U);
 
-    TEST_ASSERT_FALSE(was_set);  /* bit 0 = 0 */
-    TEST_ASSERT_EQ(value, 0x12345679U);  /* bit 0 翻转为1 */
+    TEST_ASSERT_FALSE(was_set);         /* bit 0 = 0 */
+    TEST_ASSERT_EQ(value, 0x12345679U); /* bit 0 翻转为1 */
 
     /* 再次翻转第0位 */
     was_set = atomic_test_and_toggle_u32(&value, 0U);
 
-    TEST_ASSERT_TRUE(was_set);  /* bit 0 = 1 */
-    TEST_ASSERT_EQ(value, 0x12345678U);  /* bit 0 翻转回0 */
+    TEST_ASSERT_TRUE(was_set);          /* bit 0 = 1 */
+    TEST_ASSERT_EQ(value, 0x12345678U); /* bit 0 翻转回0 */
 }
 
 /**
@@ -331,7 +331,7 @@ TEST_CASE(atomic_set_flag_basic)
 
     uint32_t old = atomic_set_flag(&flag);
 
-    TEST_ASSERT_EQ(old, 0U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(old, 0U); /* 返回旧值 */
     TEST_ASSERT_EQ(flag, 1U);
 }
 
@@ -344,7 +344,7 @@ TEST_CASE(atomic_clear_flag_basic)
 
     uint32_t old = atomic_clear_flag(&flag);
 
-    TEST_ASSERT_EQ(old, 1U);  /* 返回旧值 */
+    TEST_ASSERT_EQ(old, 1U); /* 返回旧值 */
     TEST_ASSERT_EQ(flag, 0U);
 }
 
@@ -369,7 +369,7 @@ TEST_CASE(memory_barrier_exists)
     (void)tmp;
     MEMORY_BARRIER();
 
-    TEST_ASSERT_TRUE(true);  /* 如果能编译到这里就通过 */
+    TEST_ASSERT_TRUE(true); /* 如果能编译到这里就通过 */
 }
 
 /**
@@ -382,7 +382,7 @@ TEST_CASE(wfe_sev_instructions)
     SEVL();
     WFE();
 
-    TEST_ASSERT_TRUE(true);  /* 如果能编译到这里就通过 */
+    TEST_ASSERT_TRUE(true); /* 如果能编译到这里就通过 */
 }
 
 /**

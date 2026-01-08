@@ -25,10 +25,11 @@
 /**
  * @brief EDF run queue
  */
-typedef struct edf_rq {
-    struct rb_root tasks_timeline;    /**< Red-black tree sorted by deadline */
-    uint32_t nr_running;              /**< Number of running tasks */
-    uint64_t min_deadline;            /**< Minimum deadline in queue */
+typedef struct edf_rq
+{
+    struct rb_root tasks_timeline; /**< Red-black tree sorted by deadline */
+    uint32_t nr_running;           /**< Number of running tasks */
+    uint64_t min_deadline;         /**< Minimum deadline in queue */
 } edf_rq_t;
 
 /*
@@ -42,35 +43,32 @@ static TCB_t *edf_sched_pick_next(struct rq *rq);
 static void edf_sched_tick(struct rq *rq, TCB_t *task);
 static void edf_sched_update_curr(struct rq *rq);
 static int edf_sched_can_preempt(const struct rq *rq, const TCB_t *task);
-static int edf_sched_switch_to(struct rq *rq, TCB_t *task,
-                                const struct SchedClass *new_class);
+static int edf_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class);
 static int edf_sched_get_stats(const struct rq *rq, void *stats);
 
 /*
  * EDF Scheduling Class Definition
  */
 
-const SchedClass_t sched_class_edf = {
-    .name = "EDF",
-    .priority = 20U,
-    .flags = SCHED_CLASS_FLAG_REALTIME | SCHED_CLASS_FLAG_PREEMPT,
-    .id = SCHED_EDF,
+const SchedClass_t sched_class_edf = {.name = "EDF",
+                                      .priority = 20U,
+                                      .flags = SCHED_CLASS_FLAG_REALTIME | SCHED_CLASS_FLAG_PREEMPT,
+                                      .id = SCHED_EDF,
 
-    /* Core operations */
-    .init = edf_sched_init,
-    .enqueue = edf_sched_enqueue,
-    .dequeue = edf_sched_dequeue,
-    .pick_next = edf_sched_pick_next,
-    .task_tick = edf_sched_tick,
-    .update_curr = edf_sched_update_curr,
+                                      /* Core operations */
+                                      .init = edf_sched_init,
+                                      .enqueue = edf_sched_enqueue,
+                                      .dequeue = edf_sched_dequeue,
+                                      .pick_next = edf_sched_pick_next,
+                                      .task_tick = edf_sched_tick,
+                                      .update_curr = edf_sched_update_curr,
 
-    /* Optional operations */
-    .yield = NULL,
-    .can_preempt = edf_sched_can_preempt,
-    .task_fork = NULL,
-    .switch_to = edf_sched_switch_to,
-    .get_stats = edf_sched_get_stats
-};
+                                      /* Optional operations */
+                                      .yield = NULL,
+                                      .can_preempt = edf_sched_can_preempt,
+                                      .task_fork = NULL,
+                                      .switch_to = edf_sched_switch_to,
+                                      .get_stats = edf_sched_get_stats};
 
 /*
  * Helper Functions
@@ -81,7 +79,8 @@ const SchedClass_t sched_class_edf = {
  * @param rq Generic run queue
  * @return EDF run queue pointer
  */
-static edf_rq_t *get_edf_rq(struct rq *rq) {
+static edf_rq_t *get_edf_rq(struct rq *rq)
+{
     if (rq == NULL) {
         return NULL;
     }
@@ -97,13 +96,14 @@ static edf_rq_t *get_edf_rq(struct rq *rq) {
  * @param rq Run queue pointer
  * @return 0 on success
  */
-static int edf_sched_init(struct rq *rq) {
+static int edf_sched_init(struct rq *rq)
+{
     edf_rq_t *edf_rq;
 
     /* Allocate EDF run queue */
     edf_rq = (edf_rq_t *)malloc(sizeof(edf_rq_t));
     if (edf_rq == NULL) {
-        return -1;  /* ENOMEM */
+        return -1; /* ENOMEM */
     }
 
     /* Initialize red-black tree */
@@ -124,7 +124,8 @@ static int edf_sched_init(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void edf_sched_enqueue(struct rq *rq, TCB_t *task) {
+static void edf_sched_enqueue(struct rq *rq, TCB_t *task)
+{
     edf_rq_t *edf_rq;
     struct rb_node **link;
     struct rb_node *parent;
@@ -162,8 +163,7 @@ static void edf_sched_enqueue(struct rq *rq, TCB_t *task) {
     rb_insert_color(&task->run_node, &edf_rq->tasks_timeline);
 
     /* Update minimum deadline */
-    if ((edf_rq->min_deadline == 0ULL) ||
-        (task->deadline < edf_rq->min_deadline)) {
+    if ((edf_rq->min_deadline == 0ULL) || (task->deadline < edf_rq->min_deadline)) {
         edf_rq->min_deadline = task->deadline;
     }
 
@@ -176,7 +176,8 @@ static void edf_sched_enqueue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void edf_sched_dequeue(struct rq *rq, TCB_t *task) {
+static void edf_sched_dequeue(struct rq *rq, TCB_t *task)
+{
     edf_rq_t *edf_rq;
     struct rb_node *node;
 
@@ -209,7 +210,8 @@ static void edf_sched_dequeue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @return Task control block pointer, NULL if no task
  */
-static TCB_t *edf_sched_pick_next(struct rq *rq) {
+static TCB_t *edf_sched_pick_next(struct rq *rq)
+{
     edf_rq_t *edf_rq;
     struct rb_node *leftmost;
     TCB_t *task;
@@ -242,7 +244,8 @@ static TCB_t *edf_sched_pick_next(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Current task
  */
-static void edf_sched_tick(struct rq *rq, TCB_t *task) {
+static void edf_sched_tick(struct rq *rq, TCB_t *task)
+{
     uint64_t now;
 
     /* Get current time */
@@ -261,7 +264,8 @@ static void edf_sched_tick(struct rq *rq, TCB_t *task) {
  * @brief Update current task runtime
  * @param rq Run queue pointer
  */
-static void edf_sched_update_curr(struct rq *rq) {
+static void edf_sched_update_curr(struct rq *rq)
+{
     TCB_t *curr;
     uint64_t now;
     uint64_t delta;
@@ -291,7 +295,8 @@ static void edf_sched_update_curr(struct rq *rq) {
  * @param task Task to check
  * @return 1 if can preempt, 0 otherwise
  */
-static int edf_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
+static int edf_sched_can_preempt(const struct rq *rq, const TCB_t *task)
+{
     const edf_rq_t *edf_rq;
     struct rb_node *leftmost;
     TCB_t *first;
@@ -330,8 +335,8 @@ static int edf_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
  * @param new_class New scheduling class
  * @return 0 on success
  */
-static int edf_sched_switch_to(struct rq *rq, TCB_t *task,
-                                const struct SchedClass *new_class) {
+static int edf_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class)
+{
     /* Dequeue from EDF */
     edf_sched_dequeue(rq, task);
 
@@ -354,7 +359,8 @@ static int edf_sched_switch_to(struct rq *rq, TCB_t *task,
  * @param stats Output: statistics
  * @return 0 on success
  */
-static int edf_sched_get_stats(const struct rq *rq, void *stats) {
+static int edf_sched_get_stats(const struct rq *rq, void *stats)
+{
     const edf_rq_t *edf_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 

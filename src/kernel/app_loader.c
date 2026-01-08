@@ -29,10 +29,10 @@
 #define MODULE_VERSION "1.0"
 
 /* Error codes */
-#define ERR_INVALID_CONFIG   -1
-#define ERR_SIGNATURE_FAIL   -2
-#define ERR_LOAD_FAIL        -3
-#define ERR_NO_MEMORY        -4
+#define ERR_INVALID_CONFIG -1
+#define ERR_SIGNATURE_FAIL -2
+#define ERR_LOAD_FAIL -3
+#define ERR_NO_MEMORY -4
 
 /* Global state */
 static bool g_initialized = false;
@@ -49,7 +49,8 @@ static int app_validate_config_internal(const AppConfig_t *config);
 /**
  * @brief Initialize application loader
  */
-int app_loader_init(void) {
+int app_loader_init(void)
+{
     int ret = 0;
 
     /* Check if already initialized */
@@ -81,7 +82,8 @@ int app_loader_init(void) {
 /**
  * @brief Load all applications from configuration file
  */
-int app_loader_load_all(const char *config_path) {
+int app_loader_load_all(const char *config_path)
+{
     uint32_t i;
     int loaded_count = 0;
     uint64_t start_time;
@@ -146,8 +148,8 @@ int app_loader_load_all(const char *config_path) {
     end_time = get_system_time_ms();
     g_stats.load_time_ms = (uint32_t)(end_time - start_time);
 
-    printk(KERN_INFO "Application loader finished: %d/%d loaded\n",
-           loaded_count, g_stats.total_apps);
+    printk(KERN_INFO "Application loader finished: %d/%d loaded\n", loaded_count,
+           g_stats.total_apps);
 
     return loaded_count;
 }
@@ -155,7 +157,8 @@ int app_loader_load_all(const char *config_path) {
 /**
  * @brief Restart a crashed application
  */
-int app_loader_restart(const char *app_name) {
+int app_loader_restart(const char *app_name)
+{
     const AppConfig_t *config;
     uint32_t i;
 
@@ -192,7 +195,8 @@ int app_loader_restart(const char *app_name) {
 /**
  * @brief Application loader shutdown
  */
-int app_loader_shutdown(void) {
+int app_loader_shutdown(void)
+{
     /* Check if initialized */
     if (!g_initialized) {
         return 0;
@@ -216,7 +220,8 @@ int app_loader_shutdown(void) {
 /**
  * @brief Get application loader statistics
  */
-int app_loader_get_stats(AppLoaderStats_t *stats) {
+int app_loader_get_stats(AppLoaderStats_t *stats)
+{
     if (stats == NULL) {
         return -EINVAL;
     }
@@ -233,7 +238,8 @@ int app_loader_get_stats(AppLoaderStats_t *stats) {
 /**
  * @brief Find application by name
  */
-const AppConfig_t* app_loader_find_app(const char *name) {
+const AppConfig_t *app_loader_find_app(const char *name)
+{
     uint32_t i;
 
     if (name == NULL) {
@@ -252,7 +258,8 @@ const AppConfig_t* app_loader_find_app(const char *name) {
 /**
  * @brief Validate application configuration
  */
-bool app_loader_validate_config(const AppConfig_t *config) {
+bool app_loader_validate_config(const AppConfig_t *config)
+{
     if (config == NULL) {
         return false;
     }
@@ -263,7 +270,8 @@ bool app_loader_validate_config(const AppConfig_t *config) {
 /**
  * @brief Parse application configuration file
  */
-static int app_parse_config(const char *config_path) {
+static int app_parse_config(const char *config_path)
+{
     INIParser_t *parser;
     uint32_t i;
     int ret;
@@ -295,16 +303,14 @@ static int app_parse_config(const char *config_path) {
         }
 
         /* Read name */
-        ret = ini_parser_get_string(parser, section, "name",
-                                     app->name, sizeof(app->name));
+        ret = ini_parser_get_string(parser, section, "name", app->name, sizeof(app->name));
         if (ret != 0) {
             printk(KERN_WARNING "App %u: missing name\n", i);
             continue;
         }
 
         /* Read path */
-        ret = ini_parser_get_string(parser, section, "path",
-                                     app->path, sizeof(app->path));
+        ret = ini_parser_get_string(parser, section, "path", app->path, sizeof(app->path));
         if (ret != 0) {
             printk(KERN_WARNING "App %u: missing path\n", i);
             continue;
@@ -327,8 +333,7 @@ static int app_parse_config(const char *config_path) {
 
         /* Read stack size */
         ret = ini_parser_get_int(parser, section, "stack_size", &value);
-        app->stack_size = (ret == 0) ? (uint32_t)value :
-                                        CONFIG_APP_LOADER_DEFAULT_STACK;
+        app->stack_size = (ret == 0) ? (uint32_t)value : CONFIG_APP_LOADER_DEFAULT_STACK;
 
         /* Read CPU affinity */
         ret = ini_parser_get_int(parser, section, "cpu_affinity", &value);
@@ -355,8 +360,8 @@ static int app_parse_config(const char *config_path) {
         app->capabilities = (ret == 0) ? (uint32_t)value : 0xFFFFFFFFU;
 
         /* Read signature (hex string) */
-        ret = ini_parser_get_string(parser, section, "signature",
-                                     (char *)app->signature, sizeof(app->signature));
+        ret = ini_parser_get_string(parser, section, "signature", (char *)app->signature,
+                                    sizeof(app->signature));
         if (ret != 0) {
             printk(KERN_WARNING "App %u: missing signature\n", i);
             continue;
@@ -382,7 +387,8 @@ static int app_parse_config(const char *config_path) {
 /**
  * @brief Load a single application
  */
-static int app_load_single(const AppConfig_t *config) {
+static int app_load_single(const AppConfig_t *config)
+{
     ElfLoadContext_t elf_ctx;
     uint64_t entry_point;
     int ret;
@@ -397,8 +403,8 @@ static int app_load_single(const AppConfig_t *config) {
     }
 
     /* Verify signature */
-    ret = elf_verify_signature(elf_ctx.elf_data, elf_ctx.elf_size,
-                                config->signature, g_system_pubkey);
+    ret = elf_verify_signature(elf_ctx.elf_data, elf_ctx.elf_size, config->signature,
+                               g_system_pubkey);
     if (ret != 0) {
         free((void *)elf_ctx.elf_data);
         return ERR_SIGNATURE_FAIL;
@@ -430,7 +436,8 @@ static int app_load_single(const AppConfig_t *config) {
 /**
  * @brief Create task for application
  */
-static int app_create_task(const AppConfig_t *config, uint64_t entry) {
+static int app_create_task(const AppConfig_t *config, uint64_t entry)
+{
     TCB_t *tcb;
     uint8_t *stack;
     uint64_t *stack_top;
@@ -445,10 +452,7 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry) {
     stack_top = (uint64_t *)(stack + config->stack_size);
 
     /* Create task */
-    tcb = task_create(config->name,
-                      (TaskEntry_t)entry,
-                      stack_top,
-                      config->priority,
+    tcb = task_create(config->name, (TaskEntry_t)entry, stack_top, config->priority,
                       config->cpu_affinity);
 
     if (tcb == NULL) {
@@ -463,8 +467,8 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry) {
     tcb->max_cpu_time = config->max_cpu_time;
     tcb->auto_restart = config->auto_restart;
 
-    printk(KERN_INFO "Created task '%s' (priority=%u, stack=%u)\n",
-           config->name, config->priority, config->stack_size);
+    printk(KERN_INFO "Created task '%s' (priority=%u, stack=%u)\n", config->name, config->priority,
+           config->stack_size);
 
     return 0;
 }
@@ -472,7 +476,8 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry) {
 /**
  * @brief Internal configuration validation
  */
-static int app_validate_config_internal(const AppConfig_t *config) {
+static int app_validate_config_internal(const AppConfig_t *config)
+{
     /* Check name */
     if (config->name[0] == '\0') {
         return -EINVAL;
@@ -493,8 +498,7 @@ static int app_validate_config_internal(const AppConfig_t *config) {
     }
 
     /* Check stack size */
-    if ((config->stack_size < 4096U) ||
-        (config->stack_size > CONFIG_APP_LOADER_MAX_STACK_SIZE)) {
+    if ((config->stack_size < 4096U) || (config->stack_size > CONFIG_APP_LOADER_MAX_STACK_SIZE)) {
         return -EINVAL;
     }
 

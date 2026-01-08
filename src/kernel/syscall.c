@@ -37,7 +37,8 @@ typedef int64_t (*syscall_func_t)(uint64_t *params);
  * @param params 参数数组 [0]=buf, [1]=count
  * @return 成功写入的字节数
  */
-static int64_t sys_write_impl(uint64_t *params) {
+static int64_t sys_write_impl(uint64_t *params)
+{
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
@@ -66,7 +67,8 @@ static int64_t sys_write_impl(uint64_t *params) {
  * @param params 参数数组 [0]=buf, [1]=count
  * @return 成功读取的字节数
  */
-static int64_t sys_read_impl(uint64_t *params) {
+static int64_t sys_read_impl(uint64_t *params)
+{
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
@@ -90,7 +92,8 @@ static int64_t sys_read_impl(uint64_t *params) {
  * @param params 参数数组 [0]=exit_code
  * @return 不返回
  */
-static int64_t sys_exit_impl(uint64_t *params) {
+static int64_t sys_exit_impl(uint64_t *params)
+{
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
@@ -109,8 +112,9 @@ static int64_t sys_exit_impl(uint64_t *params) {
  * @param params 参数数组（未使用）
  * @return 任务ID
  */
-static int64_t sys_getpid_impl(uint64_t *params) {
-    (void)params;  /* 未使用参数 */
+static int64_t sys_getpid_impl(uint64_t *params)
+{
+    (void)params; /* 未使用参数 */
 
     /* 获取当前任务ID */
     return task_getpid();
@@ -121,8 +125,9 @@ static int64_t sys_getpid_impl(uint64_t *params) {
  * @param params 参数数组（未使用）
  * @return 成功返回0
  */
-static int64_t sys_yield_impl(uint64_t *params) {
-    (void)params;  /* 未使用参数 */
+static int64_t sys_yield_impl(uint64_t *params)
+{
+    (void)params; /* 未使用参数 */
 
     /* 让出CPU */
     task_yield();
@@ -136,8 +141,7 @@ static int64_t sys_yield_impl(uint64_t *params) {
  */
 static int64_t sys_sleep_impl(uint64_t *params)
 {
-    if (params == NULL)
-    {
+    if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
 
@@ -146,8 +150,7 @@ static int64_t sys_sleep_impl(uint64_t *params)
     /* 调用msleep实现任务睡眠 */
     int ret = msleep(ms);
 
-    if (ret != ERROR_SUCCESS)
-    {
+    if (ret != ERROR_SUCCESS) {
         return -SYS_ERROR_INVAL;
     }
 
@@ -159,7 +162,8 @@ static int64_t sys_sleep_impl(uint64_t *params)
  * @param params 参数数组 [0]=size
  * @return 内存指针，失败返回NULL
  */
-static int64_t sys_malloc_impl(uint64_t *params) {
+static int64_t sys_malloc_impl(uint64_t *params)
+{
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
@@ -187,7 +191,8 @@ static int64_t sys_malloc_impl(uint64_t *params) {
  * @param params 参数数组 [0]=ptr
  * @return 成功返回0
  */
-static int64_t sys_free_impl(uint64_t *params) {
+static int64_t sys_free_impl(uint64_t *params)
+{
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
@@ -213,7 +218,7 @@ static int64_t sys_free_impl(uint64_t *params) {
  */
 static int64_t sys_gettime_impl(uint64_t *params)
 {
-    (void)params;  /* 未使用参数 */
+    (void)params; /* 未使用参数 */
 
     /* 返回系统运行时间（毫秒） */
     return (int64_t)get_system_time_ms();
@@ -230,15 +235,13 @@ static int64_t sys_gettime_impl(uint64_t *params)
  */
 static int64_t sys_sched_set_impl(uint64_t *params)
 {
-    if (params == NULL)
-    {
+    if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
 
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL)
-    {
+    if (task == NULL) {
         return -SYS_ERROR_INVAL;
     }
 
@@ -246,20 +249,18 @@ static int64_t sys_sched_set_impl(uint64_t *params)
     uint32_t priority = (uint32_t)params[1];
 
     /* 参数验证 */
-    if (policy > 4U)  /* 4种调度策略 + IDLE */
+    if (policy > 4U) /* 4种调度策略 + IDLE */
     {
         return -SYS_ERROR_INVAL;
     }
 
-    if (priority >= PRIORITY_LEVELS)
-    {
+    if (priority >= PRIORITY_LEVELS) {
         return -SYS_ERROR_INVAL;
     }
 
     /* 设置优先级 */
     int ret = set_task_priority(task, (uint8_t)priority);
-    if (ret != 0)
-    {
+    if (ret != 0) {
         return -SYS_ERROR_INVAL;
     }
 
@@ -280,15 +281,13 @@ static int64_t sys_sched_set_impl(uint64_t *params)
  */
 static int64_t sys_sched_get_impl(uint64_t *params)
 {
-    if (params == NULL)
-    {
+    if (params == NULL) {
         return -SYS_ERROR_INVAL;
     }
 
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL)
-    {
+    if (task == NULL) {
         return -SYS_ERROR_INVAL;
     }
 
@@ -296,21 +295,16 @@ static int64_t sys_sched_get_impl(uint64_t *params)
     uint32_t *priority_ptr = (uint32_t *)params[1];
 
     /* 输出参数 */
-    if (policy_ptr != NULL)
-    {
+    if (policy_ptr != NULL) {
         /* 返回调度策略ID */
-        if (task->sched_class != NULL)
-        {
+        if (task->sched_class != NULL) {
             *policy_ptr = task->sched_class->id;
-        }
-        else
-        {
-            *policy_ptr = 4U;  /* 默认IDLE */
+        } else {
+            *policy_ptr = 4U; /* 默认IDLE */
         }
     }
 
-    if (priority_ptr != NULL)
-    {
+    if (priority_ptr != NULL) {
         *priority_ptr = task->prio;
     }
 
@@ -322,18 +316,18 @@ static int64_t sys_sched_get_impl(uint64_t *params)
  * @details 索引对应系统调用号
  */
 static const syscall_func_t g_syscall_table[] = {
-    NULL,                       /* 0: 未使用 */
-    sys_write_impl,             /* 1: SYS_WRITE */
-    sys_read_impl,              /* 2: SYS_READ */
-    sys_exit_impl,              /* 3: SYS_EXIT */
-    sys_getpid_impl,            /* 4: SYS_GETPID */
-    sys_yield_impl,             /* 5: SYS_YIELD */
-    sys_sleep_impl,             /* 6: SYS_SLEEP */
-    sys_malloc_impl,            /* 7: SYS_MALLOC */
-    sys_free_impl,              /* 8: SYS_FREE */
-    sys_gettime_impl,           /* 9: SYS_GETTIME */
-    sys_sched_set_impl,         /* 10: SYS_SCHED_SET */
-    sys_sched_get_impl,         /* 11: SYS_SCHED_GET */
+    NULL,               /* 0: 未使用 */
+    sys_write_impl,     /* 1: SYS_WRITE */
+    sys_read_impl,      /* 2: SYS_READ */
+    sys_exit_impl,      /* 3: SYS_EXIT */
+    sys_getpid_impl,    /* 4: SYS_GETPID */
+    sys_yield_impl,     /* 5: SYS_YIELD */
+    sys_sleep_impl,     /* 6: SYS_SLEEP */
+    sys_malloc_impl,    /* 7: SYS_MALLOC */
+    sys_free_impl,      /* 8: SYS_FREE */
+    sys_gettime_impl,   /* 9: SYS_GETTIME */
+    sys_sched_set_impl, /* 10: SYS_SCHED_SET */
+    sys_sched_get_impl, /* 11: SYS_SCHED_GET */
 };
 
 /**
@@ -352,7 +346,8 @@ static const syscall_func_t g_syscall_table[] = {
  *          - 查表调用对应的系统调用实现
  *          - 返回结果到用户空间
  */
-int64_t syscall_handler(uint64_t syscall_nr, uint64_t *params) {
+int64_t syscall_handler(uint64_t syscall_nr, uint64_t *params)
+{
     /* 参数验证 */
     if (params == NULL) {
         return -SYS_ERROR_INVAL;
@@ -384,7 +379,8 @@ int64_t syscall_handler(uint64_t syscall_nr, uint64_t *params) {
  * @brief 空任务退出函数（占位符）
  * @param exit_code 退出码
  */
-void task_exit(int exit_code) {
+void task_exit(int exit_code)
+{
     printk("[TASK] Task exited with code %d\n", exit_code);
     printk("[TASK] Halting...\n");
 
@@ -410,8 +406,7 @@ int task_getpid(void)
 {
     /* 获取当前任务 */
     TCB_t *task = get_current_task();
-    if (task == NULL)
-    {
+    if (task == NULL) {
         return 0;
     }
 

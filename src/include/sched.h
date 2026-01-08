@@ -24,43 +24,45 @@
  * Configuration Constants
  */
 
-#define MAX_CPUS              8U   /**< Maximum number of CPUs */
-#define MAX_TASKS             256U /**< Maximum number of tasks */
-#define PRIORITY_LEVELS       256U /**< Number of priority levels (0-255) */
+#define MAX_CPUS 8U          /**< Maximum number of CPUs */
+#define MAX_TASKS 256U       /**< Maximum number of tasks */
+#define PRIORITY_LEVELS 256U /**< Number of priority levels (0-255) */
 
 /*
  * Task States
  */
 
-typedef enum {
-    TASK_READY = 0,      /**< Task is ready to run */
-    TASK_RUNNING,        /**< Task is currently running */
-    TASK_BLOCKED,        /**< Task is blocked (waiting for resource) */
-    TASK_SLEEPING,       /**< Task is sleeping (timed wait) */
-    TASK_ZOMBIE,         /**< Task has exited */
-    TASK_STOPPED         /**< Task is stopped */
+typedef enum
+{
+    TASK_READY = 0, /**< Task is ready to run */
+    TASK_RUNNING,   /**< Task is currently running */
+    TASK_BLOCKED,   /**< Task is blocked (waiting for resource) */
+    TASK_SLEEPING,  /**< Task is sleeping (timed wait) */
+    TASK_ZOMBIE,    /**< Task has exited */
+    TASK_STOPPED    /**< Task is stopped */
 } TaskState_t;
 
 /*
  * Scheduling Policy
  */
 
-typedef enum {
-    SCHED_FIFO = 0,      /**< First-In-First-Out (real-time) */
-    SCHED_EDF,           /**< Earliest Deadline First (real-time) */
-    SCHED_CFS,           /**< Completely Fair Scheduler */
-    SCHED_RR,            /**< Round Robin */
-    SCHED_IDLE           /**< Idle scheduler */
+typedef enum
+{
+    SCHED_FIFO = 0, /**< First-In-First-Out (real-time) */
+    SCHED_EDF,      /**< Earliest Deadline First (real-time) */
+    SCHED_CFS,      /**< Completely Fair Scheduler */
+    SCHED_RR,       /**< Round Robin */
+    SCHED_IDLE      /**< Idle scheduler */
 } SchedPolicy_t;
 
 /*
  * Scheduling Class Flags
  */
 
-#define SCHED_CLASS_FLAG_REALTIME  (0x01U)  /**< Real-time scheduler */
-#define SCHED_CLASS_FLAG_FAIR      (0x02U)  /**< Fair scheduler */
-#define SCHED_CLASS_FLAG_IDLE      (0x04U)  /**< Idle scheduler */
-#define SCHED_CLASS_FLAG_PREEMPT   (0x08U)  /**< Supports preemption */
+#define SCHED_CLASS_FLAG_REALTIME (0x01U) /**< Real-time scheduler */
+#define SCHED_CLASS_FLAG_FAIR (0x02U)     /**< Fair scheduler */
+#define SCHED_CLASS_FLAG_IDLE (0x04U)     /**< Idle scheduler */
+#define SCHED_CLASS_FLAG_PREEMPT (0x08U)  /**< Supports preemption */
 
 /*
  * Forward Declarations
@@ -74,12 +76,13 @@ struct TCB_t;
  * Scheduling Class Interface (Function Pointer Table)
  */
 
-typedef struct SchedClass {
-    const char *name;              /**< Scheduler name (debug) */
-    uint32_t priority;             /**< Class priority (lower is higher) */
-    uint32_t flags;                /**< Scheduler flags */
-    uint32_t id;                   /**< Scheduler ID (0-4) */
-    struct SchedClass *next;       /**< Next scheduler in linked list */
+typedef struct SchedClass
+{
+    const char *name;        /**< Scheduler name (debug) */
+    uint32_t priority;       /**< Class priority (lower is higher) */
+    uint32_t flags;          /**< Scheduler flags */
+    uint32_t id;             /**< Scheduler ID (0-4) */
+    struct SchedClass *next; /**< Next scheduler in linked list */
 
     /*
      * Core Operations (must be implemented)
@@ -90,7 +93,7 @@ typedef struct SchedClass {
      * @param rq Run queue pointer
      * @return 0 on success, negative error code on failure
      */
-    int  (*init)(struct rq *rq);
+    int (*init)(struct rq *rq);
 
     /**
      * @brief Enqueue task to ready queue
@@ -143,7 +146,7 @@ typedef struct SchedClass {
      * @param task Task control block pointer
      * @return 1 if can preempt, 0 otherwise
      */
-    int  (*can_preempt)(const struct rq *rq, const TCB_t *task);
+    int (*can_preempt)(const struct rq *rq, const TCB_t *task);
 
     /**
      * @brief Switch to different scheduling class
@@ -152,8 +155,7 @@ typedef struct SchedClass {
      * @param new_class New scheduling class
      * @return 0 on success, negative error code on failure
      */
-    int  (*switch_to)(struct rq *rq, struct TCB_t *task,
-                      const struct SchedClass *new_class);
+    int (*switch_to)(struct rq *rq, struct TCB_t *task, const struct SchedClass *new_class);
 
     /**
      * @brief Get scheduler statistics
@@ -161,7 +163,7 @@ typedef struct SchedClass {
      * @param stats Output: statistics
      * @return 0 on success, negative error code on failure
      */
-    int  (*get_stats)(const struct rq *rq, void *stats);
+    int (*get_stats)(const struct rq *rq, void *stats);
 
 } SchedClass_t;
 
@@ -169,49 +171,50 @@ typedef struct SchedClass {
  * Task Control Block (TCB)
  */
 
-typedef struct TCB_t {
+typedef struct TCB_t
+{
     /* Task identification */
-    uint32_t tid;                  /**< Task ID */
-    char name[32];                 /**< Task name */
+    uint32_t tid;  /**< Task ID */
+    char name[32]; /**< Task name */
 
     /* Task state */
-    TaskState_t state;             /**< Task state */
-    uint8_t prio;                  /**< Priority (0-255, 255 = highest) */
-    uint8_t static_prio;           /**< Static priority */
-    uint8_t normal_prio;           /**< Normal priority */
+    TaskState_t state;   /**< Task state */
+    uint8_t prio;        /**< Priority (0-255, 255 = highest) */
+    uint8_t static_prio; /**< Static priority */
+    uint8_t normal_prio; /**< Normal priority */
 
     /* Scheduling class */
     const SchedClass_t *sched_class; /**< Scheduling class */
-    struct rq *rq;                 /**< Run queue */
+    struct rq *rq;                   /**< Run queue */
 
     /* Scheduling data */
-    struct list_head run_list;     /**< Run list node */
-    struct rb_node run_node;       /**< Red-black tree node (EDF/CFS) */
+    struct list_head run_list; /**< Run list node */
+    struct rb_node run_node;   /**< Red-black tree node (EDF/CFS) */
 
     /* Runtime statistics */
-    uint64_t vruntime;             /**< Virtual runtime (CFS) */
-    uint64_t exec_start;           /**< Execution start time */
-    uint64_t sum_exec_runtime;     /**< Total execution time */
-    uint64_t deadline;             /**< Absolute deadline (EDF) */
-    uint32_t time_slice;           /**< Time slice (RR) */
+    uint64_t vruntime;         /**< Virtual runtime (CFS) */
+    uint64_t exec_start;       /**< Execution start time */
+    uint64_t sum_exec_runtime; /**< Total execution time */
+    uint64_t deadline;         /**< Absolute deadline (EDF) */
+    uint32_t time_slice;       /**< Time slice (RR) */
 
     /* CPU affinity */
-    uint32_t cpu_affinity;         /**< CPU affinity mask */
+    uint32_t cpu_affinity; /**< CPU affinity mask */
 
     /* Stack information */
-    uint64_t stack_ptr;            /**< Stack pointer */
-    uint64_t stack_base;           /**< Stack base address */
-    uint32_t stack_size;           /**< Stack size */
+    uint64_t stack_ptr;  /**< Stack pointer */
+    uint64_t stack_base; /**< Stack base address */
+    uint32_t stack_size; /**< Stack size */
 
     /* Context */
-    uint64_t context[32];          /**< CPU context */
+    uint64_t context[32]; /**< CPU context */
 
     /* Resources */
-    uint32_t capabilities;         /**< Capability mask */
+    uint32_t capabilities; /**< Capability mask */
 
     /* List pointers */
-    struct list_head tasks;        /**< Tasks list */
-    struct list_head rq_list;      /**< Run queue list */
+    struct list_head tasks;   /**< Tasks list */
+    struct list_head rq_list; /**< Run queue list */
 
 } TCB_t;
 
@@ -219,38 +222,39 @@ typedef struct TCB_t {
  * Run Queue (Per-CPU)
  */
 
-typedef struct rq {
+typedef struct rq
+{
     /* CPU identification */
-    uint32_t cpu;                  /**< CPU ID */
+    uint32_t cpu; /**< CPU ID */
 
     /* Lock */
-    spinlock_t lock;               /**< Run queue lock */
+    spinlock_t lock; /**< Run queue lock */
 
     /* Current task */
-    TCB_t *curr;                   /**< Currently running task */
-    TCB_t *idle;                   /**< Idle task */
+    TCB_t *curr; /**< Currently running task */
+    TCB_t *idle; /**< Idle task */
 
     /* Scheduling statistics */
-    uint32_t nr_running[5];        /**< Number of running tasks per class */
-    uint64_t nr_switches;          /**< Number of context switches */
-    uint64_t nr_migrations;        /**< Number of task migrations */
+    uint32_t nr_running[5]; /**< Number of running tasks per class */
+    uint64_t nr_switches;   /**< Number of context switches */
+    uint64_t nr_migrations; /**< Number of task migrations */
 
     /* Rescheduling flag */
-    uint32_t need_resched;         /**< Need reschedule flag */
+    uint32_t need_resched; /**< Need reschedule flag */
 
     /* Priority bitmap */
-    uint64_t priority_bitmap[4];   /**< 256-bit priority bitmap */
+    uint64_t priority_bitmap[4]; /**< 256-bit priority bitmap */
 
     /* Scheduler-specific data */
-    void *fifo_rq;                 /**< FIFO run queue */
-    void *edf_rq;                  /**< EDF run queue */
-    void *cfs_rq;                  /**< CFS run queue */
-    void *rr_rq;                   /**< RR run queue */
-    void *idle_rq;                 /**< Idle run queue */
+    void *fifo_rq; /**< FIFO run queue */
+    void *edf_rq;  /**< EDF run queue */
+    void *cfs_rq;  /**< CFS run queue */
+    void *rr_rq;   /**< RR run queue */
+    void *idle_rq; /**< Idle run queue */
 
     /* Load tracking */
-    uint64_t nr_load_updates;      /**< Number of load updates */
-    uint64_t load_weight;          /**< Load weight */
+    uint64_t nr_load_updates; /**< Number of load updates */
+    uint64_t load_weight;     /**< Load weight */
 
 } rq_t;
 
@@ -258,12 +262,13 @@ typedef struct rq {
  * Scheduler Statistics
  */
 
-typedef struct SchedStats {
-    uint32_t nr_running;           /**< Number of running tasks */
-    uint64_t nr_switches;          /**< Number of context switches */
-    uint64_t nr_migrations;        /**< Number of task migrations */
-    uint64_t load_weight;          /**< Load weight */
-    uint64_t avg_runtime;          /**< Average runtime */
+typedef struct SchedStats
+{
+    uint32_t nr_running;    /**< Number of running tasks */
+    uint64_t nr_switches;   /**< Number of context switches */
+    uint64_t nr_migrations; /**< Number of task migrations */
+    uint64_t load_weight;   /**< Load weight */
+    uint64_t avg_runtime;   /**< Average runtime */
 } SchedStats_t;
 
 /*
@@ -394,8 +399,7 @@ uint32_t smp_processor_id(void);
  * @param policy Scheduling policy
  * @return Task ID on success, 0 on failure
  */
-uint32_t task_create(const char *name, uint8_t prio,
-                     uint32_t stack_size, void (*entry)(void),
+uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (*entry)(void),
                      SchedPolicy_t policy);
 
 /**

@@ -27,6 +27,10 @@ extern void printk(const char *fmt, ...);
 extern int page_allocator_init(uint64_t base_addr, uint64_t size);
 extern int kheap_init(void *start, uint64_t size);
 
+/* 调度器 */
+extern int scheduler_init(void);
+extern void scheduler_start(void) __attribute__((noreturn));
+
 /* 时间管理 */
 extern int time_init(void);
 
@@ -43,7 +47,8 @@ extern int irq_init_subsystem(void);
 /**
  * @brief 系统信息结构
  */
-typedef struct {
+typedef struct
+{
     const char *version;
     const char *build_date;
     const char *build_time;
@@ -55,8 +60,8 @@ static const SystemInfo_t g_system_info = {
     .version = KERNEL_VERSION,
     .build_date = KERNEL_BUILD_DATE,
     .build_time = KERNEL_BUILD_TIME,
-    .cpu_count = 1U,  /* TODO: 从设备树读取 */
-    .mem_size_mb = 1024U  /* TODO: 从设备树读取 */
+    .cpu_count = 1U,     /* TODO: 从设备树读取 */
+    .mem_size_mb = 1024U /* TODO: 从设备树读取 */
 };
 
 /**
@@ -70,7 +75,8 @@ static const SystemInfo_t g_system_info = {
  *
  * @note 不应返回
  */
-void kernel_main(void) {
+void kernel_main(void)
+{
     /* 初始化串口 */
     if (printk_init() != 0) {
         /* UART初始化失败，停止执行 */
@@ -88,23 +94,7 @@ void kernel_main(void) {
     printk("Memory Size: %u MB\n", g_system_info.mem_size_mb);
     printk("\n");
 
-    /* TODO: 初始化内存管理 */
-    printk("[INIT] Memory management... ");
-    printk("NOT IMPLEMENTED\n");
-
-    /* TODO: 初始化调度器 */
-    printk("[INIT] Scheduler... ");
-    printk("NOT IMPLEMENTED\n");
-
-    /* TODO: 初始化中断管理 */
-    printk("[INIT] Interrupt controller... ");
-    printk("NOT IMPLEMENTED\n");
-
-    /* TODO: 初始化系统调用 */
-    printk("[INIT] System calls... ");
-    printk("NOT IMPLEMENTED\n");
-
-    printk("\n");
+    /* 初始化内存管理 */
     printk("[INIT] Memory management... ");
 
     /* 初始化内核堆（必须先于页分配器，因为页分配器使用堆） */
@@ -128,6 +118,14 @@ void kernel_main(void) {
     printk("[INIT]   Kernel heap: %lu KB @ %p\n", heap_size / 1024, __kernel_heap_start);
     printk("[INIT]   Page allocator: 262144 pages (1GB)\n");
 
+    /* 初始化调度器（必须在时间管理之前） */
+    printk("[INIT] Scheduler... ");
+    if (scheduler_init() != 0) {
+        printk("FAILED\n");
+        goto kernel_halt;
+    }
+    printk("OK\n");
+
     /* 初始化时间管理 */
     printk("[INIT] Time management... ");
     if (time_init() != 0) {
@@ -144,22 +142,17 @@ void kernel_main(void) {
     }
     printk("OK\n");
 
-    /* TODO: 初始化调度器 */
-    printk("[INIT] Scheduler... ");
-    printk("NOT IMPLEMENTED\n");
-
-    /* TODO: 初始化系统调用 */
-    printk("[INIT] System calls... ");
-    printk("NOT IMPLEMENTED\n");
-
     printk("\n");
     printk("[OK] Kernel initialization complete\n");
     printk("\n");
 
+    /* 启动调度器（不会返回） */
+    scheduler_start();
+
     /* 进入主循环 */
     while (true) {
         /* TODO: 空闲任务或系统管理 */
-        __asm__ volatile("wfe");  /* 等待中断 */
+        __asm__ volatile("wfe"); /* 等待中断 */
     }
 
 kernel_halt:
@@ -176,7 +169,8 @@ kernel_halt:
  *
  * @details 停止系统执行
  */
-void kernel_panic(void) {
+void kernel_panic(void)
+{
     printk("\n");
     printk("[FATAL] Kernel panic!\n");
     printk("[FATAL] System halted.\n");

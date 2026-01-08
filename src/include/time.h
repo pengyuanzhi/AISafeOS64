@@ -27,22 +27,22 @@ extern "C" {
 /**
  * @brief 系统滴答频率（Hz）
  */
-#define CONFIG_HZ                  1000UL  /**< 1000Hz = 1ms tick */
+#define CONFIG_HZ 1000UL /**< 1000Hz = 1ms tick */
 
 /**
  * @brief 毫秒转换为系统滴答
  */
-#define MSEC_TO_TICKS(msec)        ((msec) * (CONFIG_HZ / 1000UL))
+#define MSEC_TO_TICKS(msec) ((msec) * (CONFIG_HZ / 1000UL))
 
 /**
  * @brief 系统滴答转换为毫秒
  */
-#define TICKS_TO_MSEC(ticks)       ((ticks) / (CONFIG_HZ / 1000UL))
+#define TICKS_TO_MSEC(ticks) ((ticks) / (CONFIG_HZ / 1000UL))
 
 /**
  * @brief 秒转换为系统滴答
  */
-#define SEC_TO_TICKS(sec)          ((sec) * CONFIG_HZ)
+#define SEC_TO_TICKS(sec) ((sec) * CONFIG_HZ)
 
 /**
  * @brief 系统滴答变量
@@ -53,14 +53,15 @@ extern volatile uint64_t g_jiffies;
 /**
  * @brief 软件定时器结构
  */
-typedef struct software_timer {
-    uint64_t expire_ticks;         /**< 过期时间（滴答数） */
-    uint32_t period_ticks;         /**< 周期（滴答数），0表示一次性定时器 */
-    bool active;                   /**< 是否激活 */
-    bool periodic;                 /**< 是否为周期性定时器 */
-    void (*callback)(void *arg);   /**< 回调函数 */
-    void *arg;                     /**< 回调函数参数 */
-    struct software_timer *next;   /**< 下一个定时器（链表） */
+typedef struct software_timer
+{
+    uint64_t expire_ticks;       /**< 过期时间（滴答数） */
+    uint32_t period_ticks;       /**< 周期（滴答数），0表示一次性定时器 */
+    bool active;                 /**< 是否激活 */
+    bool periodic;               /**< 是否为周期性定时器 */
+    void (*callback)(void *arg); /**< 回调函数 */
+    void *arg;                   /**< 回调函数参数 */
+    struct software_timer *next; /**< 下一个定时器（链表） */
 } swtimer_t;
 
 /**
@@ -79,7 +80,8 @@ int time_init(void);
  *
  * @details jiffies: 自系统启动以来的滴答数
  */
-static inline uint64_t get_jiffies(void) {
+static inline uint64_t get_jiffies(void)
+{
     return g_jiffies;
 }
 
@@ -87,7 +89,8 @@ static inline uint64_t get_jiffies(void) {
  * @brief 获取系统时间（毫秒）
  * @return 系统运行时间（毫秒）
  */
-static inline uint64_t get_system_time_ms(void) {
+static inline uint64_t get_system_time_ms(void)
+{
     return TICKS_TO_MSEC(g_jiffies);
 }
 
@@ -95,7 +98,8 @@ static inline uint64_t get_system_time_ms(void) {
  * @brief 获取系统时间（秒）
  * @return 系统运行时间（秒）
  */
-static inline uint64_t get_system_time_sec(void) {
+static inline uint64_t get_system_time_sec(void)
+{
     return g_jiffies / CONFIG_HZ;
 }
 

@@ -25,13 +25,14 @@ extern "C" {
 /**
  * @brief 红黑树节点颜色
  */
-#define RB_RED     0
-#define RB_BLACK   1
+#define RB_RED 0
+#define RB_BLACK 1
 
 /**
  * @brief 红黑树节点
  */
-struct rb_node {
+struct rb_node
+{
     uint64_t __rb_parent_color;
     struct rb_node *rb_right;
     struct rb_node *rb_left;
@@ -40,24 +41,34 @@ struct rb_node {
 /**
  * @brief 红黑树根
  */
-struct rb_root {
+struct rb_root
+{
     struct rb_node *rb_node;
 };
 
 /**
  * @brief 初始化红黑树节点
  */
-#define RB_ROOT  (struct rb_root) { NULL, }
+#define RB_ROOT      \
+    (struct rb_root) \
+    {                \
+        NULL,        \
+    }
 
 /**
  * @brief 初始化红黑树节点指针
  */
-#define RB_EMPTY_ROOT  (struct rb_root) { NULL, }
+#define RB_EMPTY_ROOT \
+    (struct rb_root)  \
+    {                 \
+        NULL,         \
+    }
 
 /**
  * @brief 初始化节点
  */
-static inline void RB_CLEAR_NODE(struct rb_node *node) {
+static inline void RB_CLEAR_NODE(struct rb_node *node)
+{
     node->__rb_parent_color = 0U;
     node->rb_left = NULL;
     node->rb_right = NULL;
@@ -66,79 +77,87 @@ static inline void RB_CLEAR_NODE(struct rb_node *node) {
 /**
  * @brief 获取父节点
  */
-static inline struct rb_node *rb_parent(const struct rb_node *node) {
+static inline struct rb_node *rb_parent(const struct rb_node *node)
+{
     return (struct rb_node *)(node->__rb_parent_color & ~3UL);
 }
 
 /**
  * @brief 设置父节点
  */
-static inline void rb_set_parent(struct rb_node *node, struct rb_node *parent) {
-    node->__rb_parent_color = (node->__rb_parent_color & 3UL) |
-                             (uint64_t)parent;
+static inline void rb_set_parent(struct rb_node *node, struct rb_node *parent)
+{
+    node->__rb_parent_color = (node->__rb_parent_color & 3UL) | (uint64_t)parent;
 }
 
 /**
  * @brief 获取节点颜色
  */
-static inline int rb_color(const struct rb_node *node) {
+static inline int rb_color(const struct rb_node *node)
+{
     return (int)(node->__rb_parent_color & 1UL);
 }
 
 /**
  * @brief 设置节点颜色
  */
-static inline void rb_set_color(struct rb_node *node, int color) {
+static inline void rb_set_color(struct rb_node *node, int color)
+{
     node->__rb_parent_color = (node->__rb_parent_color & ~1UL) | color;
 }
 
 /**
  * @brief 节点是否为红色
  */
-static inline bool rb_is_red(const struct rb_node *node) {
+static inline bool rb_is_red(const struct rb_node *node)
+{
     return rb_color(node) == RB_RED;
 }
 
 /**
  * @brief 节点是否为黑色
  */
-static inline bool rb_is_black(const struct rb_node *node) {
+static inline bool rb_is_black(const struct rb_node *node)
+{
     return rb_color(node) == RB_BLACK;
 }
 
 /**
  * @brief 设置节点为红色
  */
-static inline void rb_set_red(struct rb_node *node) {
+static inline void rb_set_red(struct rb_node *node)
+{
     node->__rb_parent_color &= ~1UL;
 }
 
 /**
  * @brief 设置节点为黑色
  */
-static inline void rb_set_black(struct rb_node *node) {
+static inline void rb_set_black(struct rb_node *node)
+{
     node->__rb_parent_color |= 1UL;
 }
 
 /**
  * @brief 检查节点是否为空
  */
-static inline bool RB_EMPTY_NODE(const struct rb_node *node) {
+static inline bool RB_EMPTY_NODE(const struct rb_node *node)
+{
     return node->__rb_parent_color == 0UL;
 }
 
 /**
  * @brief 检查树是否为空
  */
-static inline bool RB_EMPTY_ROOT(const struct rb_root *root) {
+static inline bool RB_EMPTY_ROOT(const struct rb_root *root)
+{
     return root->rb_node == NULL;
 }
 
 /**
  * @brief 获取包含该节点的结构体指针
  */
-#define rb_entry(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
+#define rb_entry(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
 
 /**
  * @brief 红黑树查找
@@ -147,11 +166,9 @@ static inline bool RB_EMPTY_ROOT(const struct rb_root *root) {
  * @param compare 比较函数
  * @return 找到的节点，NULL表示未找到
  */
-typedef int (*rb_compare_func)(const struct rb_node *a,
-                                const struct rb_node *b);
+typedef int (*rb_compare_func)(const struct rb_node *a, const struct rb_node *b);
 
-struct rb_node *rb_find(const struct rb_root *root,
-                        const struct rb_node *node,
+struct rb_node *rb_find(const struct rb_root *root, const struct rb_node *node,
                         rb_compare_func compare);
 
 /**
@@ -160,9 +177,7 @@ struct rb_node *rb_find(const struct rb_root *root,
  * @param node 要插入的节点
  * @param compare 比较函数
  */
-void rb_insert(struct rb_root *root,
-               struct rb_node *node,
-               rb_compare_func compare);
+void rb_insert(struct rb_root *root, struct rb_node *node, rb_compare_func compare);
 
 /**
  * @brief 红黑树删除
@@ -204,29 +219,24 @@ struct rb_node *rb_prev(const struct rb_node *node);
  * @param victim 被替换的节点
  * @param new_node 新节点
  */
-void rb_replace_node(struct rb_node *victim,
-                     struct rb_node *new_node,
-                     struct rb_root *root);
+void rb_replace_node(struct rb_node *victim, struct rb_node *new_node, struct rb_root *root);
 
 /**
  * @brief 遍历红黑树
  */
-#define rb_for_each(pos, root) \
-    for (pos = rb_first(root); pos != NULL; pos = rb_next(pos))
+#define rb_for_each(pos, root) for (pos = rb_first(root); pos != NULL; pos = rb_next(pos))
 
 /**
  * @brief 遍历红黑树节点对应的结构体
  */
-#define rb_for_each_entry(pos, root, member) \
-    for (pos = rb_entry(rb_first(root), typeof(*pos), member); \
-         &pos->member != NULL; \
+#define rb_for_each_entry(pos, root, member)                                         \
+    for (pos = rb_entry(rb_first(root), typeof(*pos), member); &pos->member != NULL; \
          pos = rb_entry(rb_next(&pos->member), typeof(*pos), member))
 
 /**
  * @brief 后序遍历释放红黑树
  */
-void rb_free_subtree(struct rb_node *node,
-                     void (*free_func)(struct rb_node *node));
+void rb_free_subtree(struct rb_node *node, void (*free_func)(struct rb_node *node));
 
 #ifdef __cplusplus
 }

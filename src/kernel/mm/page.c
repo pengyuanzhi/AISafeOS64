@@ -20,7 +20,8 @@
 /**
  * @brief 页分配器结构
  */
-typedef struct {
+typedef struct
+{
     uint64_t base_addr;       /**< 物理内存基址 */
     uint64_t total_pages;     /**< 总页数 */
     uint64_t free_pages;      /**< 空闲页数 */
@@ -51,7 +52,8 @@ static uint32_t g_page_bitmap[MAX_BITMAP_WORDS];
  *          - 初始化位图
  *          - 标记所有页为空闲
  */
-int page_allocator_init(uint64_t base_addr, uint64_t size) {
+int page_allocator_init(uint64_t base_addr, uint64_t size)
+{
     /* 参数验证 */
     if (base_addr == 0UL) {
         return -ERROR_INVALID_PARAM;
@@ -102,7 +104,8 @@ int page_allocator_init(uint64_t base_addr, uint64_t size) {
  *          - O(N)时间复杂度（后续优化）
  *          - 标记页为已分配
  */
-uint64_t page_alloc(void) {
+uint64_t page_alloc(void)
+{
     /* 查找第一个空闲页 */
     for (uint64_t word_idx = 0UL; word_idx < g_page_allocator.total_pages / 32U; word_idx++) {
         uint32_t word = g_page_allocator.bitmap[word_idx];
@@ -124,7 +127,7 @@ uint64_t page_alloc(void) {
 
             /* 检查是否超出范围 */
             if (page_nr >= g_page_allocator.total_pages) {
-                return 0UL;  /* 无可用页 */
+                return 0UL; /* 无可用页 */
             }
 
             /* 标记为已分配 */
@@ -139,7 +142,7 @@ uint64_t page_alloc(void) {
         }
     }
 
-    return 0UL;  /* 无可用页 */
+    return 0UL; /* 无可用页 */
 }
 
 /**
@@ -150,7 +153,8 @@ uint64_t page_alloc(void) {
  *          - 验证地址对齐
  *          - 验证地址范围
  */
-void page_free(uint64_t addr) {
+void page_free(uint64_t addr)
+{
     /* 参数验证 */
     if (addr == 0UL) {
         return;

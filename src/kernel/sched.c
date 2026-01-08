@@ -18,6 +18,7 @@
 #include "bitmap.h"
 #include "rbtree.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * External Declarations (Scheduling Classes)
@@ -56,7 +57,8 @@ static uint64_t scheduler_ticks = 0ULL;
  *
  * @note Uses CLZ instruction for O(1) lookup
  */
-uint32_t find_highest_priority(const uint64_t *bitmap) {
+uint32_t find_highest_priority(const uint64_t *bitmap)
+{
     uint32_t word_idx;
     uint64_t bitmap_u64;
     uint32_t bit_offset;
@@ -84,18 +86,18 @@ uint32_t find_highest_priority(const uint64_t *bitmap) {
  * @param prio Priority level (0-255)
  * @return Weight value
  */
-uint32_t prio_to_weight(uint32_t prio) {
+uint32_t prio_to_weight(uint32_t prio)
+{
     /* Static weight table (similar to Linux) */
     static const uint32_t prio_to_weight_array[40] = {
         /* -20 */ 88761, 71755, 56483, 46273, 36291,
         /* -15 */ 29154, 23254, 18705, 14949, 11916,
-        /* -10 */  9548,  7620,  6100,  4904,  3906,
-        /*  -5 */  3121,  2501,  1991,  1586,  1277,
-        /*   0 */  1024,   820,   655,   526,   423,
-        /*   5 */   335,   272,   215,   172,   137,
-        /*  10 */   110,    87,    70,    56,    45,
-        /*  15 */    36,    29,    23,    18,    15
-    };
+        /* -10 */ 9548,  7620,  6100,  4904,  3906,
+        /*  -5 */ 3121,  2501,  1991,  1586,  1277,
+        /*   0 */ 1024,  820,   655,   526,   423,
+        /*   5 */ 335,   272,   215,   172,   137,
+        /*  10 */ 110,   87,    70,    56,    45,
+        /*  15 */ 36,    29,    23,    18,    15};
 
     /* Map priority 0-255 to weight index */
     if (prio >= 128U) {
@@ -112,10 +114,11 @@ uint32_t prio_to_weight(uint32_t prio) {
  * @brief Get scheduler clock
  * @return Current time in nanoseconds
  */
-uint64_t sched_clock(void) {
+uint64_t sched_clock(void)
+{
     /* TODO: Implement actual clock read */
     /* For now, return tick count in nanoseconds */
-    return scheduler_ticks * 1000000ULL;  /* 1 tick = 1ms = 1,000,000 ns */
+    return scheduler_ticks * 1000000ULL; /* 1 tick = 1ms = 1,000,000 ns */
 }
 
 /**
@@ -123,7 +126,8 @@ uint64_t sched_clock(void) {
  * @param cpu CPU ID
  * @return Run queue pointer
  */
-struct rq *cpu_rq(uint32_t cpu) {
+struct rq *cpu_rq(uint32_t cpu)
+{
     if (cpu >= MAX_CPUS) {
         return NULL;
     }
@@ -134,7 +138,8 @@ struct rq *cpu_rq(uint32_t cpu) {
  * @brief Get current CPU's run queue
  * @return Run queue pointer
  */
-struct rq *this_rq(void) {
+struct rq *this_rq(void)
+{
     uint32_t cpu = smp_processor_id();
     return cpu_rq(cpu);
 }
@@ -143,7 +148,8 @@ struct rq *this_rq(void) {
  * @brief Get current CPU ID
  * @return CPU ID
  */
-uint32_t smp_processor_id(void) {
+uint32_t smp_processor_id(void)
+{
     /* TODO: Implement actual CPU ID read */
     /* For now, return 0 */
     return 0U;
@@ -158,22 +164,19 @@ uint32_t smp_processor_id(void) {
  * @param class Scheduling class pointer
  * @return 0 on success, negative error code on failure
  */
-int register_sched_class(const SchedClass_t *class) {
+int register_sched_class(const SchedClass_t *class)
+{
     const SchedClass_t **link;
 
     /* Parameter validation */
     if (class == NULL) {
-        return -1;  /* EINVAL */
+        return -1; /* EINVAL */
     }
 
     /* Check core operations */
-    if ((class->init == NULL) ||
-        (class->enqueue == NULL) ||
-        (class->dequeue == NULL) ||
-        (class->pick_next == NULL) ||
-        (class->task_tick == NULL) ||
-        (class->update_curr == NULL)) {
-        return -1;  /* EINVAL */
+    if ((class->init == NULL) || (class->enqueue == NULL) || (class->dequeue == NULL) ||
+        (class->pick_next == NULL) || (class->task_tick == NULL) || (class->update_curr == NULL)) {
+        return -1; /* EINVAL */
     }
 
     /* Insert into linked list (sorted by priority) */
@@ -201,13 +204,14 @@ int register_sched_class(const SchedClass_t *class) {
  * @brief Initialize multi-core scheduler
  * @return 0 on success, negative error code on failure
  */
-int scheduler_init(void) {
+int scheduler_init(void)
+{
     uint32_t cpu;
     int ret;
 
     /* Check if already initialized */
     if (scheduler_initialized != 0U) {
-        return -1;  /* EALREADY */
+        return -1; /* EALREADY */
     }
 
     /* Initialize per-CPU run queues */
@@ -301,7 +305,8 @@ int scheduler_init(void) {
  * @note Iterates through scheduling classes
  * @note Returns idle task if no other tasks available
  */
-TCB_t *pick_next_task(struct rq *rq) {
+TCB_t *pick_next_task(struct rq *rq)
+{
     const SchedClass_t *class;
     TCB_t *next_task;
 
@@ -334,7 +339,8 @@ TCB_t *pick_next_task(struct rq *rq) {
  * @brief Enqueue task to ready queue
  * @param task Task control block pointer
  */
-void enqueue_task(TCB_t *task) {
+void enqueue_task(TCB_t *task)
+{
     struct rq *rq;
     const SchedClass_t *class;
 
@@ -372,7 +378,8 @@ void enqueue_task(TCB_t *task) {
  * @brief Dequeue task from ready queue
  * @param task Task control block pointer
  */
-void dequeue_task(TCB_t *task) {
+void dequeue_task(TCB_t *task)
+{
     struct rq *rq;
     const SchedClass_t *class;
 
@@ -407,7 +414,8 @@ void dequeue_task(TCB_t *task) {
 /**
  * @brief Main scheduler function
  */
-void schedule(void) {
+void schedule(void)
+{
     struct rq *rq;
     TCB_t *prev;
     TCB_t *next;
@@ -461,7 +469,8 @@ void schedule(void) {
  * @brief Scheduler tick handler
  * @param cpu CPU ID
  */
-void scheduler_tick(uint32_t cpu) {
+void scheduler_tick(uint32_t cpu)
+{
     struct rq *rq;
     TCB_t *curr;
     const SchedClass_t *class;
@@ -510,7 +519,8 @@ void scheduler_tick(uint32_t cpu) {
 /**
  * @brief Yield CPU to other tasks
  */
-void yield(void) {
+void yield(void)
+{
     struct rq *rq;
     TCB_t *curr;
     const SchedClass_t *class;
@@ -559,9 +569,9 @@ void yield(void) {
  * @param policy Scheduling policy
  * @return Task ID on success, 0 on failure
  */
-uint32_t task_create(const char *name, uint8_t prio,
-                     uint32_t stack_size, void (*entry)(void),
-                     SchedPolicy_t policy) {
+uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (*entry)(void),
+                     SchedPolicy_t policy)
+{
     TCB_t *task;
     uint32_t tid;
     struct rq *rq;
@@ -584,15 +594,15 @@ uint32_t task_create(const char *name, uint8_t prio,
     }
 
     /* Allocate task */
-    task = (TCB_t *)malloc(sizeof(TCB_t));
+    task = (TCB_t *)kmalloc(sizeof(TCB_t));
     if (task == NULL) {
         return 0U;
     }
 
     /* Allocate stack */
-    task->stack_base = (uint64_t)malloc(stack_size);
+    task->stack_base = (uint64_t)kmalloc((uint64_t)stack_size);
     if (task->stack_base == 0ULL) {
-        free(task);
+        kfree(task);
         return 0U;
     }
 
@@ -602,7 +612,7 @@ uint32_t task_create(const char *name, uint8_t prio,
     task->prio = prio;
     task->static_prio = prio;
     task->normal_prio = prio;
-    task->cpu_affinity = 0x01U;  /* CPU 0 */
+    task->cpu_affinity = 0x01U; /* CPU 0 */
     task->stack_size = stack_size;
     task->stack_ptr = task->stack_base + stack_size;
 
@@ -634,8 +644,8 @@ uint32_t task_create(const char *name, uint8_t prio,
     /* Get run queue */
     rq = this_rq();
     if (rq == NULL) {
-        free((void *)task->stack_base);
-        free(task);
+        kfree((void *)task->stack_base);
+        kfree(task);
         return 0U;
     }
 
@@ -658,12 +668,13 @@ uint32_t task_create(const char *name, uint8_t prio,
  * @brief Exit current task
  * @param code Exit code
  */
-void task_exit(int code) {
+void task_exit(int code)
+{
     struct rq *rq;
     TCB_t *curr;
     unsigned long flags;
 
-    (void)code;  /* Unused parameter */
+    (void)code; /* Unused parameter */
 
     /* Get run queue */
     rq = this_rq();

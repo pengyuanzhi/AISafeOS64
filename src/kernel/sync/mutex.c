@@ -60,8 +60,7 @@ static inline void set_task_priority(void *task, uint32_t priority)
  */
 void mutex_init(mutex_t *mutex, uint32_t ceiling_priority)
 {
-    if (mutex == NULL)
-    {
+    if (mutex == NULL) {
         return;
     }
 
@@ -83,26 +82,22 @@ void mutex_init(mutex_t *mutex, uint32_t ceiling_priority)
  */
 int mutex_lock(mutex_t *mutex)
 {
-    if (mutex == NULL)
-    {
+    if (mutex == NULL) {
         return -ERROR_INVALID_PARAM;
     }
 
     void *current_task = get_current_task();
 
     /* 检查是否为递归锁（当前任务已持有） */
-    if ((mutex->owner == current_task) && (mutex->locked != 0U))
-    {
+    if ((mutex->owner == current_task) && (mutex->locked != 0U)) {
         mutex->lock_count++;
         return ERROR_SUCCESS;
     }
 
     /* 尝试获取锁 */
-    while (1)
-    {
+    while (1) {
         /* 原子尝试加锁（使用标准原子操作） */
-        if (atomic_cas_u32(&mutex->locked, 0U, 1U))
-        {
+        if (atomic_cas_u32(&mutex->locked, 0U, 1U)) {
             /* 成功获取锁 */
             break;
         }
@@ -116,22 +111,16 @@ int mutex_lock(mutex_t *mutex)
     mutex->lock_count = 1U;
 
     /* 优先级天花板协议 */
-    if (mutex->ceiling_priority != 0U)
-    {
+    if (mutex->ceiling_priority != 0U) {
         uint32_t current_priority = get_current_priority();
-        if (current_priority < mutex->ceiling_priority)
-        {
+        if (current_priority < mutex->ceiling_priority) {
             /* 提升优先级到天花板 */
             set_task_priority(current_task, mutex->ceiling_priority);
             mutex->owner_priority = current_priority;
-        }
-        else
-        {
+        } else {
             mutex->owner_priority = current_priority;
         }
-    }
-    else
-    {
+    } else {
         mutex->owner_priority = get_current_priority();
     }
 
@@ -147,23 +136,20 @@ int mutex_lock(mutex_t *mutex)
  */
 int mutex_trylock(mutex_t *mutex)
 {
-    if (mutex == NULL)
-    {
+    if (mutex == NULL) {
         return -ERROR_INVALID_PARAM;
     }
 
     void *current_task = get_current_task();
 
     /* 检查是否为递归锁 */
-    if ((mutex->owner == current_task) && (mutex->locked != 0U))
-    {
+    if ((mutex->owner == current_task) && (mutex->locked != 0U)) {
         mutex->lock_count++;
         return ERROR_SUCCESS;
     }
 
     /* 尝试获取锁（非阻塞，使用标准原子操作） */
-    if (!atomic_cas_u32(&mutex->locked, 0U, 1U))
-    {
+    if (!atomic_cas_u32(&mutex->locked, 0U, 1U)) {
         /* 锁已被其他任务持有 */
         return -ERROR_BUSY;
     }
@@ -173,21 +159,15 @@ int mutex_trylock(mutex_t *mutex)
     mutex->lock_count = 1U;
 
     /* 优先级天花板协议 */
-    if (mutex->ceiling_priority != 0U)
-    {
+    if (mutex->ceiling_priority != 0U) {
         uint32_t current_priority = get_current_priority();
-        if (current_priority < mutex->ceiling_priority)
-        {
+        if (current_priority < mutex->ceiling_priority) {
             set_task_priority(current_task, mutex->ceiling_priority);
             mutex->owner_priority = current_priority;
-        }
-        else
-        {
+        } else {
             mutex->owner_priority = current_priority;
         }
-    }
-    else
-    {
+    } else {
         mutex->owner_priority = get_current_priority();
     }
 
@@ -205,33 +185,28 @@ int mutex_trylock(mutex_t *mutex)
  */
 int mutex_unlock(mutex_t *mutex)
 {
-    if (mutex == NULL)
-    {
+    if (mutex == NULL) {
         return -ERROR_INVALID_PARAM;
     }
 
     void *current_task = get_current_task();
 
     /* 检查锁是否被当前任务持有 */
-    if (mutex->owner != current_task)
-    {
+    if (mutex->owner != current_task) {
         /* 当前任务未持有锁 */
         return -ERROR_INVALID_STATE;
     }
 
     /* 递归锁计数减1 */
     mutex->lock_count--;
-    if (mutex->lock_count != 0U)
-    {
+    if (mutex->lock_count != 0U) {
         /* 递归锁尚未完全释放 */
         return ERROR_SUCCESS;
     }
 
     /* 恢复原始优先级 */
-    if (mutex->ceiling_priority != 0U)
-    {
-        if (mutex->owner_priority < mutex->ceiling_priority)
-        {
+    if (mutex->ceiling_priority != 0U) {
+        if (mutex->owner_priority < mutex->ceiling_priority) {
             set_task_priority(current_task, mutex->owner_priority);
         }
     }
@@ -256,8 +231,7 @@ int mutex_unlock(mutex_t *mutex)
  */
 bool mutex_is_held(mutex_t *mutex)
 {
-    if (mutex == NULL)
-    {
+    if (mutex == NULL) {
         return false;
     }
 

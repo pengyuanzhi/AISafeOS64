@@ -21,54 +21,55 @@
 /**
  * @brief GICv3 Distributor寄存器偏移
  */
-#define GICD_CTLR           0x0000  /**< Distributor控制寄存器 */
-#define GICD_TYPER          0x0004  /**< 中断类型寄存器 */
-#define GICD_IIDR           0x0008  /**< 实现ID寄存器 */
-#define GICD_IGROUPR        0x0080  /**< 中断分组寄存器 */
-#define GICD_ISENABLER      0x0100  /**< 中断使能设置寄存器 */
-#define GICD_ICENABLER      0x0180  /**< 中断使能清除寄存器 */
-#define GICD_ISPENDR        0x0200  /**< 中断挂起设置寄存器 */
-#define GICD_ICPENDR        0x0280  /**< 中断挂起清除寄存器 */
-#define GICD_ISACTIVER      0x0300  /**< 中断激活设置寄存器 */
-#define GICD_ICACTIVER      0x0380  /**< 中断激活清除寄存器 */
-#define GICD_IPRIORITYR     0x0400  /**< 中断优先级寄存器 */
-#define GICD_ITARGETSR      0x0800  /**< 中断处理器目标寄存器 */
-#define GICD_ICFGR          0x0C00  /**< 中断配置寄存器 */
-#define GICD_SGIR           0x0F00  /**< 软件中断生成寄存器 */
+#define GICD_CTLR 0x0000       /**< Distributor控制寄存器 */
+#define GICD_TYPER 0x0004      /**< 中断类型寄存器 */
+#define GICD_IIDR 0x0008       /**< 实现ID寄存器 */
+#define GICD_IGROUPR 0x0080    /**< 中断分组寄存器 */
+#define GICD_ISENABLER 0x0100  /**< 中断使能设置寄存器 */
+#define GICD_ICENABLER 0x0180  /**< 中断使能清除寄存器 */
+#define GICD_ISPENDR 0x0200    /**< 中断挂起设置寄存器 */
+#define GICD_ICPENDR 0x0280    /**< 中断挂起清除寄存器 */
+#define GICD_ISACTIVER 0x0300  /**< 中断激活设置寄存器 */
+#define GICD_ICACTIVER 0x0380  /**< 中断激活清除寄存器 */
+#define GICD_IPRIORITYR 0x0400 /**< 中断优先级寄存器 */
+#define GICD_ITARGETSR 0x0800  /**< 中断处理器目标寄存器 */
+#define GICD_ICFGR 0x0C00      /**< 中断配置寄存器 */
+#define GICD_SGIR 0x0F00       /**< 软件中断生成寄存器 */
 
 /**
  * @brief GICv3 Redistributor寄存器偏移
  */
-#define GICR_CTLR           0x0000  /**< Redistributor控制寄存器 */
-#define GICR_TYPER          0x0008  /**< Redistributor类型寄存器 */
-#define GICR_WAKER          0x0014  /**< 唤醒寄存器 */
-#define GICR_ISENABLER0     0x0100  /**< 中断使能设置寄存器0 (SGI+PPI) */
-#define GICR_ICENABLER0     0x0180  /**< 中断使能清除寄存器0 (SGI+PPI) */
-#define GICR_ISPENDR0       0x0200  /**< 中断挂起设置寄存器0 (SGI+PPI) */
-#define GICR_ICPENDR0       0x0280  /**< 中断挂起清除寄存器0 (SGI+PPI) */
-#define GICR_IPRIORITYR     0x0400  /**< 中断优先级寄存器 (SGI+PPI) */
-#define GICR_ICFGR0         0x0C00  /**< 中断配置寄存器0 (SGI) */
-#define GICR_ICFGR1         0x0C04  /**< 中断配置寄存器1 (PPI) */
+#define GICR_CTLR 0x0000       /**< Redistributor控制寄存器 */
+#define GICR_TYPER 0x0008      /**< Redistributor类型寄存器 */
+#define GICR_WAKER 0x0014      /**< 唤醒寄存器 */
+#define GICR_ISENABLER0 0x0100 /**< 中断使能设置寄存器0 (SGI+PPI) */
+#define GICR_ICENABLER0 0x0180 /**< 中断使能清除寄存器0 (SGI+PPI) */
+#define GICR_ISPENDR0 0x0200   /**< 中断挂起设置寄存器0 (SGI+PPI) */
+#define GICR_ICPENDR0 0x0280   /**< 中断挂起清除寄存器0 (SGI+PPI) */
+#define GICR_IPRIORITYR 0x0400 /**< 中断优先级寄存器 (SGI+PPI) */
+#define GICR_ICFGR0 0x0C00     /**< 中断配置寄存器0 (SGI) */
+#define GICR_ICFGR1 0x0C04     /**< 中断配置寄存器1 (PPI) */
 
 /**
  * @brief QEMU virt平台GIC地址
  */
-#define GICD_BASE           0x08000000UL  /**< GIC Distributor基址 */
-#define GICR_BASE           0x080A0000UL  /**< GIC Redistributor基址 */
+#define GICD_BASE 0x08000000UL /**< GIC Distributor基址 */
+#define GICR_BASE 0x080A0000UL /**< GIC Redistributor基址 */
 
 /**
  * @brief GIC寄存器访问宏
  */
-#define GICD_READ(offset)       (*(volatile uint32_t *)(GICD_BASE + (offset)))
+#define GICD_READ(offset) (*(volatile uint32_t *)(GICD_BASE + (offset)))
 #define GICD_WRITE(offset, val) (*(volatile uint32_t *)(GICD_BASE + (offset)) = (val))
-#define GICR_READ(offset)       (*(volatile uint32_t *)(GICR_BASE + (offset)))
+#define GICR_READ(offset) (*(volatile uint32_t *)(GICR_BASE + (offset)))
 #define GICR_WRITE(offset, val) (*(volatile uint32_t *)(GICR_BASE + (offset)) = (val))
 
 /**
  * @brief GIC初始化
  * @return 成功返回0，失败返回负错误码
  */
-int gic_init(void) {
+int gic_init(void)
+{
     uint32_t typer, iidr;
     uint32_t num_irqs, i;
 
@@ -76,7 +77,7 @@ int gic_init(void) {
 
     /* 读取GICD类型 */
     typer = GICD_READ(GICD_TYPER);
-    num_irqs = ((typer & 0x1F) + 1) * 32;  /* ITLinesNumber字段 */
+    num_irqs = ((typer & 0x1F) + 1) * 32; /* ITLinesNumber字段 */
     printk("[INIT] GICv3: Maximum IRQs: %u\n", num_irqs);
 
     /* 读取GICD实现ID */
@@ -116,7 +117,7 @@ int gic_init(void) {
 
     /* 唤醒Redistributor */
     uint32_t waker = GICR_READ(GICR_WAKER);
-    waker &= ~0x2;  /* 清除ProcessorSleep */
+    waker &= ~0x2; /* 清除ProcessorSleep */
     GICR_WRITE(GICR_WAKER, waker);
 
     /* 等待唤醒完成 */
@@ -136,8 +137,8 @@ int gic_init(void) {
     }
 
     /* 配置SGI和PPI为电平触发 (SGI固定为电平触发，PPI大部分为边沿触发) */
-    GICR_WRITE(GICR_ICFGR0, 0);  /* SGI: 电平触发 */
-    GICR_WRITE(GICR_ICFGR1, 0);  /* PPI: 电平触发 */
+    GICR_WRITE(GICR_ICFGR0, 0); /* SGI: 电平触发 */
+    GICR_WRITE(GICR_ICFGR1, 0); /* PPI: 电平触发 */
 
     /* 使能GIC Distributor */
     GICD_WRITE(GICD_CTLR, 1);
@@ -152,7 +153,8 @@ int gic_init(void) {
  * @param irq 中断号
  * @return 成功返回0，失败返回负错误码
  */
-int irq_enable(uint32_t irq) {
+int irq_enable(uint32_t irq)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -173,7 +175,8 @@ int irq_enable(uint32_t irq) {
  * @param irq 中断号
  * @return 成功返回0，失败返回负错误码
  */
-int irq_disable(uint32_t irq) {
+int irq_disable(uint32_t irq)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -195,7 +198,8 @@ int irq_disable(uint32_t irq) {
  * @param priority 优先级 (0-255)
  * @return 成功返回0，失败返回负错误码
  */
-int irq_set_priority(uint32_t irq, uint32_t priority) {
+int irq_set_priority(uint32_t irq, uint32_t priority)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -228,7 +232,8 @@ int irq_set_priority(uint32_t irq, uint32_t priority) {
  * @param trigger 触发方式
  * @return 成功返回0，失败返回负错误码
  */
-int irq_set_trigger(uint32_t irq, irq_trigger_t trigger) {
+int irq_set_trigger(uint32_t irq, irq_trigger_t trigger)
+{
     if (irq >= 1020) {
         return -ERROR_INVALID_PARAM;
     }
@@ -275,7 +280,8 @@ int irq_set_trigger(uint32_t irq, irq_trigger_t trigger) {
  * @param sgi SGI中断号 (0-15)
  * @return 成功返回0，失败返回负错误码
  */
-int irq_send_sgi(uint8_t target_cpu, uint8_t sgi) {
+int irq_send_sgi(uint8_t target_cpu, uint8_t sgi)
+{
     if (sgi > 15) {
         return -ERROR_INVALID_PARAM;
     }

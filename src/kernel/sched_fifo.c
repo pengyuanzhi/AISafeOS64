@@ -25,10 +25,11 @@
 /**
  * @brief FIFO run queue (per-priority)
  */
-typedef struct fifo_rq {
-    struct list_head queue_array[256];  /**< 256 priority queues */
-    uint64_t priority_bitmap[4];        /**< 256-bit bitmap */
-    uint32_t nr_running;                /**< Number of running tasks */
+typedef struct fifo_rq
+{
+    struct list_head queue_array[256]; /**< 256 priority queues */
+    uint64_t priority_bitmap[4];       /**< 256-bit bitmap */
+    uint32_t nr_running;               /**< Number of running tasks */
 } fifo_rq_t;
 
 /*
@@ -43,35 +44,33 @@ static void fifo_sched_tick(struct rq *rq, TCB_t *task);
 static void fifo_sched_update_curr(struct rq *rq);
 static void fifo_sched_yield(struct rq *rq, TCB_t *task);
 static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task);
-static int fifo_sched_switch_to(struct rq *rq, TCB_t *task,
-                                 const struct SchedClass *new_class);
+static int fifo_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class);
 static int fifo_sched_get_stats(const struct rq *rq, void *stats);
 
 /*
  * FIFO Scheduling Class Definition
  */
 
-const SchedClass_t sched_class_fifo = {
-    .name = "FIFO",
-    .priority = 10U,
-    .flags = SCHED_CLASS_FLAG_REALTIME | SCHED_CLASS_FLAG_PREEMPT,
-    .id = SCHED_FIFO,
+const SchedClass_t sched_class_fifo = {.name = "FIFO",
+                                       .priority = 10U,
+                                       .flags =
+                                           SCHED_CLASS_FLAG_REALTIME | SCHED_CLASS_FLAG_PREEMPT,
+                                       .id = SCHED_FIFO,
 
-    /* Core operations */
-    .init = fifo_sched_init,
-    .enqueue = fifo_sched_enqueue,
-    .dequeue = fifo_sched_dequeue,
-    .pick_next = fifo_sched_pick_next,
-    .task_tick = fifo_sched_tick,
-    .update_curr = fifo_sched_update_curr,
+                                       /* Core operations */
+                                       .init = fifo_sched_init,
+                                       .enqueue = fifo_sched_enqueue,
+                                       .dequeue = fifo_sched_dequeue,
+                                       .pick_next = fifo_sched_pick_next,
+                                       .task_tick = fifo_sched_tick,
+                                       .update_curr = fifo_sched_update_curr,
 
-    /* Optional operations */
-    .yield = fifo_sched_yield,
-    .can_preempt = fifo_sched_can_preempt,
-    .task_fork = NULL,
-    .switch_to = fifo_sched_switch_to,
-    .get_stats = fifo_sched_get_stats
-};
+                                       /* Optional operations */
+                                       .yield = fifo_sched_yield,
+                                       .can_preempt = fifo_sched_can_preempt,
+                                       .task_fork = NULL,
+                                       .switch_to = fifo_sched_switch_to,
+                                       .get_stats = fifo_sched_get_stats};
 
 /*
  * Helper Functions
@@ -82,7 +81,8 @@ const SchedClass_t sched_class_fifo = {
  * @param rq Generic run queue
  * @return FIFO run queue pointer
  */
-static fifo_rq_t *get_fifo_rq(struct rq *rq) {
+static fifo_rq_t *get_fifo_rq(struct rq *rq)
+{
     if (rq == NULL) {
         return NULL;
     }
@@ -98,14 +98,15 @@ static fifo_rq_t *get_fifo_rq(struct rq *rq) {
  * @param rq Run queue pointer
  * @return 0 on success
  */
-static int fifo_sched_init(struct rq *rq) {
+static int fifo_sched_init(struct rq *rq)
+{
     fifo_rq_t *fifo_rq;
     uint32_t i;
 
     /* Allocate FIFO run queue */
     fifo_rq = (fifo_rq_t *)malloc(sizeof(fifo_rq_t));
     if (fifo_rq == NULL) {
-        return -1;  /* ENOMEM */
+        return -1; /* ENOMEM */
     }
 
     /* Initialize priority queues */
@@ -130,7 +131,8 @@ static int fifo_sched_init(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void fifo_sched_enqueue(struct rq *rq, TCB_t *task) {
+static void fifo_sched_enqueue(struct rq *rq, TCB_t *task)
+{
     fifo_rq_t *fifo_rq;
     struct list_head *queue;
     uint32_t prio;
@@ -167,7 +169,8 @@ static void fifo_sched_enqueue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @param task Task control block pointer
  */
-static void fifo_sched_dequeue(struct rq *rq, TCB_t *task) {
+static void fifo_sched_dequeue(struct rq *rq, TCB_t *task)
+{
     fifo_rq_t *fifo_rq;
     uint32_t prio;
 
@@ -204,7 +207,8 @@ static void fifo_sched_dequeue(struct rq *rq, TCB_t *task) {
  * @param rq Run queue pointer
  * @return Task control block pointer, NULL if no task
  */
-static TCB_t *fifo_sched_pick_next(struct rq *rq) {
+static TCB_t *fifo_sched_pick_next(struct rq *rq)
+{
     fifo_rq_t *fifo_rq;
     struct list_head *queue;
     TCB_t *task;
@@ -242,7 +246,7 @@ static TCB_t *fifo_sched_pick_next(struct rq *rq) {
 
     /* Check if valid priority found */
     if (prio == 255U) {
-        return NULL;  /* Should not happen if nr_running > 0 */
+        return NULL; /* Should not happen if nr_running > 0 */
     }
 
     /* Get priority queue */
@@ -270,7 +274,8 @@ static TCB_t *fifo_sched_pick_next(struct rq *rq) {
  *
  * @note FIFO does not use time slices
  */
-static void fifo_sched_tick(struct rq *rq, TCB_t *task) {
+static void fifo_sched_tick(struct rq *rq, TCB_t *task)
+{
     /* FIFO tasks run until they yield or block */
     /* No time slice management needed */
     (void)rq;
@@ -281,7 +286,8 @@ static void fifo_sched_tick(struct rq *rq, TCB_t *task) {
  * @brief Update current task runtime
  * @param rq Run queue pointer
  */
-static void fifo_sched_update_curr(struct rq *rq) {
+static void fifo_sched_update_curr(struct rq *rq)
+{
     TCB_t *curr;
     uint64_t now;
     uint64_t delta;
@@ -310,7 +316,8 @@ static void fifo_sched_update_curr(struct rq *rq) {
  * @param rq Run queue pointer
  * @param task Task yielding
  */
-static void fifo_sched_yield(struct rq *rq, TCB_t *task) {
+static void fifo_sched_yield(struct rq *rq, TCB_t *task)
+{
     fifo_rq_t *fifo_rq;
     struct list_head *queue;
     uint32_t prio;
@@ -341,7 +348,8 @@ static void fifo_sched_yield(struct rq *rq, TCB_t *task) {
  * @param task Task to check
  * @return 1 if can preempt, 0 otherwise
  */
-static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
+static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task)
+{
     const fifo_rq_t *fifo_rq;
     uint32_t prio;
     uint32_t highest_prio;
@@ -388,8 +396,8 @@ static int fifo_sched_can_preempt(const struct rq *rq, const TCB_t *task) {
  * @param new_class New scheduling class
  * @return 0 on success, negative error code on failure
  */
-static int fifo_sched_switch_to(struct rq *rq, TCB_t *task,
-                                 const struct SchedClass *new_class) {
+static int fifo_sched_switch_to(struct rq *rq, TCB_t *task, const struct SchedClass *new_class)
+{
     /* Dequeue from FIFO */
     fifo_sched_dequeue(rq, task);
 
@@ -412,12 +420,13 @@ static int fifo_sched_switch_to(struct rq *rq, TCB_t *task,
  * @param stats Output: statistics
  * @return 0 on success
  */
-static int fifo_sched_get_stats(const struct rq *rq, void *stats) {
+static int fifo_sched_get_stats(const struct rq *rq, void *stats)
+{
     const fifo_rq_t *fifo_rq;
     SchedStats_t *s = (SchedStats_t *)stats;
 
     if ((rq == NULL) || (stats == NULL)) {
-        return -1;  /* EINVAL */
+        return -1; /* EINVAL */
     }
 
     /* Get FIFO run queue */

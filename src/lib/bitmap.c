@@ -19,7 +19,8 @@
  * @param nbits 位图总位数
  * @return 位号，未找到返回-1
  */
-int find_first_set_bit(const uint64_t *bitmap, uint32_t nbits) {
+int find_first_set_bit(const uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -44,7 +45,8 @@ int find_first_set_bit(const uint64_t *bitmap, uint32_t nbits) {
  * @param nbits 位图总位数
  * @return 位号，未找到返回-1
  */
-int find_first_zero_bit(const uint64_t *bitmap, uint32_t nbits) {
+int find_first_zero_bit(const uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -70,7 +72,8 @@ int find_first_zero_bit(const uint64_t *bitmap, uint32_t nbits) {
  * @param nbits 位图总位数
  * @return 位号，未找到返回-1
  */
-int find_last_set_bit(const uint64_t *bitmap, uint32_t nbits) {
+int find_last_set_bit(const uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (int i = (int)nlongs - 1; i >= 0; i--) {
@@ -96,7 +99,8 @@ int find_last_set_bit(const uint64_t *bitmap, uint32_t nbits) {
  * @param start 起始位号
  * @return 位号，未找到返回-1
  */
-int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start) {
+int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
+{
     if (start >= nbits) {
         return -1;
     }
@@ -137,7 +141,8 @@ int find_next_set_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start) {
  * @param start 起始位号
  * @return 位号，未找到返回-1
  */
-int find_next_zero_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start) {
+int find_next_zero_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start)
+{
     if (start >= nbits) {
         return -1;
     }
@@ -178,7 +183,8 @@ int find_next_zero_bit(const uint64_t *bitmap, uint32_t nbits, uint32_t start) {
  * @param nbits 位图总位数
  * @return 置位数
  */
-uint32_t bitmap_count_bits(const uint64_t *bitmap, uint32_t nbits) {
+uint32_t bitmap_count_bits(const uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t count = 0U;
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
@@ -193,8 +199,8 @@ uint32_t bitmap_count_bits(const uint64_t *bitmap, uint32_t nbits) {
 /**
  * @brief 位图与运算
  */
-void bitmap_and(uint64_t *dst, const uint64_t *src1,
-                const uint64_t *src2, uint32_t nbits) {
+void bitmap_and(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -205,8 +211,8 @@ void bitmap_and(uint64_t *dst, const uint64_t *src1,
 /**
  * @brief 位图或运算
  */
-void bitmap_or(uint64_t *dst, const uint64_t *src1,
-               const uint64_t *src2, uint32_t nbits) {
+void bitmap_or(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -217,8 +223,8 @@ void bitmap_or(uint64_t *dst, const uint64_t *src1,
 /**
  * @brief 位图异或运算
  */
-void bitmap_xor(uint64_t *dst, const uint64_t *src1,
-                const uint64_t *src2, uint32_t nbits) {
+void bitmap_xor(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -229,7 +235,8 @@ void bitmap_xor(uint64_t *dst, const uint64_t *src1,
 /**
  * @brief 位图非运算
  */
-void bitmap_not(uint64_t *dst, const uint64_t *src, uint32_t nbits) {
+void bitmap_not(uint64_t *dst, const uint64_t *src, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -240,7 +247,8 @@ void bitmap_not(uint64_t *dst, const uint64_t *src, uint32_t nbits) {
 /**
  * @brief 比较位图
  */
-int bitmap_equal(const uint64_t *src1, const uint64_t *src2, uint32_t nbits) {
+int bitmap_equal(const uint64_t *src1, const uint64_t *src2, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
 
     for (uint32_t i = 0; i < nlongs; i++) {
@@ -255,13 +263,15 @@ int bitmap_equal(const uint64_t *src1, const uint64_t *src2, uint32_t nbits) {
 /**
  * @brief 位图是否为空
  */
-int bitmap_empty(const uint64_t *bitmap, uint32_t nbits) {
+int bitmap_empty(const uint64_t *bitmap, uint32_t nbits)
+{
     return find_first_set_bit(bitmap, nbits) < 0;
 }
 
 /**
  * @brief 位图是否全满
  */
-int bitmap_full(const uint64_t *bitmap, uint32_t nbits) {
+int bitmap_full(const uint64_t *bitmap, uint32_t nbits)
+{
     return find_first_zero_bit(bitmap, nbits) < 0;
 }

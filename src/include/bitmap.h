@@ -26,32 +26,30 @@ extern "C" {
 /**
  * @brief 位图字大小（位）
  */
-#define BITS_PER_LONG   (sizeof(uint64_t) * 8)
+#define BITS_PER_LONG (sizeof(uint64_t) * 8)
 
 /**
  * @brief 位图字对齐
  */
-#define BITS_TO_LONGS(bits) \
-    (((bits) + BITS_PER_LONG - 1) / BITS_PER_LONG)
+#define BITS_TO_LONGS(bits) (((bits) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
 /**
  * @brief 声明位图
  */
-#define DECLARE_BITMAP(name, bits) \
-    uint64_t name[BITS_TO_LONGS(bits)]
+#define DECLARE_BITMAP(name, bits) uint64_t name[BITS_TO_LONGS(bits)]
 
 /**
  * @brief 定义位图
  */
-#define DEFINE_BITMAP(name, bits) \
-    uint64_t name[BITS_TO_LONGS(bits)] = {0}
+#define DEFINE_BITMAP(name, bits) uint64_t name[BITS_TO_LONGS(bits)] = {0}
 
 /**
  * @brief 设置位
  * @param bitmap 位图
  * @param nr 位号
  */
-static inline void set_bit(uint64_t *bitmap, uint32_t nr) {
+static inline void set_bit(uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     bitmap[word] |= (1UL << bit);
@@ -62,7 +60,8 @@ static inline void set_bit(uint64_t *bitmap, uint32_t nr) {
  * @param bitmap 位图
  * @param nr 位号
  */
-static inline void clear_bit(uint64_t *bitmap, uint32_t nr) {
+static inline void clear_bit(uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     bitmap[word] &= ~(1UL << bit);
@@ -73,7 +72,8 @@ static inline void clear_bit(uint64_t *bitmap, uint32_t nr) {
  * @param bitmap 位图
  * @param nr 位号
  */
-static inline void change_bit(uint64_t *bitmap, uint32_t nr) {
+static inline void change_bit(uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     bitmap[word] ^= (1UL << bit);
@@ -85,7 +85,8 @@ static inline void change_bit(uint64_t *bitmap, uint32_t nr) {
  * @param nr 位号
  * @return 位值（0或1）
  */
-static inline int test_bit(const uint64_t *bitmap, uint32_t nr) {
+static inline int test_bit(const uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     return (int)((bitmap[word] >> bit) & 1UL);
@@ -97,7 +98,8 @@ static inline int test_bit(const uint64_t *bitmap, uint32_t nr) {
  * @param nr 位号
  * @return 原始位值
  */
-static inline int test_and_set_bit(uint64_t *bitmap, uint32_t nr) {
+static inline int test_and_set_bit(uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     uint64_t old = bitmap[word];
@@ -111,7 +113,8 @@ static inline int test_and_set_bit(uint64_t *bitmap, uint32_t nr) {
  * @param nr 位号
  * @return 原始位值
  */
-static inline int test_and_clear_bit(uint64_t *bitmap, uint32_t nr) {
+static inline int test_and_clear_bit(uint64_t *bitmap, uint32_t nr)
+{
     uint64_t word = nr / BITS_PER_LONG;
     uint64_t bit = nr % BITS_PER_LONG;
     uint64_t old = bitmap[word];
@@ -176,8 +179,7 @@ uint32_t bitmap_count_bits(const uint64_t *bitmap, uint32_t nbits);
  * @param src2 源位图2
  * @param nbits 位图总位数
  */
-void bitmap_and(uint64_t *dst, const uint64_t *src1,
-                const uint64_t *src2, uint32_t nbits);
+void bitmap_and(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits);
 
 /**
  * @brief 位图或运算
@@ -186,8 +188,7 @@ void bitmap_and(uint64_t *dst, const uint64_t *src1,
  * @param src2 源位图2
  * @param nbits 位图总位数
  */
-void bitmap_or(uint64_t *dst, const uint64_t *src1,
-               const uint64_t *src2, uint32_t nbits);
+void bitmap_or(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits);
 
 /**
  * @brief 位图异或运算
@@ -196,8 +197,7 @@ void bitmap_or(uint64_t *dst, const uint64_t *src1,
  * @param src2 源位图2
  * @param nbits 位图总位数
  */
-void bitmap_xor(uint64_t *dst, const uint64_t *src1,
-                const uint64_t *src2, uint32_t nbits);
+void bitmap_xor(uint64_t *dst, const uint64_t *src1, const uint64_t *src2, uint32_t nbits);
 
 /**
  * @brief 位图非运算
@@ -212,7 +212,8 @@ void bitmap_not(uint64_t *dst, const uint64_t *src, uint32_t nbits);
  * @param bitmap 位图
  * @param nbits 位图总位数
  */
-static inline void bitmap_zero(uint64_t *bitmap, uint32_t nbits) {
+static inline void bitmap_zero(uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
     for (uint32_t i = 0; i < nlongs; i++) {
         bitmap[i] = 0ULL;
@@ -224,7 +225,8 @@ static inline void bitmap_zero(uint64_t *bitmap, uint32_t nbits) {
  * @param bitmap 位图
  * @param nbits 位图总位数
  */
-static inline void bitmap_fill(uint64_t *bitmap, uint32_t nbits) {
+static inline void bitmap_fill(uint64_t *bitmap, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
     for (uint32_t i = 0; i < nlongs; i++) {
         bitmap[i] = ~0ULL;
@@ -237,8 +239,8 @@ static inline void bitmap_fill(uint64_t *bitmap, uint32_t nbits) {
  * @param src 源位图
  * @param nbits 位图总位数
  */
-static inline void bitmap_copy(uint64_t *dst, const uint64_t *src,
-                               uint32_t nbits) {
+static inline void bitmap_copy(uint64_t *dst, const uint64_t *src, uint32_t nbits)
+{
     uint32_t nlongs = BITS_TO_LONGS(nbits);
     for (uint32_t i = 0; i < nlongs; i++) {
         dst[i] = src[i];

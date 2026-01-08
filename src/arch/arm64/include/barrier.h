@@ -72,13 +72,13 @@ extern "C" {
  * @brief 完全系统数据内存屏障
  * @details 最强的内存屏障，确保所有内存访问完成
  */
-#define MEMORY_BARRIER()      ARM64_DMB(sy)
+#define MEMORY_BARRIER() ARM64_DMB(sy)
 
 /**
  * @brief 数据同步屏障（Data Synchronization Barrier）
  * @details 确保之前的内存访问和缓存操作完成
  */
-#define DATA_SYNC_BARRIER()   __asm__ volatile("dsb sy" ::: "memory")
+#define DATA_SYNC_BARRIER() __asm__ volatile("dsb sy" ::: "memory")
 
 /**
  * @brief 指令同步屏障（Instruction Synchronization Barrier）
@@ -117,13 +117,7 @@ extern "C" {
  * @param dest 目标变量
  * @param addr 地址指针
  */
-#define LDXR(dest, addr) \
-    __asm__ volatile( \
-        "ldxr %w0, [%1]" \
-        : "=r"(dest) \
-        : "r"(addr) \
-        : "memory" \
-    )
+#define LDXR(dest, addr) __asm__ volatile("ldxr %w0, [%1]" : "=r"(dest) : "r"(addr) : "memory")
 
 /**
  * @brief 独占存储（Store-Exclusive Register）
@@ -134,12 +128,7 @@ extern "C" {
  * @param addr 地址指针
  */
 #define STXR(result, src, addr) \
-    __asm__ volatile( \
-        "stxr %w0, %w1, [%2]" \
-        : "=&r"(result) \
-        : "r"(src), "r"(addr) \
-        : "memory" \
-    )
+    __asm__ volatile("stxr %w0, %w1, [%2]" : "=&r"(result) : "r"(src), "r"(addr) : "memory")
 
 /**
  * @brief 独占加载对（Load-Exclusive Pair of Registers）
@@ -150,12 +139,7 @@ extern "C" {
  * @param addr 地址指针
  */
 #define LDXP(dest0, dest1, addr) \
-    __asm__ volatile( \
-        "ldxp %w0, %w1, [%2]" \
-        : "=r"(dest0), "=r"(dest1) \
-        : "r"(addr) \
-        : "memory" \
-    )
+    __asm__ volatile("ldxp %w0, %w1, [%2]" : "=r"(dest0), "=r"(dest1) : "r"(addr) : "memory")
 
 /**
  * @brief 独占存储对（Store-Exclusive Pair of Registers）
@@ -166,13 +150,11 @@ extern "C" {
  * @param src1 第二个源数据
  * @param addr 地址指针
  */
-#define STXP(result, src0, src1, addr) \
-    __asm__ volatile( \
-        "stxp %w0, %w1, %w2, [%3]" \
-        : "=&r"(result) \
-        : "r"(src0), "r"(src1), "r"(addr) \
-        : "memory" \
-    )
+#define STXP(result, src0, src1, addr)                 \
+    __asm__ volatile("stxp %w0, %w1, %w2, [%3]"        \
+                     : "=&r"(result)                   \
+                     : "r"(src0), "r"(src1), "r"(addr) \
+                     : "memory")
 
 /**
  * @brief 原子比较并交换（Compare-And-Swap）
@@ -183,23 +165,19 @@ extern "C" {
  * @param desired 新值
  * @return 成功返回true，失败返回false
  */
-static inline bool atomic_cas_u32(volatile uint32_t *addr,
-                                  uint32_t expected,
-                                  uint32_t desired)
+static inline bool atomic_cas_u32(volatile uint32_t *addr, uint32_t expected, uint32_t desired)
 {
     uint32_t old_val;
     uint32_t result;
 
-    __asm__ volatile(
-        "ldxr %w0, [%2]\n"
-        "cmp %w0, %w3\n"
-        "b.ne 1f\n"
-        "stxr %w1, %w4, [%2]\n"
-        "1:"
-        : "=&r"(old_val), "=&r"(result)
-        : "r"(addr), "r"(expected), "r"(desired)
-        : "cc", "memory"
-    );
+    __asm__ volatile("ldxr %w0, [%2]\n"
+                     "cmp %w0, %w3\n"
+                     "b.ne 1f\n"
+                     "stxr %w1, %w4, [%2]\n"
+                     "1:"
+                     : "=&r"(old_val), "=&r"(result)
+                     : "r"(addr), "r"(expected), "r"(desired)
+                     : "cc", "memory");
 
     return (old_val == expected) && (result == 0U);
 }
@@ -215,26 +193,22 @@ static inline bool atomic_cas_u32(volatile uint32_t *addr,
  *
  * @note 失败时，expected会被更新为实际读取的值
  */
-static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr,
-                                                  uint32_t *expected,
+static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr, uint32_t *expected,
                                                   uint32_t desired)
 {
     uint32_t old_val;
     uint32_t result;
 
-    __asm__ volatile(
-        "ldxr %w0, [%2]\n"
-        "cmp %w0, %w3\n"
-        "b.ne 1f\n"
-        "stxr %w1, %w4, [%2]\n"
-        "1:"
-        : "=&r"(old_val), "=&r"(result)
-        : "r"(addr), "r"(*expected), "r"(desired)
-        : "cc", "memory"
-    );
+    __asm__ volatile("ldxr %w0, [%2]\n"
+                     "cmp %w0, %w3\n"
+                     "b.ne 1f\n"
+                     "stxr %w1, %w4, [%2]\n"
+                     "1:"
+                     : "=&r"(old_val), "=&r"(result)
+                     : "r"(addr), "r"(*expected), "r"(desired)
+                     : "cc", "memory");
 
-    if (old_val != *expected)
-    {
+    if (old_val != *expected) {
         *expected = old_val;
         return false;
     }
@@ -251,9 +225,7 @@ static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr,
  * @param desired 新值
  * @return 成功返回true，失败返回false
  */
-static inline bool atomic_cmpxchg(volatile uint32_t *addr,
-                                  uint32_t expected,
-                                  uint32_t desired)
+static inline bool atomic_cmpxchg(volatile uint32_t *addr, uint32_t expected, uint32_t desired)
 {
     return atomic_cas_u32(addr, expected, desired);
 }
@@ -300,13 +272,11 @@ static inline uint32_t atomic_inc_u32(volatile uint32_t *addr)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val + 1U;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -336,13 +306,11 @@ static inline uint32_t atomic_dec_u32(volatile uint32_t *addr)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val - 1U;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -361,13 +329,11 @@ static inline uint32_t atomic_add_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val + value;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -399,13 +365,11 @@ static inline uint32_t atomic_sub_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val - value;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -424,13 +388,11 @@ static inline uint32_t atomic_and_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val & value;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -449,13 +411,11 @@ static inline uint32_t atomic_or_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val | value;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -474,13 +434,11 @@ static inline uint32_t atomic_xor_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t new_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         new_val = old_val ^ value;
         STXR(result, new_val, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -498,12 +456,10 @@ static inline uint32_t atomic_xchg_u32(volatile uint32_t *addr, uint32_t value)
     uint32_t old_val;
     uint32_t result;
 
-    do
-    {
+    do {
         LDXR(old_val, addr);
         STXR(result, value, addr);
-    }
-    while (result != 0U);
+    } while (result != 0U);
 
     return old_val;
 }
@@ -521,23 +477,19 @@ static inline uint32_t atomic_xchg_u32(volatile uint32_t *addr, uint32_t value)
  * @param desired 新值
  * @return 成功返回true，失败返回false
  */
-static inline bool atomic_cas_u64(volatile uint64_t *addr,
-                                  uint64_t expected,
-                                  uint64_t desired)
+static inline bool atomic_cas_u64(volatile uint64_t *addr, uint64_t expected, uint64_t desired)
 {
     uint64_t old_val;
     uint64_t result;
 
-    __asm__ volatile(
-        "ldxr %0, [%2]\n"
-        "cmp %0, %3\n"
-        "b.ne 1f\n"
-        "stxr %w1, %4, [%2]\n"
-        "1:"
-        : "=&r"(old_val), "=&r"(result)
-        : "r"(addr), "r"(expected), "r"(desired)
-        : "cc", "memory"
-    );
+    __asm__ volatile("ldxr %0, [%2]\n"
+                     "cmp %0, %3\n"
+                     "b.ne 1f\n"
+                     "stxr %w1, %4, [%2]\n"
+                     "1:"
+                     : "=&r"(old_val), "=&r"(result)
+                     : "r"(addr), "r"(expected), "r"(desired)
+                     : "cc", "memory");
 
     return (old_val == expected) && (result == 0U);
 }
@@ -552,12 +504,7 @@ static inline bool atomic_cas_u64(volatile uint64_t *addr,
 static inline uint64_t atomic_read_u64(const volatile uint64_t *addr)
 {
     uint64_t value;
-    __asm__ volatile(
-        "ldxr %0, [%1]"
-        : "=r"(value)
-        : "r"(addr)
-        : "memory"
-    );
+    __asm__ volatile("ldxr %0, [%1]" : "=r"(value) : "r"(addr) : "memory");
     MEMORY_BARRIER();
     return value;
 }
@@ -589,23 +536,11 @@ static inline uint64_t atomic_inc_u64(volatile uint64_t *addr)
     uint64_t new_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         new_val = old_val + 1ULL;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return old_val;
 }
@@ -623,23 +558,11 @@ static inline uint64_t atomic_dec_u64(volatile uint64_t *addr)
     uint64_t new_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         new_val = old_val - 1ULL;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return old_val;
 }
@@ -658,23 +581,11 @@ static inline uint64_t atomic_add_u64(volatile uint64_t *addr, uint64_t value)
     uint64_t new_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         new_val = old_val + value;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return old_val;
 }
@@ -693,23 +604,11 @@ static inline uint64_t atomic_sub_u64(volatile uint64_t *addr, uint64_t value)
     uint64_t new_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         new_val = old_val - value;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return old_val;
 }
@@ -727,22 +626,10 @@ static inline uint64_t atomic_xchg_u64(volatile uint64_t *addr, uint64_t value)
     uint64_t old_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(value), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(value), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return old_val;
 }
@@ -914,23 +801,11 @@ static inline bool atomic_test_and_set_u64(volatile uint64_t *addr, uint64_t bit
     uint64_t old_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         uint64_t new_val = old_val | mask;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return (old_val & mask) == 0ULL;
 }
@@ -949,23 +824,11 @@ static inline bool atomic_test_and_clear_u64(volatile uint64_t *addr, uint64_t b
     uint64_t old_val;
     uint64_t result;
 
-    do
-    {
-        __asm__ volatile(
-            "ldxr %0, [%2]"
-            : "=&r"(old_val)
-            : "r"(addr)
-            : "memory"
-        );
+    do {
+        __asm__ volatile("ldxr %0, [%2]" : "=&r"(old_val) : "r"(addr) : "memory");
         uint64_t new_val = old_val & ~mask;
-        __asm__ volatile(
-            "stxr %w0, %1, [%2]"
-            : "=&r"(result)
-            : "r"(new_val), "r"(addr)
-            : "memory"
-        );
-    }
-    while (result != 0U);
+        __asm__ volatile("stxr %w0, %1, [%2]" : "=&r"(result) : "r"(new_val), "r"(addr) : "memory");
+    } while (result != 0U);
 
     return (old_val & mask) != 0ULL;
 }
@@ -1086,8 +949,7 @@ static inline void atomic_store_release_u32(volatile uint32_t *addr, uint32_t va
  * @param value 要加的值
  * @return 旧值
  */
-static inline uint32_t atomic_fetch_add_acquire_u32(volatile uint32_t *addr,
-                                                     uint32_t value)
+static inline uint32_t atomic_fetch_add_acquire_u32(volatile uint32_t *addr, uint32_t value)
 {
     uint32_t old_val = atomic_fetch_add(addr, value);
     ARM64_DMB(acquire);
@@ -1102,8 +964,7 @@ static inline uint32_t atomic_fetch_add_acquire_u32(volatile uint32_t *addr,
  * @param value 要加的值
  * @return 旧值
  */
-static inline uint32_t atomic_fetch_add_release_u32(volatile uint32_t *addr,
-                                                     uint32_t value)
+static inline uint32_t atomic_fetch_add_release_u32(volatile uint32_t *addr, uint32_t value)
 {
     ARM64_DMB(release);
     return atomic_fetch_add(addr, value);

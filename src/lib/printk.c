@@ -24,7 +24,8 @@
  *
  * @details 初始化UART驱动
  */
-int printk_init(void) {
+int printk_init(void)
+{
     extern int uart_init(void);
     return uart_init();
 }
@@ -44,7 +45,8 @@ int printk_init(void) {
  *
  * @note 简化实现，不支持浮点和字段宽度
  */
-void printk(const char *fmt, ...) {
+void printk(const char *fmt, ...)
+{
     va_list args;
     const char *p;
     bool fmt_spec;
@@ -65,27 +67,26 @@ void printk(const char *fmt, ...) {
         if (*p == '%') {
             p++;
             if (*p == '\0') {
-                break;  /* 格式字符串以%结尾 */
+                break; /* 格式字符串以%结尾 */
             }
 
             switch (*p) {
-                case 'c':  /* 字符 */
+                case 'c': /* 字符 */
                     ch = (char)va_arg(args, int32_t);
                     uart_putc(ch);
                     break;
 
-                case 's':  /* 字符串 */
-                    {
-                        const char *str = va_arg(args, const char *);
-                        if (str == NULL) {
-                            uart_puts("(null)");
-                        } else {
-                            uart_puts(str);
-                        }
+                case 's': /* 字符串 */
+                {
+                    const char *str = va_arg(args, const char *);
+                    if (str == NULL) {
+                        uart_puts("(null)");
+                    } else {
+                        uart_puts(str);
                     }
-                    break;
+                } break;
 
-                case 'd':  /* 有符号十进制整数 */
+                case 'd': /* 有符号十进制整数 */
                     val = va_arg(args, int32_t);
                     if (val < 0) {
                         uart_putc('-');
@@ -103,7 +104,7 @@ void printk(const char *fmt, ...) {
                     }
                     break;
 
-                case 'u':  /* 无符号十进制整数 */
+                case 'u': /* 无符号十进制整数 */
                     uval = va_arg(args, uint32_t);
                     /* 转换为字符串 */
                     i = 0U;
@@ -117,7 +118,7 @@ void printk(const char *fmt, ...) {
                     }
                     break;
 
-                case 'x':  /* 无符号十六进制整数（小写） */
+                case 'x': /* 无符号十六进制整数（小写） */
                     uval = va_arg(args, uint32_t);
                     /* 转换为字符串 */
                     i = 0U;
@@ -142,7 +143,7 @@ void printk(const char *fmt, ...) {
                     uart_puts("0x");
                     break;
 
-                case 'p':  /* 指针 */
+                case 'p': /* 指针 */
                     uval = (uint32_t)va_arg(args, void *);
                     uart_puts("0x");
                     /* 转换为字符串（8位十六进制） */
@@ -158,11 +159,11 @@ void printk(const char *fmt, ...) {
                     }
                     break;
 
-                case '%':  /* 百分号 */
+                case '%': /* 百分号 */
                     uart_putc('%');
                     break;
 
-                default:  /* 未知格式 */
+                default: /* 未知格式 */
                     uart_putc('%');
                     uart_putc(*p);
                     break;

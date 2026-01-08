@@ -28,17 +28,17 @@ typedef int32_t ErrorCode_t;
 /**
  * @brief 通用错误码定义
  */
-#define ERROR_SUCCESS         0
-#define ERROR_FAIL            (-1)
-#define ERROR_INVALID_PARAM   (-2)
-#define ERROR_OUT_OF_MEMORY   (-3)
-#define ERROR_TIMEOUT         (-4)
-#define ERROR_BUSY            (-5)
-#define ERROR_NOT_SUPPORTED   (-6)
-#define ERROR_NOT_FOUND       (-7)
-#define ERROR_INVALID_STATE   (-8)
-#define ERROR_WOULD_BLOCK     (-9)
-#define ERROR_OVERFLOW        (-10)
+#define ERROR_SUCCESS 0
+#define ERROR_FAIL (-1)
+#define ERROR_INVALID_PARAM (-2)
+#define ERROR_OUT_OF_MEMORY (-3)
+#define ERROR_TIMEOUT (-4)
+#define ERROR_BUSY (-5)
+#define ERROR_NOT_SUPPORTED (-6)
+#define ERROR_NOT_FOUND (-7)
+#define ERROR_INVALID_STATE (-8)
+#define ERROR_WOULD_BLOCK (-9)
+#define ERROR_OVERFLOW (-10)
 
 /**
  * @brief NULL指针定义

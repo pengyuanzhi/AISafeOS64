@@ -22,21 +22,21 @@
 #include <stddef.h>
 
 /* Configuration definitions */
-#define CONFIG_APP_LOADER_MAX_APPS       8U
-#define CONFIG_APP_LOADER_MAX_NAME_LEN   64U
-#define CONFIG_APP_LOADER_MAX_PATH_LEN   256U
-#define CONFIG_APP_LOADER_DEFAULT_STACK  8192U
+#define CONFIG_APP_LOADER_MAX_APPS 8U
+#define CONFIG_APP_LOADER_MAX_NAME_LEN 64U
+#define CONFIG_APP_LOADER_MAX_PATH_LEN 256U
+#define CONFIG_APP_LOADER_DEFAULT_STACK 8192U
 #define CONFIG_APP_LOADER_MAX_STACK_SIZE 1048576U
-#define CONFIG_APP_LOADER_SIGNATURE_LEN  64U
+#define CONFIG_APP_LOADER_SIGNATURE_LEN 64U
 
 /* Capability flags */
-#define CAP_HARDWARE_ACCESS  (1U << 0)  /* Hardware access */
-#define CAP_NETWORK_ACCESS   (1U << 1)  /* Network access */
-#define CAP_FILE_IO          (1U << 2)  /* File I/O */
-#define CAP_IPC              (1U << 3)  /* Inter-process communication */
-#define CAP_RAW_IO           (1U << 4)  /* Raw I/O */
-#define CAP_TIMER            (1U << 5)  /* Timer access */
-#define CAP_SIGNAL           (1U << 6)  /* Signal handling */
+#define CAP_HARDWARE_ACCESS (1U << 0) /* Hardware access */
+#define CAP_NETWORK_ACCESS (1U << 1)  /* Network access */
+#define CAP_FILE_IO (1U << 2)         /* File I/O */
+#define CAP_IPC (1U << 3)             /* Inter-process communication */
+#define CAP_RAW_IO (1U << 4)          /* Raw I/O */
+#define CAP_TIMER (1U << 5)           /* Timer access */
+#define CAP_SIGNAL (1U << 6)          /* Signal handling */
 
 /**
  * @brief Application configuration structure
@@ -44,33 +44,35 @@
  * This structure contains all configuration parameters for a single
  * user application to be loaded at boot time.
  */
-typedef struct {
-    char     name[CONFIG_APP_LOADER_MAX_NAME_LEN];     /* Application name */
-    char     path[CONFIG_APP_LOADER_MAX_PATH_LEN];     /* ELF file path (absolute) */
-    char     description[128];                          /* Application description */
-    uint8_t  priority;                                  /* Task priority (0-255) */
+typedef struct
+{
+    char name[CONFIG_APP_LOADER_MAX_NAME_LEN];          /* Application name */
+    char path[CONFIG_APP_LOADER_MAX_PATH_LEN];          /* ELF file path (absolute) */
+    char description[128];                              /* Application description */
+    uint8_t priority;                                   /* Task priority (0-255) */
     uint32_t stack_size;                                /* Stack size in bytes */
     uint32_t cpu_affinity;                              /* CPU affinity mask */
     uint64_t max_memory;                                /* Maximum memory limit (bytes) */
     uint64_t max_cpu_time;                              /* Maximum CPU time (ms/s) */
-    uint8_t  signature[CONFIG_APP_LOADER_SIGNATURE_LEN]; /* ECDSA signature */
-    uint8_t  hash[32];                                  /* SHA-256 hash (pre-calculated) */
+    uint8_t signature[CONFIG_APP_LOADER_SIGNATURE_LEN]; /* ECDSA signature */
+    uint8_t hash[32];                                   /* SHA-256 hash (pre-calculated) */
     uint32_t version;                                   /* Application version */
-    bool     enabled;                                   /* Whether to load this app */
-    bool     auto_restart;                              /* Auto-restart on crash */
+    bool enabled;                                       /* Whether to load this app */
+    bool auto_restart;                                  /* Auto-restart on crash */
     uint32_t capabilities;                              /* Capability bitmap */
 } AppConfig_t;
 
 /**
  * @brief Application loading statistics
  */
-typedef struct {
-    uint32_t total_apps;        /* Total applications in config */
-    uint32_t loaded_apps;       /* Successfully loaded applications */
-    uint32_t failed_apps;       /* Failed to load applications */
-    uint32_t disabled_apps;     /* Disabled applications */
-    uint32_t total_memory;      /* Total memory used by applications */
-    uint32_t load_time_ms;      /* Time taken to load all applications */
+typedef struct
+{
+    uint32_t total_apps;    /* Total applications in config */
+    uint32_t loaded_apps;   /* Successfully loaded applications */
+    uint32_t failed_apps;   /* Failed to load applications */
+    uint32_t disabled_apps; /* Disabled applications */
+    uint32_t total_memory;  /* Total memory used by applications */
+    uint32_t load_time_ms;  /* Time taken to load all applications */
 } AppLoaderStats_t;
 
 /**
@@ -191,7 +193,7 @@ int app_loader_get_stats(AppLoaderStats_t *stats);
  *
  * @warning Returned pointer is valid only if loader is active
  */
-const AppConfig_t* app_loader_find_app(const char *name);
+const AppConfig_t *app_loader_find_app(const char *name);
 
 /**
  * @brief Validate application configuration
