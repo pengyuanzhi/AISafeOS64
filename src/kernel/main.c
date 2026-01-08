@@ -24,6 +24,10 @@ extern int printk_init(void);
 extern void printk(const char *fmt, ...);
 extern void syscall_handler(uint64_t syscall_nr, uint64_t *params);
 
+/* 内存管理 */
+extern int page_allocator_init(uint64_t base_addr, uint64_t size);
+extern int kheap_init(void *start, uint64_t size);
+
 /**
  * @brief 系统配置
  */
@@ -82,6 +86,42 @@ void kernel_main(void) {
     /* TODO: 初始化内存管理 */
     printk("[INIT] Memory management... ");
     printk("NOT IMPLEMENTED\n");
+
+    /* TODO: 初始化调度器 */
+    printk("[INIT] Scheduler... ");
+    printk("NOT IMPLEMENTED\n");
+
+    /* TODO: 初始化中断管理 */
+    printk("[INIT] Interrupt controller... ");
+    printk("NOT IMPLEMENTED\n");
+
+    /* TODO: 初始化系统调用 */
+    printk("[INIT] System calls... ");
+    printk("NOT IMPLEMENTED\n");
+
+    printk("\n");
+    printk("[INIT] Memory management... ");
+
+    /* 初始化内核堆（必须先于页分配器，因为页分配器使用堆） */
+    /* 使用静态内存区域作为堆（1MB） */
+    extern uint8_t __kernel_heap_start[];
+    extern uint8_t __kernel_heap_end[];
+    uint64_t heap_size = (uint64_t)(__kernel_heap_end - __kernel_heap_start);
+
+    if (kheap_init(__kernel_heap_start, heap_size) != 0) {
+        printk("FAILED (kernel heap)\n");
+        goto kernel_halt;
+    }
+
+    /* 初始化物理页分配器 */
+    if (page_allocator_init(0x40000000UL, 1024 * 1024 * 1024UL) != 0) {
+        printk("FAILED (page allocator)\n");
+        goto kernel_halt;
+    }
+
+    printk("OK\n");
+    printk("[INIT]   Kernel heap: %lu KB @ %p\n", heap_size / 1024, __kernel_heap_start);
+    printk("[INIT]   Page allocator: 262144 pages (1GB)\n");
 
     /* TODO: 初始化调度器 */
     printk("[INIT] Scheduler... ");

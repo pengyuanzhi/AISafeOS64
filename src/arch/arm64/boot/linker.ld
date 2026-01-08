@@ -78,6 +78,16 @@ SECTIONS
     } > KERNEL
 
     /**
+     * .heap段 - 内核堆
+     * @details 1MB堆空间，用于kmalloc/kfree
+     */
+    .heap (NOLOAD) : {
+        __kernel_heap_start = .;
+        . = . + 1M;                  /* 1MB堆空间 */
+        __kernel_heap_end = .;
+    } > KERNEL
+
+    /**
      * .stack段 - 栈空间
      * @details 8KB栈，向下增长
      */
