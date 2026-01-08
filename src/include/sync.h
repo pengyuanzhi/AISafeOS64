@@ -24,6 +24,12 @@
 /* 架构特定的内存屏障和原子操作 */
 #include "barrier.h"
 
+/* 链表结构 */
+#include "list.h"
+
+/* Forward declarations */
+struct TCB_t;
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -53,13 +59,25 @@ extern "C"
     } mutex_t;
 
     /**
+     * @brief 信号量等待节点
+     * @details 用于维护信号量等待队列
+     */
+    typedef struct semaphore_wait_node
+    {
+        struct list_head wait_list; /**< 链表节点 */
+        struct TCB_t *task;         /**< 等待的任务 */
+        uint64_t timeout;           /**< 超时时间（可选） */
+    } semaphore_wait_node_t;
+
+    /**
      * @brief 信号量结构
      * @details 支持二值信号量和计数信号量
      */
     typedef struct
     {
-        volatile int32_t count; /**< 计数 */
-        uint32_t max_count;     /**< 最大计数 */
+        volatile int32_t count;      /**< 计数 */
+        uint32_t max_count;          /**< 最大计数 */
+        struct list_head wait_queue; /**< 等待队列 */
     } semaphore_t;
 
     /**
@@ -140,9 +158,22 @@ extern "C"
      * @param sem 信号量指针
      * @return 成功返回0，失败返回负错误码
      *
-     * @details 如果计数为0，阻塞当前任务
+     * @details 如果计数为0，阻塞当前任务（无限等待）
      */
     int semaphore_wait(semaphore_t *sem);
+
+    /**
+     * @brief 信号量等待（P操作，带超时）
+     * @param sem 信号量指针
+     * @param timeout_ms 超时时间（毫秒），0表示非阻塞，UINT64_MAX表示无限等待
+     * @return 成功返回0，失败返回负错误码
+     *
+     * @details 如果计数为0，阻塞当前任务
+     *          - 支持0超时（非阻塞）
+     *          - 支持有限超时
+     *          - 支持无限等待
+     */
+    int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms);
 
     /**
      * @brief 信号量尝试等待
