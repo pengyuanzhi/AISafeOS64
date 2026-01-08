@@ -27,6 +27,9 @@ extern void printk(const char *fmt, ...);
 extern int page_allocator_init(uint64_t base_addr, uint64_t size);
 extern int kheap_init(void *start, uint64_t size);
 
+/* 时间管理 */
+extern int time_init(void);
+
 /**
  * @brief 系统配置
  */
@@ -121,6 +124,14 @@ void kernel_main(void) {
     printk("OK\n");
     printk("[INIT]   Kernel heap: %lu KB @ %p\n", heap_size / 1024, __kernel_heap_start);
     printk("[INIT]   Page allocator: 262144 pages (1GB)\n");
+
+    /* 初始化时间管理 */
+    printk("[INIT] Time management... ");
+    if (time_init() != 0) {
+        printk("FAILED\n");
+        goto kernel_halt;
+    }
+    printk("OK\n");
 
     /* TODO: 初始化调度器 */
     printk("[INIT] Scheduler... ");
