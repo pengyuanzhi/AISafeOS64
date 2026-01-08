@@ -515,6 +515,11 @@ int shell_cmd_mem(int argc, char *argv[])
  */
 int shell_cmd_sched(int argc, char *argv[])
 {
+    SchedStats_t stats;
+    int ret;
+    uint64_t idle_percent;
+    uint64_t busy_percent;
+
     (void)argc;
     (void)argv;
 
@@ -522,10 +527,42 @@ int shell_cmd_sched(int argc, char *argv[])
     printk("Scheduler Statistics:\n");
     printk("\n");
 
-    /* TODO: Get statistics from scheduler */
+    /* Get statistics from scheduler for CPU 0 */
+    ret = sched_get_stats(0U, &stats);
+    if (ret != 0)
+    {
+        printk("  Error: Unable to get scheduler statistics\n");
+        printk("\n");
+        return 0;
+    }
 
-    printk("  Running tasks: 0\n");
-    printk("  Context switches: 0\n");
+    /* Display statistics */
+    printk("  Running tasks:    %u\n", stats.nr_running);
+    printk("  Context switches: %llu\n", (unsigned long long)stats.nr_switches);
+    printk("  Task migrations:  %llu\n", (unsigned long long)stats.nr_migrations);
+    printk("  Load weight:      %llu\n", (unsigned long long)stats.load_weight);
+    printk("  Avg runtime:      %llu ticks\n", (unsigned long long)stats.avg_runtime);
+    printk("\n");
+
+    /* Calculate idle/busy percentage */
+    if (stats.total_time > 0ULL)
+    {
+        idle_percent = (stats.idle_time * 100ULL) / stats.total_time;
+        busy_percent = 100ULL - idle_percent;
+
+        printk("  Total time:       %llu ticks\n", (unsigned long long)stats.total_time);
+        printk("  Idle time:        %llu ticks (%llu%%)\n", (unsigned long long)stats.idle_time,
+               (unsigned long long)idle_percent);
+        printk("  Busy time:        %llu ticks (%llu%%)\n",
+               (unsigned long long)(stats.total_time - stats.idle_time),
+               (unsigned long long)busy_percent);
+    }
+    else
+    {
+        printk("  Total time:       0 ticks\n");
+        printk("  Idle time:        0 ticks (0%%)\n");
+        printk("  Busy time:        0 ticks (0%%)\n");
+    }
     printk("\n");
 
     return 0;

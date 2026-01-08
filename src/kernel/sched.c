@@ -240,6 +240,8 @@ int scheduler_init(void)
         rq->need_resched = 0U;
         rq->nr_load_updates = 0ULL;
         rq->load_weight = 0ULL;
+        rq->idle_time = 0ULL;
+        rq->total_time = 0ULL;
 
         /* Initialize priority bitmap */
         (void)memset(rq->priority_bitmap, 0, sizeof(rq->priority_bitmap));
@@ -533,6 +535,9 @@ void scheduler_tick(uint32_t cpu)
         spin_unlock_irqrestore(&rq->lock, flags);
         return;
     }
+
+    /* Track total time (1 tick per call) */
+    rq->total_time++;
 
     /* Get scheduling class */
     class = curr->sched_class;

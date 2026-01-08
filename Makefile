@@ -37,7 +37,17 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/sync/spinlock.c \
            $(SRC_DIR)/kernel/sync/mutex.c \
            $(SRC_DIR)/kernel/sync/semaphore.c \
-           $(SRC_DIR)/drivers/uart/uart.c
+           $(SRC_DIR)/drivers/uart/uart.c \
+           $(SRC_DIR)/kernel/sched.c \
+           $(SRC_DIR)/kernel/sched_fifo.c \
+           $(SRC_DIR)/kernel/sched_rr.c \
+           $(SRC_DIR)/kernel/sched_cfs.c \
+           $(SRC_DIR)/kernel/sched_edf.c \
+           $(SRC_DIR)/kernel/sched_idle.c \
+           $(SRC_DIR)/kernel/sched_extra.c \
+           $(SRC_DIR)/kernel/task.c \
+           $(SRC_DIR)/kernel/loader.c \
+           $(SRC_DIR)/kernel/shell.c
 
 # 目标文件
 ASM_OBJECTS = $(ASM_SOURCES:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o)
@@ -75,6 +85,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)/kernel/sync
 	mkdir -p $(BUILD_DIR)/lib
 	mkdir -p $(BUILD_DIR)/drivers/uart
+	mkdir -p $(BUILD_DIR)/kernel/loader
 
 # 编译汇编文件
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.s | $(BUILD_DIR)

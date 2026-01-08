@@ -256,6 +256,10 @@ typedef struct rq
     uint64_t nr_load_updates; /**< Number of load updates */
     uint64_t load_weight;     /**< Load weight */
 
+    /* Time tracking */
+    uint64_t idle_time;  /**< Total idle time (ticks) */
+    uint64_t total_time; /**< Total time (ticks) */
+
 } rq_t;
 
 /*
@@ -269,6 +273,8 @@ typedef struct SchedStats
     uint64_t nr_migrations; /**< Number of task migrations */
     uint64_t load_weight;   /**< Load weight */
     uint64_t avg_runtime;   /**< Average runtime */
+    uint64_t idle_time;     /**< Total idle time */
+    uint64_t total_time;    /**< Total time */
 } SchedStats_t;
 
 /*

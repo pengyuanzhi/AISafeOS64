@@ -530,6 +530,9 @@ int set_task_priority(TCB_t *task, uint8_t prio)
 int sched_get_stats(uint32_t cpu, SchedStats_t *stats)
 {
     struct rq *rq;
+    uint64_t total_runtime = 0ULL;
+    uint32_t task_count = 0U;
+    TCB_t *curr;
 
     if (cpu >= MAX_CPUS)
     {
@@ -558,9 +561,28 @@ int sched_get_stats(uint32_t cpu, SchedStats_t *stats)
         stats->nr_running += rq->nr_running[i];
     }
 
+    /* 复制时间统计 */
+    stats->idle_time = rq->idle_time;
+    stats->total_time = rq->total_time;
+
     /* 计算平均运行时间 */
-    /* TODO: 实现平均运行时间计算 */
-    stats->avg_runtime = 0ULL;
+    /* 遍历所有任务计算平均运行时间 */
+    curr = rq->curr;
+    if (curr != NULL)
+    {
+        total_runtime += curr->sum_exec_runtime;
+        task_count++;
+    }
+
+    /* 计算平均值 */
+    if (task_count > 0U)
+    {
+        stats->avg_runtime = total_runtime / task_count;
+    }
+    else
+    {
+        stats->avg_runtime = 0ULL;
+    }
 
     return 0;
 }
@@ -691,13 +713,37 @@ int idle_task_init(void)
 void idle_task_entry(void *arg)
 {
     (void)arg;
+    struct rq *rq;
+    uint64_t last_time;
+    uint64_t current_time;
+    uint64_t idle_delta;
+
+    /* Get run queue */
+    rq = this_rq();
+    if (rq == NULL)
+    {
+        /* Should not happen */
+        while (1)
+        {
+            __asm__ volatile("wfi");
+        }
+    }
+
+    /* Initialize last time */
+    last_time = sched_clock();
 
     while (1)
     {
-        /* 等待中断 */
+        /* Wait for interrupt */
         __asm__ volatile("wfi");
 
-        /* TODO: 统计空闲时间 */
-        /* TODO: 功耗管理 */
+        /* Track idle time */
+        current_time = sched_clock();
+        idle_delta = current_time - last_time;
+        last_time = current_time;
+
+        /* Update idle time statistics */
+        rq->idle_time += idle_delta;
+        rq->total_time += idle_delta;
     }
 }
