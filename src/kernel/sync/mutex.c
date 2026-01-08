@@ -91,26 +91,8 @@ int mutex_lock(mutex_t *mutex) {
 
     /* 尝试获取锁 */
     while (1) {
-        /* 原子尝试加锁 */
-        uint32_t expected = 0U;
-        uint32_t desired = 1U;
-
-        /* CAS (Compare-And-Swap) */
-        uint32_t old_val;
-        uint32_t result;
-
-        __asm__ volatile(
-            "ldxr %w0, [%2]\n"
-            "cmp %w0, %w3\n"
-            "b.ne 1f\n"
-            "stxr %w1, %w4, [%2]\n"
-            "1:"
-            : "=&r"(old_val), "=&r"(result)
-            : "r"(&mutex->locked), "r"(expected), "r"(desired)
-            : "cc", "memory"
-        );
-
-        if ((old_val == expected) && (result == 0U)) {
+        /* 原子尝试加锁（使用标准原子操作） */
+        if (atomic_cas_u32(&mutex->locked, 0U, 1U)) {
             /* 成功获取锁 */
             break;
         }
@@ -160,26 +142,8 @@ int mutex_trylock(mutex_t *mutex) {
         return ERROR_SUCCESS;
     }
 
-    /* 尝试获取锁（非阻塞） */
-    uint32_t expected = 0U;
-    uint32_t desired = 1U;
-
-    /* CAS (Compare-And-Swap) */
-    uint32_t old_val;
-    uint32_t result;
-
-    __asm__ volatile(
-        "ldxr %w0, [%2]\n"
-        "cmp %w0, %w3\n"
-        "b.ne 1f\n"
-        "stxr %w1, %w4, [%2]\n"
-        "1:"
-        : "=&r"(old_val), "=&r"(result)
-        : "r"(&mutex->locked), "r"(expected), "r"(desired)
-        : "cc", "memory"
-    );
-
-    if ((old_val != expected) || (result != 0U)) {
+    /* 尝试获取锁（非阻塞，使用标准原子操作） */
+    if (!atomic_cas_u32(&mutex->locked, 0U, 1U)) {
         /* 锁已被其他任务持有 */
         return -ERROR_BUSY;
     }

@@ -174,6 +174,57 @@ static inline bool atomic_cas_u32(volatile uint32_t *addr,
 }
 
 /**
+ * @brief 原子比较并交换（C11风格接口）
+ * @details 如果*addr == expected，则将desired写入*addr
+ *
+ * @param addr 地址指针
+ * @param expected 期望值的指针
+ * @param desired 新值
+ * @return 成功返回true，失败返回false
+ *
+ * @note 失败时，expected会被更新为实际读取的值
+ */
+static inline bool atomic_compare_exchange_strong(volatile uint32_t *addr,
+                                                  uint32_t *expected,
+                                                  uint32_t desired) {
+    uint32_t old_val;
+    uint32_t result;
+
+    __asm__ volatile(
+        "ldxr %w0, [%2]\n"
+        "cmp %w0, %w3\n"
+        "b.ne 1f\n"
+        "stxr %w1, %w4, [%2]\n"
+        "1:"
+        : "=&r"(old_val), "=&r"(result)
+        : "r"(addr), "r"(*expected), "r"(desired)
+        : "cc", "memory"
+    );
+
+    if (old_val != *expected) {
+        *expected = old_val;
+        return false;
+    }
+
+    return (result == 0U);
+}
+
+/**
+ * @brief 原子比较并交换（简化接口）
+ * @details 如果*addr == expected，则将desired写入*addr
+ *
+ * @param addr 地址指针
+ * @param expected 期望值
+ * @param desired 新值
+ * @return 成功返回true，失败返回false
+ */
+static inline bool atomic_cmpxchg(volatile uint32_t *addr,
+                                  uint32_t expected,
+                                  uint32_t desired) {
+    return atomic_cas_u32(addr, expected, desired);
+}
+
+/**
  * @brief 原子读取
  * @details 带内存屏障的读取操作
  *
@@ -222,6 +273,17 @@ static inline uint32_t atomic_inc_u32(volatile uint32_t *addr) {
 }
 
 /**
+ * @brief 原子递增（Fetch-Increment）
+ * @details 原子地递增并返回旧值（标准C11风格的接口）
+ *
+ * @param addr 地址指针
+ * @return 操作前的旧值
+ */
+static inline uint32_t atomic_fetch_inc(volatile uint32_t *addr) {
+    return atomic_inc_u32(addr);
+}
+
+/**
  * @brief 原子递减
  * @details 原子地将值减1
  *
@@ -262,6 +324,18 @@ static inline uint32_t atomic_add_u32(volatile uint32_t *addr, uint32_t value) {
     } while (result != 0U);
 
     return old_val;
+}
+
+/**
+ * @brief 原子取加（Fetch-and-Add）
+ * @details 原子地加并返回旧值（标准C11风格的接口）
+ *
+ * @param addr 地址指针
+ * @param value 要加的值
+ * @return 操作前的旧值
+ */
+static inline uint32_t atomic_fetch_add(volatile uint32_t *addr, uint32_t value) {
+    return atomic_add_u32(addr, value);
 }
 
 /**

@@ -6,7 +6,7 @@
  * @version 1.0
  *
  * @details Ticket Lock算法实现
- *          - ARMv8-A LDXR/STXR指令
+ *          - 使用标准原子操作接口
  *          - 公平性保证（FIFO）
  *          - 内存屏障保证
  *
@@ -48,29 +48,9 @@ void spinlock_lock(spinlock_t *lock) {
     }
 
     uint32_t ticket;
-    uint32_t next;
 
-    /* 原子获取票据 */
-    do {
-        /* LDXR: 独占加载 */
-        __asm__ volatile(
-            "ldxr %w0, [%1]"
-            : "=r"(next)
-            : "r"(&lock->next_ticket)
-            : "memory"
-        );
-
-        ticket = next;
-        next = ticket + 1U;
-
-        /* STXR: 独占存储，成功返回0 */
-        __asm__ volatile(
-            "stxr %w0, %w1, [%2]"
-            : "=&r"(next)
-            : "r"(next), "r"(&lock->next_ticket)
-            : "memory"
-        );
-    } while (next != 0U);
+    /* 原子获取票据（使用标准原子操作） */
+    ticket = atomic_fetch_inc(&lock->next_ticket);
 
     /* 内存屏障确保票据获取完成 */
     MEMORY_BARRIER();
@@ -95,29 +75,9 @@ bool spinlock_trylock(spinlock_t *lock) {
     }
 
     uint32_t ticket;
-    uint32_t next;
 
-    /* 原子获取票据 */
-    do {
-        /* LDXR: 独占加载 */
-        __asm__ volatile(
-            "ldxr %w0, [%1]"
-            : "=r"(next)
-            : "r"(&lock->next_ticket)
-            : "memory"
-        );
-
-        ticket = next;
-        next = ticket + 1U;
-
-        /* STXR: 独占存储，成功返回0 */
-        __asm__ volatile(
-            "stxr %w0, %w1, [%2]"
-            : "=&r"(next)
-            : "r"(next), "r"(&lock->next_ticket)
-            : "memory"
-        );
-    } while (next != 0U);
+    /* 原子获取票据（使用标准原子操作） */
+    ticket = atomic_fetch_inc(&lock->next_ticket);
 
     /* 内存屏障 */
     MEMORY_BARRIER();

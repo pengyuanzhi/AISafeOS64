@@ -80,23 +80,12 @@ int semaphore_wait(semaphore_t *sem) {
             continue;
         }
 
-        /* 尝试原子减1 */
-        int32_t new_count = current_count - 1;
-        int32_t old_val;
-        int32_t result;
+        /* 尝试原子减1（使用标准原子操作） */
+        uint32_t expected = (uint32_t)current_count;
+        uint32_t desired = (uint32_t)(current_count - 1);
 
-        __asm__ volatile(
-            "ldxr %w0, [%2]\n"
-            "cmp %w0, %w3\n"
-            "b.ne 1f\n"
-            "stxr %w1, %w4, [%2]\n"
-            "1:"
-            : "=&r"(old_val), "=&r"(result)
-            : "r"(&sem->count), "r"(current_count), "r"(new_count)
-            : "cc", "memory"
-        );
-
-        if ((old_val == current_count) && (result == 0)) {
+        if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
+                                           &expected, desired)) {
             /* 成功获取信号量 */
             return ERROR_SUCCESS;
         }
@@ -128,23 +117,12 @@ int semaphore_trywait(semaphore_t *sem) {
         return -ERROR_WOULD_BLOCK;
     }
 
-    /* 尝试原子减1 */
-    int32_t new_count = current_count - 1;
-    int32_t old_val;
-    int32_t result;
+    /* 尝试原子减1（使用标准原子操作） */
+    uint32_t expected = (uint32_t)current_count;
+    uint32_t desired = (uint32_t)(current_count - 1);
 
-    __asm__ volatile(
-        "ldxr %w0, [%2]\n"
-        "cmp %w0, %w3\n"
-        "b.ne 1f\n"
-        "stxr %w1, %w4, [%2]\n"
-        "1:"
-        : "=&r"(old_val), "=&r"(result)
-        : "r"(&sem->count), "r"(current_count), "r"(new_count)
-        : "cc", "memory"
-    );
-
-    if ((old_val == current_count) && (result == 0)) {
+    if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
+                                       &expected, desired)) {
         /* 成功获取信号量 */
         return ERROR_SUCCESS;
     }
@@ -176,23 +154,12 @@ int semaphore_post(semaphore_t *sem) {
             return -ERROR_OVERFLOW;
         }
 
-        /* 尝试原子加1 */
-        int32_t new_count = current_count + 1;
-        int32_t old_val;
-        int32_t result;
+        /* 尝试原子加1（使用标准原子操作） */
+        uint32_t expected = (uint32_t)current_count;
+        uint32_t desired = (uint32_t)(current_count + 1);
 
-        __asm__ volatile(
-            "ldxr %w0, [%2]\n"
-            "cmp %w0, %w3\n"
-            "b.ne 1f\n"
-            "stxr %w1, %w4, [%2]\n"
-            "1:"
-            : "=&r"(old_val), "=&r"(result)
-            : "r"(&sem->count), "r"(current_count), "r"(new_count)
-            : "cc", "memory"
-        );
-
-        if ((old_val == current_count) && (result == 0)) {
+        if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
+                                           &expected, desired)) {
             /* 成功释放信号量 */
 
             /* 内存屏障 */
