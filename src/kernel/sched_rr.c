@@ -16,6 +16,7 @@
 
 #include "sched.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * RR Constants
@@ -106,7 +107,7 @@ static int rr_sched_init(struct rq *rq)
     rr_rq_t *rr_rq;
 
     /* Allocate RR run queue */
-    rr_rq = (rr_rq_t *)malloc(sizeof(rr_rq_t));
+    rr_rq = (rr_rq_t *)kmalloc((uint64_t)sizeof(rr_rq_t));
     if (rr_rq == NULL) {
         return -1; /* ENOMEM */
     }

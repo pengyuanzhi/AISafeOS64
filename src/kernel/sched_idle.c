@@ -16,6 +16,7 @@
 
 #include "sched.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * Idle-specific Data Structures
@@ -97,7 +98,7 @@ static int idle_sched_init(struct rq *rq)
     idle_rq_t *idle_rq;
 
     /* Allocate idle run queue */
-    idle_rq = (idle_rq_t *)malloc(sizeof(idle_rq_t));
+    idle_rq = (idle_rq_t *)kmalloc((uint64_t)sizeof(idle_rq_t));
     if (idle_rq == NULL) {
         return -1; /* ENOMEM */
     }

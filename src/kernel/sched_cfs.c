@@ -17,6 +17,7 @@
 #include "sched.h"
 #include "rbtree.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * CFS Constants
@@ -110,7 +111,7 @@ static int cfs_sched_init(struct rq *rq)
     cfs_rq_t *cfs_rq;
 
     /* Allocate CFS run queue */
-    cfs_rq = (cfs_rq_t *)malloc(sizeof(cfs_rq_t));
+    cfs_rq = (cfs_rq_t *)kmalloc((uint64_t)sizeof(cfs_rq_t));
     if (cfs_rq == NULL) {
         return -1; /* ENOMEM */
     }

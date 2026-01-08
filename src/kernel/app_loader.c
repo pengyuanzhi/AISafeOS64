@@ -443,7 +443,7 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry)
     uint64_t *stack_top;
 
     /* Allocate stack */
-    stack = (uint8_t *)malloc(config->stack_size);
+    stack = (uint8_t *)kmalloc((uint64_t)config->stack_size);
     if (stack == NULL) {
         return -ENOMEM;
     }
@@ -456,7 +456,7 @@ static int app_create_task(const AppConfig_t *config, uint64_t entry)
                       config->cpu_affinity);
 
     if (tcb == NULL) {
-        free(stack);
+        kfree(stack);
         return -ENOMEM;
     }
 

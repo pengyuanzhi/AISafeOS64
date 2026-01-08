@@ -17,6 +17,7 @@
 #include "sched.h"
 #include "rbtree.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * EDF-specific Data Structures
@@ -101,7 +102,7 @@ static int edf_sched_init(struct rq *rq)
     edf_rq_t *edf_rq;
 
     /* Allocate EDF run queue */
-    edf_rq = (edf_rq_t *)malloc(sizeof(edf_rq_t));
+    edf_rq = (edf_rq_t *)kmalloc((uint64_t)sizeof(edf_rq_t));
     if (edf_rq == NULL) {
         return -1; /* ENOMEM */
     }

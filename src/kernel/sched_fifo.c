@@ -17,6 +17,7 @@
 #include "sched.h"
 #include "spinlock.h"
 #include "list.h"
+#include "mm.h"
 
 /*
  * FIFO-specific Data Structures
@@ -104,7 +105,7 @@ static int fifo_sched_init(struct rq *rq)
     uint32_t i;
 
     /* Allocate FIFO run queue */
-    fifo_rq = (fifo_rq_t *)malloc(sizeof(fifo_rq_t));
+    fifo_rq = (fifo_rq_t *)kmalloc((uint64_t)sizeof(fifo_rq_t));
     if (fifo_rq == NULL) {
         return -1; /* ENOMEM */
     }

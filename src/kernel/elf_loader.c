@@ -182,7 +182,7 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
     size = (uint32_t)ret;
 
     /* Allocate buffer */
-    data = (uint8_t *)malloc(size);
+    data = (uint8_t *)kmalloc((uint64_t)size);
     if (data == NULL) {
         close(fd);
         return -ENOMEM;
@@ -194,14 +194,14 @@ int elf_load_from_file(const char *path, ElfLoadContext_t *ctx)
     close(fd);
 
     if (ret != (ssize_t)size) {
-        free(data);
+        kfree(data);
         return -EIO;
     }
 
     /* Validate ELF header */
     ret = elf_read_header(data, size, &ehdr);
     if (ret != 0) {
-        free(data);
+        kfree(data);
         return ret;
     }
 
@@ -263,7 +263,7 @@ int elf_load_segments(ElfLoadContext_t *ctx, ElfSegmentInfo_t *segments, uint32_
             }
 
             /* Allocate memory */
-            vaddr = (uint8_t *)malloc(memsz);
+            vaddr = (uint8_t *)kmalloc((uint64_t)memsz);
             if (vaddr == NULL) {
                 return -ENOMEM;
             }
