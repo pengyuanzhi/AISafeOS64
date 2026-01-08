@@ -159,6 +159,8 @@ extern "C"
      * @return 成功返回0，失败返回负错误码
      *
      * @details 如果计数为0，阻塞当前任务（无限等待）
+     *
+     * @note 必须在任务上下文中调用，不能在中断中调用
      */
     int semaphore_wait(semaphore_t *sem);
 
@@ -172,6 +174,8 @@ extern "C"
      *          - 支持0超时（非阻塞）
      *          - 支持有限超时
      *          - 支持无限等待
+     *
+     * @note 必须在任务上下文中调用，不能在中断中调用
      */
     int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms);
 
@@ -188,6 +192,11 @@ extern "C"
      * @brief 信号量释放（V操作）
      * @param sem 信号量指针
      * @return 成功返回0，失败返回负错误码
+     *
+     * @details 释放资源，计数加1，唤醒等待的任务
+     *
+     * @note 可以在任务上下文或中断上下文中调用
+     *       典型场景：中断处理程序释放信号量
      */
     int semaphore_post(semaphore_t *sem);
 

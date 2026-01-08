@@ -131,6 +131,11 @@ int semaphore_trywait(semaphore_t *sem)
  *          - 支持0超时（非阻塞）
  *          - 支持有限超时
  *          - 支持无限等待
+ *
+ * @note 使用约束：
+ *       - 必须在任务上下文中调用（不能在中断中调用）
+ *       - semaphore_post 可以在中断中调用
+ *       - 典型场景：中断释放信号量，任务等待信号量
  */
 int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
 {
@@ -172,43 +177,15 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
         break;
     }
 
-    /* 阻塞等待路径 */
+    /* 获取当前任务 */
     TCB_t *current = get_current_task();
+
+    /* 运行时检查：确保不在中断上下文中调用 */
     if (current == NULL)
     {
-        /* 无任务上下文，使用忙等待（兼容中断上下文） */
-        uint64_t start_time = sched_clock();
-        uint64_t timeout_ns = timeout_ms * 1000000ULL;
-
-        for (;;)
-        {
-            int32_t current_count = sem->count;
-
-            if (current_count > 0)
-            {
-                uint32_t expected = (uint32_t)current_count;
-                uint32_t desired = (uint32_t)(current_count - 1);
-
-                if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected,
-                                                   desired))
-                {
-                    return ERROR_SUCCESS;
-                }
-            }
-
-            /* 检查超时 */
-            if (timeout_ms != UINT64_MAX)
-            {
-                uint64_t elapsed = sched_clock() - start_time;
-                if (elapsed >= timeout_ns)
-                {
-                    return -ERROR_TIMEOUT;
-                }
-            }
-
-            /* 硬实时系统：不使用 WFE，保持 CPU 响应性 */
-            /* WFE 会引入不确定的唤醒延迟，影响实时性 */
-        }
+        /* 在中断上下文中调用 semaphore_wait 是编程错误 */
+        /* 根据使用约束：只能在中断中释放，不能在中断中获取 */
+        return -ERROR_INVALID_STATE;
     }
 
     /* 任务上下文：使用调度器阻塞 */
@@ -243,6 +220,11 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
  * @details 释放资源，计数加1
  *          - 如果计数达到上限，返回错误
  *          - 唤醒等待的任务
+ *
+ * @note 使用约束：
+ *       - 可以在任务上下文或中断上下文中调用
+ *       - 典型场景：中断处理程序释放信号量，唤醒等待的任务
+ *       - 中断安全：使用原子操作保证线程安全
  */
 int semaphore_post(semaphore_t *sem)
 {
