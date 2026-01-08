@@ -1,0 +1,214 @@
+# ============================================
+# AISafeOS64 .gitignore
+# 嵌入式操作系统项目
+# ============================================
+
+# ============================================
+# CMake 构建产物
+# ============================================
+build/
+cmake-build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!cmake/*.cmake
+
+# ============================================
+# 编译产物
+# ============================================
+*.o
+*.obj
+*.ko
+*.elf
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+*.bin
+*.srec
+*.img
+*.dump
+*.map
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.la
+*.lo
+
+# ============================================
+# 链接器和调试文件
+# ============================================
+*.map
+*.lst
+*.sym
+*.su
+*.idb
+*.pdb
+
+# ============================================
+# 配置文件（包含本地配置）
+# ============================================
+.config
+autoconf.h
+include/generated/
+defconfig
+
+# ============================================
+# 交叉编译工具链
+# ============================================
+tools/gcc-arm/
+tools/toolchain/
+*.tar.xz
+*.tar.gz
+*.tgz
+
+# ============================================
+# 测试和覆盖率报告
+# ============================================
+test/results/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+coverage.html
+lcov.info
+
+# ============================================
+# 文档生成
+# ============================================
+docs/generated/
+docs/html/
+docs/latex/
+Doxyfile
+Doxyfile.bak
+
+# ============================================
+# 日志和调试文件
+# ============================================
+*.log
+*.dmp
+*.trace
+core
+core.*
+
+# ============================================
+# IDE 和编辑器
+# ============================================
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (CLion, IntelliJ, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
+.project
+.classpath
+.settings/
+.metadata/
+bin/
+
+# Keil MDK-ARM
+*.uvoptx
+*.uvopt
+*.uvprojx
+*.bak
+*.dep
+
+# IAR EWARM
+*.ewp
+*.eww
+*.dep
+
+# GCC ARM
+*.d
+
+# Vim
+*.swp
+*.swo
+*~
+.*.sw*
+.tags
+
+# Emacs
+*~
+\#*\#
+.\#*
+.dir-locals.el
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# 操作系统文件
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+
+# ============================================
+# 临时文件
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.patch
+
+# ============================================
+# Python 工具和脚本
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# ============================================
+# Git 相关
+# ============================================
+*.orig
+*.rej
+.git-rebase-todo
+
+# ============================================
+# 其他
+# ============================================
+*.pid
+*.seed
+*.pid.lock
+.npm
+.eslintcache

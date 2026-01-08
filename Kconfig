@@ -1,0 +1,565 @@
+#
+# AISafe64 Configuration
+# AI-Generated, Safety-Certifiable, Native 64-bit RTOS
+#
+
+mainmenu "AISafe64 Configuration"
+
+config ARM64
+    bool
+    option env="ARCH"
+    default y
+
+menu "Core Configuration"
+
+config NR_CPUS
+    int "CPU Core Count (1-8)"
+    range 1 8
+    default 4
+    help
+      Number of CPU cores to enable in SMP mode.
+
+choice
+    prompt "Priority Levels"
+    default PRIORITY_256
+
+config PRIORITY_32
+    bool "32 Priority Levels"
+
+config PRIORITY_64
+    bool "64 Priority Levels"
+
+config PRIORITY_128
+    bool "128 Priority Levels"
+
+config PRIORITY_256
+    bool "256 Priority Levels"
+
+endchoice
+
+config PRIORITY_LEVELS
+    int
+    default 32 if PRIORITY_32
+    default 64 if PRIORITY_64
+    default 128 if PRIORITY_128
+    default 256 if PRIORITY_256
+
+config MAX_TASKS
+    int "Maximum Number of Tasks"
+    range 1 256
+    default 32
+    help
+      Maximum number of concurrent tasks supported by the scheduler.
+
+config TICK_RATE_HZ
+    int "System Tick Rate (Hz)"
+    range 100 10000
+    default 1000
+    help
+      System timer tick frequency in Hz.
+
+endmenu
+
+menu "Memory Configuration"
+
+config KERNEL_HEAP_SIZE
+    hex "Kernel Heap Size"
+    default 0x100000
+    help
+      Size of kernel heap in bytes (default: 1MB).
+
+config TASK_STACK_SIZE
+    int "Default Task Stack Size"
+    range 4096 65536
+    default 8192
+    help
+      Default stack size for each task in bytes.
+
+config ENABLE_MMU
+    bool "Enable MMU Support"
+    default y
+    select PAGE_TABLES
+    help
+      Enable Memory Management Unit for virtual memory support.
+
+config PAGE_TABLES
+    bool
+    depends on ENABLE_MMU
+
+config MMU_PAGE_SIZE
+    int "MMU Page Size"
+    depends on ENABLE_MMU
+    default 4096
+    help
+      Page size used by MMU (4096 bytes for 4KB pages).
+
+endmenu
+
+menu "SMP Configuration"
+
+config ENABLE_SMP
+    bool "Enable SMP Support"
+    depends on NR_CPUS > 1
+    default y
+    select IPI_SUPPORT
+    help
+      Enable Symmetric Multi-Processing support.
+
+config IPI_SUPPORT
+    bool "Inter-Processor Interrupt Support"
+    depends on ENABLE_SMP
+
+config LOAD_BALANCE
+    bool "Load Balancing"
+    depends on ENABLE_SMP
+    default y
+    help
+      Enable automatic load balancing between CPU cores.
+
+config LOAD_BALANCE_THRESHOLD
+    int "Load Balance Threshold (%)"
+    range 10 50
+    default 30
+    depends on LOAD_BALANCE
+    help
+      Load difference threshold to trigger load balancing.
+
+endmenu
+
+menu "Safety Configuration"
+
+config STACK_CHECK
+    bool "Stack Overflow Detection"
+    default y
+    help
+      Enable runtime stack overflow detection.
+
+config CODE_PROTECT
+    bool "Code Segment Protection"
+    default y
+    help
+      Enable code segment protection (read-only, no-execute).
+
+config CODE_INTEGRITY
+    bool "Code Integrity Check (SHA-256)"
+    depends on CODE_PROTECT
+    default y
+    help
+      Enable SHA-256 integrity check for code segments.
+
+config WATCHDOG
+    bool "Watchdog Timer"
+    default y
+    help
+      Enable hardware watchdog timer support.
+
+config WATCHDOG_TIMEOUT
+    int "Watchdog Timeout (ms)"
+    range 100 10000
+    default 1000
+    depends on WATCHDOG
+
+endmenu
+
+menu "Debug Configuration"
+
+config DEBUG
+    bool "Enable Debug Support"
+
+choice
+    prompt "Log Level"
+    default LOG_WARN
+
+config LOG_OFF
+    bool "Off"
+
+config LOG_ERR
+    bool "Error"
+
+config LOG_WARN
+    bool "Warning"
+
+config LOG_INFO
+    bool "Info"
+
+config LOG_DEBUG
+    bool "Debug"
+
+endchoice
+
+config LOG_LEVEL
+    int
+    default 0 if LOG_OFF
+    default 1 if LOG_ERR
+    default 2 if LOG_WARN
+    default 3 if LOG_INFO
+    default 4 if LOG_DEBUG
+
+config ASSERT_LEVEL
+    int "Assertion Level"
+    range 0 2
+    default 2
+    depends on DEBUG
+    help
+      0: Disabled, 1: Error only, 2: Full assertions.
+
+config PERF_COUNTERS
+    bool "Performance Counters"
+    depends on DEBUG
+    help
+      Enable performance counter support for profiling.
+
+endmenu
+
+menu "POSIX Compatibility Layer"
+
+config POSIX_COMPAT
+    bool "Enable POSIX Compatibility Layer (PSE52)"
+    default y
+    help
+      Enable POSIX compatibility layer for AISafe64 RTOS.
+      Compliant with PSE52 (IEEE Std 1003.13-2001) for embedded systems.
+      Includes pthread, mutex, semaphore, condition variable, and message queue support.
+
+config POSIX_PTHREAD
+    bool "Support pthread API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_create, pthread_join, pthread_detach, pthread_exit.
+
+config POSIX_MUTEX
+    bool "Support pthread_mutex API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_mutex_* and pthread_mutexattr_* including
+      mutex types, priority inheritance, and robust mutexes.
+
+config POSIX_SEMAPHORE
+    bool "Support semaphore API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support sem_wait, sem_post, sem_init, sem_destroy, sem_open.
+
+config POSIX_COND
+    bool "Support condition variable API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_cond_* (wait, signal, broadcast, timedwait).
+
+config POSIX_RWLOCK
+    bool "Support read-write lock API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_rwlock_* (rdlock, wrlock, unlock, tryrdlock, trywrlock).
+
+config POSIX_SLEEP
+    bool "Support sleep functions"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support usleep, nanosleep, sleep functions.
+
+config POSIX_SCHED
+    bool "Support scheduling control API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support sched_setscheduler, sched_getscheduler, sched_yield,
+      sched_get_priority_max, sched_get_priority_min.
+
+config POSIX_SIGNAL
+    bool "Support signal handling (simplified)"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support sigaction, sigprocmask, pthread_sigmask.
+      Note: Simplified signal handling, no full POSIX signal support.
+
+config POSIX_TIME
+    bool "Support time functions"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support gettimeofday, clock_gettime, clock_settime.
+
+config POSIX_BARRIER
+    bool "Support barrier API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_barrier_* (barrier_wait, barrier_init).
+
+config POSIX_SPINLOCK
+    bool "Support spinlock API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_spin_* (spin_lock, spin_unlock, spin_trylock).
+
+config POSIX_MQUEUE
+    bool "Support message queue API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support mq_open, mq_close, mq_send, mq_receive, mq_getattr,
+      mq_setattr, mq_unlink with priority-based scheduling.
+
+config POSIX_FILELOCK
+    bool "Support file locking"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support flock, fcntl for file and record locking.
+
+config POSIX_KEY
+    bool "Support thread-specific data"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_key_create, pthread_key_delete,
+      pthread_setspecific, pthread_getspecific.
+
+config POSIX_CANCEL
+    bool "Support thread cancellation"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_cancel, pthread_setcancelstate, pthread_testcancel.
+
+config POSIX_ONCE
+    bool "Support one-time initialization"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support pthread_once for one-time initialization function.
+
+config POSIX_SHM
+    bool "Support shared memory (simplified)"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support simplified shared memory using address space groups.
+      Multiple tasks can share same address space for IPC.
+
+config POSIX_TIMER
+    bool "Support timer API"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support timer_create, timer_settime, timer_getoverrun, timer_delete.
+      POSIX per-process timers for task scheduling.
+
+config POSIX_AIO
+    bool "Support asynchronous I/O"
+    depends on POSIX_COMPAT
+    default y
+    help
+      Support aio_read, aio_write, aio_return, aio_error, aio_suspend.
+      Simplified AIO support for non-blocking I/O operations.
+
+endmenu
+
+menu "Hardware Configuration"
+
+choice
+    prompt "Target Board"
+
+config BOARD_RPI4
+    bool "Raspberry Pi 4"
+
+config BOARD_IMX8
+    bool "NXP i.MX 8"
+
+config BOARD_RK3399
+    bool "Rockchip RK3399"
+
+endchoice
+
+config BOARD_NAME
+    string
+    default "rpi4" if BOARD_RPI4
+    default "imx8" if BOARD_IMX8
+    default "rk3399" if BOARD_RK3399
+
+choice
+    prompt "GIC Version"
+
+config GIC_V3
+    bool "GICv3"
+
+config GIC_V4
+    bool "GICv4"
+
+endchoice
+
+config GIC_VERSION
+    int
+    default 3 if GIC_V3
+    default 4 if GIC_V4
+
+config ARCH_TIMER
+    bool "Use ARM Architecture Timer"
+    default y
+    help
+      Use the ARMv8-A generic timer (CNTVCT) as system timer.
+
+endmenu
+
+menu "Core Dump and Debug Support"
+
+config CORE_DUMP
+    bool "Core Dump Generation"
+    depends on DEBUG
+    default n
+    help
+      Generate core dump when task crashes. Contains CPU context,
+      stack content, and memory mapping information in ELF format.
+
+config STACK_BACKTRACE
+    bool "Runtime Stack Backtrace"
+    depends on DEBUG
+    default y
+    help
+      Enable runtime stack unwinding for debugging. Supports frame
+      pointer (FP) based and DWARF debug info based backtrace.
+
+config BACKTRACE_MAX_FRAMES
+    int "Maximum Backtrace Frames"
+    range 8 64
+    default 32
+    depends on STACK_BACKTRACE
+    help
+      Maximum number of stack frames to capture during backtrace.
+
+endmenu
+
+menu "Performance Monitoring"
+
+config PERF_MONITOR
+    bool "Performance Monitoring Framework"
+    depends on DEBUG
+    default y
+    help
+      Enable comprehensive performance monitoring including CPU usage,
+      WCET tracking, response times, and deadline monitoring.
+
+config PERF_TASK_STATS
+    bool "Per-Task Performance Statistics"
+    depends on PERF_MONITOR
+    default y
+    help
+      Track CPU usage, response times, context switches, and stack
+      usage for each task.
+
+config PERF_WCET
+    bool "Worst Case Execution Time Tracking"
+    depends on PERF_MONITOR
+    default y
+    help
+      Track WCET (Worst Case Execution Time) for each task.
+
+config PERF_DEADLINE
+    bool "Deadline Monitoring"
+    depends on PERF_MONITOR
+    default y
+    help
+      Monitor task deadline compliance and count missed deadlines.
+
+config PERF_PMU
+    bool "Hardware Performance Monitoring Unit (PMU)"
+    depends on PERF_MONITOR
+    default n
+    help
+      Use ARM PMU for cache hit rates, branch prediction, and TLB stats.
+
+endmenu
+
+menu "Device Driver Model"
+
+config DEVICE_MODEL
+    bool "Unified Device Driver Model"
+    default y
+    help
+      Enable unified device driver framework supporting character,
+      block, network, and platform devices.
+
+config DEVICE_CHAR
+    bool "Character Device Support"
+    depends on DEVICE_MODEL
+    default y
+    help
+      Support character device drivers (UART, GPIO, etc.).
+
+config DEVICE_BLOCK
+    bool "Block Device Support"
+    depends on DEVICE_MODEL
+    default y
+    help
+      Support block device drivers (SD card, eMMC, etc.).
+
+config DEVICE_NET
+    bool "Network Device Support"
+    depends on DEVICE_MODEL
+    default n
+    help
+      Support network device drivers (Ethernet, WiFi, etc.).
+
+config DEVICE_PLATFORM
+    bool "Platform Device Support"
+    depends on DEVICE_MODEL
+    default y
+    help
+      Support platform devices connected to system bus.
+
+config DEVICE_HOTPLUG
+    bool "Device Hotplug Support"
+    depends on DEVICE_MODEL
+    default n
+    help
+      Support runtime device add/remove (hotplug).
+
+config DEVICE_POWER_MGMT
+    bool "Device Power Management"
+    depends on DEVICE_MODEL
+    default y
+    help
+      Enable device power management callbacks (suspend/resume).
+
+endmenu
+
+menu "Device Tree Support"
+
+config DEVICE_TREE
+    bool "Flattened Device Tree (FDT) Support"
+    default y
+    help
+      Enable device tree support for hardware description. Uses
+      flattened device tree (DTB) format compatible with Linux.
+
+config DT_BLOB_ADDR
+    hex "Device Tree Blob Address"
+    depends on DEVICE_TREE
+    default 0x0
+    help
+      Physical address of the device tree blob in memory.
+
+config DT_EARLY_BINDINGS
+    bool "Early Device Tree Bindings"
+    depends on DEVICE_TREE
+    default y
+    help
+      Parse device tree early during boot for essential hardware.
+
+config DT_DYNAMIC
+    bool "Dynamic Device Tree Modification"
+    depends on DEVICE_TREE
+    default n
+    help
+      Allow runtime modifications to device tree (advanced).
+
+endmenu
