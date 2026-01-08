@@ -26,6 +26,11 @@ extern "C" {
 typedef int32_t ErrorCode_t;
 
 /**
+ * @brief 有符号大小类型 (用于返回字节数或错误码)
+ */
+typedef int64_t ssize_t;
+
+/**
  * @brief 通用错误码定义
  */
 #define ERROR_SUCCESS 0
