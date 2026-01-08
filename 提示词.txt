@@ -81,10 +81,7 @@ earlymmu是否需要支持，以尽快开启mmu加速系统启动
 VFS文件系统是否支持，深度思考后请给出建议和方案
 调度是否支持调度类，便于扩展不同的调度算法，深度思考后请给出建议和方案
 请分析Linux、zephyer、nuttx、qnx、VxWorks，seL4等操作系统，是否有值得借鉴的技术，可以完善现有操作系统的安全性和架构合理性、扩展性和灵活性
-
-gh auth login
-     ! First copy your one-time code: 6E52-C367
-     Open this URL to continue in your web browser: https://github.com/login/device
-     … +4 lines (ctrl+o to expand)
-
+根据plan.md和CLAUDE.md开始编码任务，依次按照模块进行编写，每个模块编写完成后自动提交到远程仓库
 SYSCALL_DESIGN.md
+
+帮我整理 @assistant_ticket_bot-1.py 的代码逻辑，整理到 .html中，可以利用mermaid和svg
