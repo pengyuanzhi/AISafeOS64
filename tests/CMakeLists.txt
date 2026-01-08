@@ -43,3 +43,39 @@ else()
     # 嵌入式测试需要特殊处理
     message(WARNING "Cross-compilation detected. Tests will be built but not run.")
 endif()
+
+# Scheduler tests
+add_executable(test_sched
+    test_sched.c
+    test_framework.c
+)
+
+target_include_directories(test_sched PRIVATE
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/include
+    ${CMAKE_SOURCE_DIR}/src/arch/arm64/include
+)
+
+target_compile_definitions(test_sched PRIVATE
+    TEST_MODE=1
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_sched PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+        -O2
+        -g
+    )
+endif()
+
+if(NOT CMAKE_CROSSCOMPILING)
+    target_link_options(test_sched PRIVATE
+        -Wl,--gc-sections
+    )
+    add_test(NAME sched_test COMMAND test_sched)
+else()
+    message(WARNING "Cross-compilation detected. Scheduler tests will be built but not run.")
+endif()
