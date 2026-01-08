@@ -3,7 +3,7 @@
 ## 项目概述
 AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 
-## 已完成模块（8/15核心模块）
+## 已完成模块（9/15核心模块）
 
 ### 1. ✅ 启动代码和HAL (Module 1)
 **文件**: `src/arch/arm64/boot/start.S`, `src/drivers/uart/uart.c`
@@ -79,14 +79,25 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 
 **提交**: `feat(sched): implement context switching and interrupt-safe locking`
 
+### 9. ✅ 虚拟文件系统 (VFS)
+**文件**: `src/kernel/fs/vfs.c`, `src/kernel/fs/initramfs.c`, `src/kernel/fs/procfs.c`
+- VFS核心层（统一文件操作接口）
+- initramfs文件系统（初始RAM文件系统）
+- procfs文件系统（进程信息文件系统）
+- 文件描述符管理（open, close, read, write）
+- 挂载和卸载接口（mount, umount）
+- 标准/proc条目（/proc/version, /proc/cpuinfo, /proc/meminfo等）
+
+**提交**: `feat(fs): implement VFS, initramfs and procfs filesystems`
+
 ## 代码统计
 
 | 类别 | 文件数 | 代码行数（估计） |
 |------|--------|----------------|
 | 汇编代码 | 2 | ~500行 |
-| C代码 | 20+ | ~5000行 |
-| 头文件 | 15+ | ~3000行 |
-| **总计** | **37+** | **~8500行** |
+| C代码 | 23+ | ~6000行 |
+| 头文件 | 17+ | ~3500行 |
+| **总计** | **42+** | **~10000行** |
 
 ## 功能特性
 
@@ -100,6 +111,7 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 - ✅ 中断管理（GICv3驱动）
 - ✅ 调度器框架（多核、调度类架构）
 - ✅ 上下文切换（ARMv8-A汇编）
+- ✅ 虚拟文件系统（VFS核心层、initramfs、procfs）
 
 ### 部分实现
 - ⚠️ 调度算法（FIFO/EDF/CFS/RR/IDLE类框架存在，需完善）
@@ -107,7 +119,6 @@ AISafe64 RTOS - 面向ARMv8-A架构的64位实时操作系统
 - ⚠️ 进程管理（框架存在，需完善）
 
 ### 未实现
-- ❌ VFS（虚拟文件系统）
 - ❌ Shell调试接口
 - ❌ 网络栈
 - ❌ 驱动框架
@@ -214,29 +225,23 @@ aarch64-none-elf-gdb build/aisafe64.elf
    - 性能测试
 
 ### 中期目标（1-2月）
-4. **虚拟文件系统（VFS）**
-   - VFS核心层
-   - initramfs文件系统
-   - procfs文件系统
-   - 文件操作API
-
-5. **Shell调试接口**
+4. **Shell调试接口**
    - Shell命令解析器
    - 基础命令（ps, top, mem等）
    - 内核调试系统调用
 
-6. **驱动框架**
+5. **驱动框架**
    - 统一设备操作接口
    - 字符设备驱动
    - 平台设备驱动
 
 ### 长期目标（3-6月）
-7. **安全功能**（plan.md中的10个专项）
+6. **安全功能**（plan.md中的10个专项）
    - 专项1-3：栈溢出保护、MPU/MMU抽象层、安全钩子
    - 专项4-6：Capability系统、Fast IPC、保护域
    - 专项7-10：自适应分区、eBPF、驱动框架、形式化验证
 
-8. **高级功能**
+7. **高级功能**
    - 网络栈（TCP/IP）
    - POSIX兼容层（PSE52）
    - 功耗管理
@@ -254,4 +259,5 @@ aarch64-none-elf-gdb build/aisafe64.elf
 ## 更新历史
 
 - 2025-01-08: 项目初始化，完成8个核心模块
+- 2025-01-08: 完成VFS模块（VFS核心层、initramfs、procfs），共9个核心模块
 - [后续更新记录]

@@ -47,7 +47,10 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/sched_extra.c \
            $(SRC_DIR)/kernel/task.c \
            $(SRC_DIR)/kernel/loader.c \
-           $(SRC_DIR)/kernel/shell.c
+           $(SRC_DIR)/kernel/shell.c \
+           $(SRC_DIR)/kernel/fs/vfs.c \
+           $(SRC_DIR)/kernel/fs/initramfs.c \
+           $(SRC_DIR)/kernel/fs/procfs.c
 
 # 目标文件
 ASM_OBJECTS = $(ASM_SOURCES:$(SRC_DIR)/%.s=$(BUILD_DIR)/%.o)
@@ -62,6 +65,7 @@ CFLAGS = -Wall -Wextra -Werror -nostdlib -nostartfiles -ffreestanding
 CFLAGS += -march=armv8-a -mtune=cortex-a53
 CFLAGS += -I$(INCLUDE_DIR)
 CFLAGS += -I$(SRC_DIR)/arch/arm64/include
+CFLAGS += -I$(INCLUDE_DIR)/fs
 CFLAGS += -O2 -g
 
 # 汇编选项
@@ -86,6 +90,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)/lib
 	mkdir -p $(BUILD_DIR)/drivers/uart
 	mkdir -p $(BUILD_DIR)/kernel/loader
+	mkdir -p $(BUILD_DIR)/kernel/fs
 
 # 编译汇编文件
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
