@@ -31,6 +31,8 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/kernel/mm/page.c \
            $(SRC_DIR)/kernel/mm/kheap.c \
            $(SRC_DIR)/lib/printk.c \
+           $(SRC_DIR)/lib/bitmap.c \
+           $(SRC_DIR)/lib/rbtree.c \
            $(SRC_DIR)/lib/sync/spinlock.c \
            $(SRC_DIR)/lib/sync/mutex.c \
            $(SRC_DIR)/lib/sync/semaphore.c \
