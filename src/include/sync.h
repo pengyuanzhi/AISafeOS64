@@ -185,6 +185,59 @@ static inline void spinlock_cleanup(spinlock_t **lock) {
     }
 }
 
+/**
+ * @brief 自旋锁+中断禁用宏
+ * @details 用于调度器和中断处理程序
+ */
+
+/**
+ * @brief 保存中断状态并加锁
+ */
+#define spin_lock_irqsave(lock, flags) \
+    do { \
+        flags = irq_save_and_disable(); \
+        spinlock_lock(&(lock)); \
+    } while (0)
+
+/**
+ * @brief 恢复中断状态并解锁
+ */
+#define spin_unlock_irqrestore(lock, flags) \
+    do { \
+        spinlock_unlock(&(lock)); \
+        irq_restore(flags); \
+    } while (0)
+
+/**
+ * @brief 禁用中断并加锁
+ */
+#define spin_lock_irq(lock) \
+    do { \
+        irq_disable_global(); \
+        spinlock_lock(&(lock)); \
+    } while (0)
+
+/**
+ * @brief 解锁并使能中断
+ */
+#define spin_unlock_irq(lock) \
+    do { \
+        spinlock_unlock(&(lock)); \
+        irq_enable_global(); \
+    } while (0)
+
+/**
+ * @brief 禁用底部中断并加锁
+ */
+#define spin_lock_bh(lock) \
+    spin_lock_irqsave((lock), flags)
+
+/**
+ * @brief 解锁并使能底部中断
+ */
+#define spin_unlock_bh(lock) \
+    spin_unlock_irqrestore((lock), flags)
+
 #ifdef __cplusplus
 }
 #endif

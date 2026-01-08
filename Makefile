@@ -19,7 +19,8 @@ BUILD_DIR = build
 INCLUDE_DIR = $(SRC_DIR)/include
 
 # 汇编源文件
-ASM_SOURCES = $(SRC_DIR)/arch/arm64/boot/start.S
+ASM_SOURCES = $(SRC_DIR)/arch/arm64/boot/start.S \
+             $(SRC_DIR)/arch/arm64/boot/context_switch.S
 
 # C源文件
 C_SOURCES = $(SRC_DIR)/kernel/main.c \
@@ -33,9 +34,9 @@ C_SOURCES = $(SRC_DIR)/kernel/main.c \
            $(SRC_DIR)/lib/printk.c \
            $(SRC_DIR)/lib/bitmap.c \
            $(SRC_DIR)/lib/rbtree.c \
-           $(SRC_DIR)/lib/sync/spinlock.c \
-           $(SRC_DIR)/lib/sync/mutex.c \
-           $(SRC_DIR)/lib/sync/semaphore.c \
+           $(SRC_DIR)/kernel/sync/spinlock.c \
+           $(SRC_DIR)/kernel/sync/mutex.c \
+           $(SRC_DIR)/kernel/sync/semaphore.c \
            $(SRC_DIR)/drivers/uart/uart.c
 
 # 目标文件
@@ -69,8 +70,8 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)/kernel
 	mkdir -p $(BUILD_DIR)/kernel/mm
 	mkdir -p $(BUILD_DIR)/kernel/irq
+	mkdir -p $(BUILD_DIR)/kernel/sync
 	mkdir -p $(BUILD_DIR)/lib
-	mkdir -p $(BUILD_DIR)/lib/sync
 	mkdir -p $(BUILD_DIR)/drivers/uart
 
 # 编译汇编文件
