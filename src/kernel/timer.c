@@ -15,6 +15,7 @@
  */
 
 #include "time.h"
+#include "sched.h"
 #include "types.h"
 #include <stddef.h>
 
@@ -285,17 +286,19 @@ void swtimer_tick_handler(void) {
  * @param ms 睡眠时间（毫秒）
  * @return 成功返回0，失败返回负错误码
  *
- * @details TODO: 集成任务管理器实现阻塞睡眠
+ * @details 阻塞当前任务指定时间
+ *          - 使用task_sleep()实现真正的阻塞睡眠
+ *          - 任务会被挂起，CPU可以执行其他任务
  */
-int msleep(uint64_t ms) {
-    if (ms == 0UL) {
+int msleep(uint64_t ms)
+{
+    if (ms == 0UL)
+    {
         return ERROR_SUCCESS;
     }
 
-    /* 简单实现：忙等待（TODO: 改为阻塞睡眠） */
-    mdelay(ms);
-
-    return ERROR_SUCCESS;
+    /* 使用task_sleep实现阻塞睡眠 */
+    return task_sleep(ms);
 }
 
 /**

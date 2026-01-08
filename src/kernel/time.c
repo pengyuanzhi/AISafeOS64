@@ -15,6 +15,7 @@
  */
 
 #include "time.h"
+#include "sched.h"
 #include "printk.h"
 
 /**
@@ -97,15 +98,18 @@ int time_init(void) {
  * @details 由定时器中断调用
  *          - 更新jiffies
  *          - 处理软件定时器
+ *          - 唤醒睡眠到期的任务
  */
 extern void swtimer_tick_handler(void);
 
-void timer_tick(void) {
+void timer_tick(void)
+{
     /* 更新系统滴答 */
     g_jiffies++;
 
     /* 处理软件定时器 */
     swtimer_tick_handler();
 
-    /* TODO: 唤醒延迟的任务 */
+    /* 检查并唤醒睡眠到期的任务 */
+    check_sleeping_tasks();
 }

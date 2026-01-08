@@ -162,6 +162,53 @@ task_entry_trampoline:
     /* 注意：x0已经是参数，entry应该接受一个void *参数 */
     ret
 
+/**
+ * @brief 首次上下文切换（调度器启动时使用）
+ * @param x0 第一个任务TCB指针
+ *
+ * @details 这是调度器启动后的第一次上下文切换
+ *          - 不保存任何"prev"上下文（因为从kernel初始化来）
+ *          - 直接恢复first任务的所有寄存器
+ *          - 跳转到first任务执行
+ */
+.global cpu_switch_to_first_task
+cpu_switch_to_first_task:
+    /* x0 = first任务TCB指针 */
+
+    /* 恢复栈指针 */
+    ldr     x2, [x0, #16]            /* stack_ptr */
+    mov     sp, x2
+
+    /* 恢复程序状态寄存器 */
+    ldp     x2, x3, [x0, #104]       /* SPSR, ELR */
+    msr     spsr_el1, x2
+    msr     elr_el1, x3
+
+    /* 恢复通用寄存器 */
+    ldp     x19, x20, [x0, #0]
+    ldp     x21, x22, [x0, #16]
+    ldp     x23, x24, [x0, #32]
+    ldp     x25, x26, [x0, #48]
+    ldp     x27, x28, [x0, #64]
+    ldp     x29, x30, [x0, #80]
+
+    /* 恢复栈指针（可能在上一步被修改） */
+    ldr     x2, [x0, #96]
+    mov     sp, x2
+
+    /* 设置x0为任务参数 */
+    ldr     x0, [x0, #0]             /* context[0] = 参数 */
+
+    /* 跳转到第一个任务 */
+    ret
+
+/* 为了兼容性，添加context_switch_asm别名 */
+.global context_switch_asm
+context_switch_asm:
+    /* 跳转到context_switch函数 */
+    b       context_switch
+
 .size context_switch, . - context_switch
 .size arch_setup_task_context, . - arch_setup_task_context
 .size task_entry_trampoline, . - task_entry_trampoline
+.size cpu_switch_to_first_task, . - cpu_switch_to_first_task

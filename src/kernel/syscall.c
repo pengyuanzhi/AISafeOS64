@@ -15,6 +15,8 @@
  */
 
 #include "syscall.h"
+#include "sched.h"
+#include "time.h"
 #include "printk.h"
 #include "types.h"
 
@@ -132,16 +134,24 @@ static int64_t sys_yield_impl(uint64_t *params) {
  * @param params 参数数组 [0]=ms
  * @return 成功返回0
  */
-static int64_t sys_sleep_impl(uint64_t *params) {
-    if (params == NULL) {
+static int64_t sys_sleep_impl(uint64_t *params)
+{
+    if (params == NULL)
+    {
         return -SYS_ERROR_INVAL;
     }
 
     uint64_t ms = params[0];
 
-    /* TODO: 实现任务睡眠 */
-    printk("[WARNING] sys_sleep(%lu) not implemented yet\n", ms);
-    return -SYS_ERROR_NOSYS;
+    /* 调用msleep实现任务睡眠 */
+    int ret = msleep(ms);
+
+    if (ret != ERROR_SUCCESS)
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    return SYS_SUCCESS;
 }
 
 /**
@@ -201,38 +211,110 @@ static int64_t sys_free_impl(uint64_t *params) {
  * @param params 参数数组（未使用）
  * @return 系统时间（毫秒）
  */
-static int64_t sys_gettime_impl(uint64_t *params) {
+static int64_t sys_gettime_impl(uint64_t *params)
+{
     (void)params;  /* 未使用参数 */
 
-    /* TODO: 实现系统时间获取 */
-    /* 暂时返回0 */
-    return 0;
+    /* 返回系统运行时间（毫秒） */
+    return (int64_t)get_system_time_ms();
 }
 
 /**
  * @brief 系统调用实现：设置调度参数
- * @param params 参数数组
+ * @param params 参数数组 [0]=policy, [1]=priority
  * @return 成功返回0
+ *
+ * @details 设置当前任务的调度参数
+ *          - policy: 调度策略（0=FIFO, 1=EDF, 2=CFS, 3=RR, 4=IDLE）
+ *          - priority: 优先级（0-255，255为最高）
  */
-static int64_t sys_sched_set_impl(uint64_t *params) {
-    (void)params;  /* 未使用参数 */
+static int64_t sys_sched_set_impl(uint64_t *params)
+{
+    if (params == NULL)
+    {
+        return -SYS_ERROR_INVAL;
+    }
 
-    /* TODO: 实现调度参数设置 */
-    printk("[WARNING] sys_sched_set not implemented yet\n");
-    return -SYS_ERROR_NOSYS;
+    /* 获取当前任务 */
+    TCB_t *task = get_current_task();
+    if (task == NULL)
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    uint32_t policy = (uint32_t)params[0];
+    uint32_t priority = (uint32_t)params[1];
+
+    /* 参数验证 */
+    if (policy > 4U)  /* 4种调度策略 + IDLE */
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    if (priority >= PRIORITY_LEVELS)
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    /* 设置优先级 */
+    int ret = set_task_priority(task, (uint8_t)priority);
+    if (ret != 0)
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    /* TODO: 实现调度策略切换 */
+    /* 需要调用 sched_switch_class() */
+
+    return SYS_SUCCESS;
 }
 
 /**
  * @brief 系统调用实现：获取调度参数
- * @param params 参数数组
+ * @param params 参数数组 [0]=policy_ptr, [1]=priority_ptr
  * @return 成功返回0
+ *
+ * @details 获取当前任务的调度参数
+ *          - policy_ptr: 输出调度策略的指针
+ *          - priority_ptr: 输出优先级的指针
  */
-static int64_t sys_sched_get_impl(uint64_t *params) {
-    (void)params;  /* 未使用参数 */
+static int64_t sys_sched_get_impl(uint64_t *params)
+{
+    if (params == NULL)
+    {
+        return -SYS_ERROR_INVAL;
+    }
 
-    /* TODO: 实现调度参数获取 */
-    printk("[WARNING] sys_sched_get not implemented yet\n");
-    return -SYS_ERROR_NOSYS;
+    /* 获取当前任务 */
+    TCB_t *task = get_current_task();
+    if (task == NULL)
+    {
+        return -SYS_ERROR_INVAL;
+    }
+
+    uint32_t *policy_ptr = (uint32_t *)params[0];
+    uint32_t *priority_ptr = (uint32_t *)params[1];
+
+    /* 输出参数 */
+    if (policy_ptr != NULL)
+    {
+        /* 返回调度策略ID */
+        if (task->sched_class != NULL)
+        {
+            *policy_ptr = task->sched_class->id;
+        }
+        else
+        {
+            *policy_ptr = 4U;  /* 默认IDLE */
+        }
+    }
+
+    if (priority_ptr != NULL)
+    {
+        *priority_ptr = task->prio;
+    }
+
+    return SYS_SUCCESS;
 }
 
 /**
@@ -312,18 +394,26 @@ void task_exit(int exit_code) {
 }
 
 /**
- * @brief 空让出CPU函数（占位符）
+ * @brief 让出CPU函数
  */
-void task_yield(void) {
-    /* TODO: 实现任务调度 */
-    /* 暂时不做任何操作 */
+void task_yield(void)
+{
+    /* 调用调度器的yield函数 */
+    yield();
 }
 
 /**
- * @brief 空获取任务ID函数（占位符）
- * @return 任务ID（暂时返回0）
+ * @brief 获取任务ID函数
+ * @return 任务ID
  */
-int task_getpid(void) {
-    /* TODO: 实现任务管理 */
-    return 0;
+int task_getpid(void)
+{
+    /* 获取当前任务 */
+    TCB_t *task = get_current_task();
+    if (task == NULL)
+    {
+        return 0;
+    }
+
+    return (int)task->tid;
 }

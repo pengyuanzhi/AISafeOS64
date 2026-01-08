@@ -35,7 +35,8 @@
 typedef enum {
     TASK_READY = 0,      /**< Task is ready to run */
     TASK_RUNNING,        /**< Task is currently running */
-    TASK_BLOCKED,        /**< Task is blocked */
+    TASK_BLOCKED,        /**< Task is blocked (waiting for resource) */
+    TASK_SLEEPING,       /**< Task is sleeping (timed wait) */
     TASK_ZOMBIE,         /**< Task has exited */
     TASK_STOPPED         /**< Task is stopped */
 } TaskState_t;
@@ -417,6 +418,43 @@ int wake_up_task(TCB_t *task);
  * @return 0 on success, negative error code on failure
  */
 int set_task_priority(TCB_t *task, uint8_t prio);
+
+/**
+ * @brief Get current task
+ * @return Current task's TCB pointer, NULL if not found
+ */
+TCB_t *get_current_task(void);
+
+/**
+ * @brief Put current task to sleep
+ * @param ms Sleep time in milliseconds
+ * @return 0 on success, negative error code on failure
+ *
+ * @details Blocks current task for specified time
+ *          - Sets task state to TASK_SLEEPING
+ *          - Adds task to sleep queue
+ *          - Triggers scheduler
+ */
+int task_sleep(uint64_t ms);
+
+/**
+ * @brief Wake up sleeping task (timer callback)
+ * @param task Task control block pointer
+ *
+ * @details Internal function called by timer
+ *          - Sets task state to TASK_READY
+ *          - Adds task to ready queue
+ */
+void task_wakeup_timer(TCB_t *task);
+
+/**
+ * @brief Check and wake up sleeping tasks
+ *
+ * @details Called by timer_tick()
+ *          - Checks sleep queue for expired tasks
+ *          - Wakes up tasks whose sleep time has elapsed
+ */
+void check_sleeping_tasks(void);
 
 /*
  * Scheduling Class Specific API
