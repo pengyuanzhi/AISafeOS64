@@ -206,7 +206,8 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
                 }
             }
 
-            WFE();
+            /* 硬实时系统：不使用 WFE，保持 CPU 响应性 */
+            /* WFE 会引入不确定的唤醒延迟，影响实时性 */
         }
     }
 
@@ -298,8 +299,7 @@ int semaphore_post(semaphore_t *sem)
             return ERROR_SUCCESS;
         }
 
-        /* CAS失败，重试 */
-        WFE();
+        /* CAS失败，立即重试（不使用 WFE 保证实时性） */
     }
 }
 
