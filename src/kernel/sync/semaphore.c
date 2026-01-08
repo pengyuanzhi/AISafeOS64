@@ -28,21 +28,26 @@
  *          - 二值信号量：max_count=1
  *          - 计数信号量：max_count>1
  */
-int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count) {
-    if (sem == NULL) {
+int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
+{
+    if (sem == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     /* 参数验证 */
-    if (initial_count < 0) {
+    if (initial_count < 0)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if (max_count == 0U) {
+    if (max_count == 0U)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    if ((uint32_t)initial_count > max_count) {
+    if ((uint32_t)initial_count > max_count)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
@@ -65,16 +70,20 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count) 
  *          - 成功：计数减1
  *          - 失败：阻塞等待（TODO）
  */
-int semaphore_wait(semaphore_t *sem) {
-    if (sem == NULL) {
+int semaphore_wait(semaphore_t *sem)
+{
+    if (sem == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    while (1) {
+    while (1)
+    {
         int32_t current_count = sem->count;
 
         /* 检查是否有可用资源 */
-        if (current_count <= 0) {
+        if (current_count <= 0)
+        {
             /* 计数为0，阻塞等待（TODO: 阻塞当前任务） */
             WFE();
             continue;
@@ -85,7 +94,8 @@ int semaphore_wait(semaphore_t *sem) {
         uint32_t desired = (uint32_t)(current_count - 1);
 
         if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
-                                           &expected, desired)) {
+                                           &expected, desired))
+        {
             /* 成功获取信号量 */
             return ERROR_SUCCESS;
         }
@@ -104,15 +114,18 @@ int semaphore_wait(semaphore_t *sem) {
  *          - 如果计数>0，计数减1并返回成功
  *          - 如果计数=0，立即返回失败
  */
-int semaphore_trywait(semaphore_t *sem) {
-    if (sem == NULL) {
+int semaphore_trywait(semaphore_t *sem)
+{
+    if (sem == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
     int32_t current_count = sem->count;
 
     /* 检查是否有可用资源 */
-    if (current_count <= 0) {
+    if (current_count <= 0)
+    {
         /* 计数为0，立即返回失败 */
         return -ERROR_WOULD_BLOCK;
     }
@@ -122,7 +135,8 @@ int semaphore_trywait(semaphore_t *sem) {
     uint32_t desired = (uint32_t)(current_count - 1);
 
     if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
-                                       &expected, desired)) {
+                                       &expected, desired))
+    {
         /* 成功获取信号量 */
         return ERROR_SUCCESS;
     }
@@ -140,16 +154,20 @@ int semaphore_trywait(semaphore_t *sem) {
  *          - 如果计数达到上限，返回错误
  *          - 唤醒等待的任务
  */
-int semaphore_post(semaphore_t *sem) {
-    if (sem == NULL) {
+int semaphore_post(semaphore_t *sem)
+{
+    if (sem == NULL)
+    {
         return -ERROR_INVALID_PARAM;
     }
 
-    while (1) {
+    while (1)
+    {
         int32_t current_count = sem->count;
 
         /* 检查是否超过最大计数 */
-        if ((uint32_t)current_count >= sem->max_count) {
+        if ((uint32_t)current_count >= sem->max_count)
+        {
             /* 计数已达到上限 */
             return -ERROR_OVERFLOW;
         }
@@ -159,7 +177,8 @@ int semaphore_post(semaphore_t *sem) {
         uint32_t desired = (uint32_t)(current_count + 1);
 
         if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count,
-                                           &expected, desired)) {
+                                           &expected, desired))
+        {
             /* 成功释放信号量 */
 
             /* 内存屏障 */
@@ -181,8 +200,10 @@ int semaphore_post(semaphore_t *sem) {
  * @param sem 信号量指针
  * @return 当前计数
  */
-int32_t semaphore_getcount(semaphore_t *sem) {
-    if (sem == NULL) {
+int32_t semaphore_getcount(semaphore_t *sem)
+{
+    if (sem == NULL)
+    {
         return -1;
     }
 

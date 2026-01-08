@@ -32,7 +32,8 @@ extern "C" {
  * @brief 自旋锁结构
  * @details Ticket Lock算法
  */
-typedef struct {
+typedef struct
+{
     volatile uint32_t next_ticket;    /**< 下一个票据 */
     volatile uint32_t serving_ticket; /**< 当前服务的票据 */
 } spinlock_t;
@@ -41,7 +42,8 @@ typedef struct {
  * @brief 互斥锁结构
  * @details 支持优先级继承
  */
-typedef struct {
+typedef struct
+{
     volatile uint32_t locked;         /**< 锁状态 */
     void *owner;                      /**< 持有者任务 */
     uint32_t owner_priority;          /**< 持有者优先级 */
@@ -53,7 +55,8 @@ typedef struct {
  * @brief 信号量结构
  * @details 支持二值信号量和计数信号量
  */
-typedef struct {
+typedef struct
+{
     volatile int32_t count;           /**< 计数 */
     uint32_t max_count;               /**< 最大计数 */
 } semaphore_t;
@@ -182,8 +185,10 @@ int32_t semaphore_getcount(semaphore_t *sem);
 /**
  * @brief 自旋锁清理函数（用于RAII）
  */
-static inline void spinlock_cleanup(spinlock_t **lock) {
-    if (lock != NULL && *lock != NULL) {
+static inline void spinlock_cleanup(spinlock_t **lock)
+{
+    if (lock != NULL && *lock != NULL)
+    {
         spinlock_unlock(*lock);
     }
 }

@@ -809,25 +809,59 @@ if(condition)         /* ❌ 错误 */
 if (condition)        /* ✅ 正确 */
 ```
 
-#### 4.2.2 大括号规范
+#### 4.2.2 大括号规范（Allman风格）
 ```c
-/* 左大括号不换行 */
+/* Allman风格：左大括号必须换行 */
 void function(void)
-{                    /* ❌ 错误 */
+{                    /* ✅ 正确 - Allman风格 */
     /* code */
 }
 
-void function(void) { /* ✅ 正确 */
+void function(void) { /* ❌ 错误 - K&R风格 */
     /* code */
 }
 
 /* 单语句也必须使用大括号 */
 if (condition)
-    x = 1;           /* ❌ 错误 */
+    x = 1;           /* ❌ 错误：缺少大括号 */
 
-if (condition) {
-    x = 1;           /* ✅ 正确 */
+if (condition)
+{                    /* ✅ 正确：Allman风格 */
+    x = 1;
 }
+
+/* 控制语句必须使用Allman风格 */
+if (condition)
+{
+    do_something();
+}
+else
+{
+    do_other_thing();
+}
+
+while (condition)
+{
+    do_something();
+}
+
+for (int i = 0; i < max; i++)
+{
+    do_something();
+}
+
+/* 函数定义必须使用Allman风格 */
+void function_name(parameter1, parameter2)
+{
+    /* 函数体 */
+}
+
+/* 结构体定义必须使用Allman风格 */
+typedef struct StructureName
+{
+    uint32_t field1;
+    uint32_t field2;
+} StructureName_t;
 ```
 
 #### 4.2.3 行长度

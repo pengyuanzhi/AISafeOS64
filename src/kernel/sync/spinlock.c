@@ -22,8 +22,10 @@
  *
  * @details 初始化票据为0
  */
-void spinlock_init(spinlock_t *lock) {
-    if (lock == NULL) {
+void spinlock_init(spinlock_t *lock)
+{
+    if (lock == NULL)
+    {
         return;
     }
 
@@ -42,8 +44,10 @@ void spinlock_init(spinlock_t *lock) {
  *          - 原子获取下一个票据
  *          - 忙等待直到当前票据等于服务票据
  */
-void spinlock_lock(spinlock_t *lock) {
-    if (lock == NULL) {
+void spinlock_lock(spinlock_t *lock)
+{
+    if (lock == NULL)
+    {
         return;
     }
 
@@ -56,7 +60,8 @@ void spinlock_lock(spinlock_t *lock) {
     MEMORY_BARRIER();
 
     /* 忙等待直到轮到自己 */
-    while (lock->serving_ticket != ticket) {
+    while (lock->serving_ticket != ticket)
+    {
         /* 降低功耗的等待循环 */
         WFE();
     }
@@ -69,8 +74,10 @@ void spinlock_lock(spinlock_t *lock) {
  *
  * @details 非阻塞模式
  */
-bool spinlock_trylock(spinlock_t *lock) {
-    if (lock == NULL) {
+bool spinlock_trylock(spinlock_t *lock)
+{
+    if (lock == NULL)
+    {
         return false;
     }
 
@@ -83,7 +90,8 @@ bool spinlock_trylock(spinlock_t *lock) {
     MEMORY_BARRIER();
 
     /* 检查是否立即轮到自己 */
-    if (lock->serving_ticket == ticket) {
+    if (lock->serving_ticket == ticket)
+    {
         return true;
     }
 
@@ -98,8 +106,10 @@ bool spinlock_trylock(spinlock_t *lock) {
  *
  * @details 释放锁，增加服务票据
  */
-void spinlock_unlock(spinlock_t *lock) {
-    if (lock == NULL) {
+void spinlock_unlock(spinlock_t *lock)
+{
+    if (lock == NULL)
+    {
         return;
     }
 
