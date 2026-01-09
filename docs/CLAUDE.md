@@ -1496,6 +1496,63 @@ static uint64_t priority_bitmap[4];
 /* HACK: 临时使用忙等待，后续改为WFE指令 */
 ```
 
+#### 4.3.4 字符集和符号规范
+
+**禁止使用Emoji和特殊符号**：
+
+在源代码、头文件、文档和注释中，**严格禁止**使用以下字符：
+- ❌ Emoji表情符号（如：✅ ❌ ⚠️ 🎯 🛡️ 🚀 📋 📊 等）
+- ❌ 特殊Unicode符号（如：→ ← ↑ ↓ ⇒ ⇔ 等）
+- ❌ 装饰性符号（如：★ ☆ ♥ ♦ 等）
+- ❌ 非ASCII字符（包括中文全角标点：，。！？等）
+
+**正确做法**：
+```c
+/* ✅ 正确: 使用ASCII字符 */
+int result = 0;  /* Operation successful */
+if (error != 0) {
+    return ERROR_FAILED;  /* Error occurred */
+}
+
+/* ✅ 正确: 使用英文和ASCII标点 */
+/*
+ * High priority task: Priority > 200
+ * Low priority task: Priority < 50
+ */
+
+/* ❌ 错误: 使用Emoji */
+int result = 0;  /* ✅ 成功 */
+if (error != 0) {
+    return ERROR_FAILED;  /* ❌ 失败 */
+}
+
+/* ❌ 错误: 使用中文全角标点 */
+int result = 0； /* 成功 */
+
+/* ❌ 错误: 使用特殊Unicode符号 */
+int result = 0;  /* OK → 成功 */
+```
+
+**文档规范**：
+- 使用英文编写注释和文档
+- 仅使用ASCII字符（0x00-0x7F）
+- 使用标准ASCII标点符号：`, . ! ? : ; ( ) [ ] { } < > / \ | - _`
+- 代码注释优先使用英文，必要时可用中文但必须用半角标点
+
+**工具检查**：
+```bash
+# 检查文件中是否包含非ASCII字符
+grep -P '[^\x00-\x7F]' filename.c
+
+# 检查是否包含Emoji（常见Emoji范围）
+grep -P '[\x{1F000}-\x{1F9FF}]' filename.c
+```
+
+**MISRA-C:2012合规性**：
+- 此规则符合MISRA-C:2012关于源字符集的要求
+- 确保代码在不同编译器和编辑器中的一致性
+- 便于代码审查和版本控制
+
 ### 4.4 文件组织规范
 
 #### 4.4.1 头文件结构
