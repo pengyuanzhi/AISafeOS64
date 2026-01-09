@@ -163,3 +163,59 @@ https://code.claude.com/docs/zh-CN/cli-reference
 │       ├── code-style.md   # Code style guidelines
 │       ├── testing.md      # Testing conventions
 │       └── security.md     # Security requirements
+
+为需求(SRS)、概要设计(HLD)、详细设计(LLD)、实施计划等4个主要文档
+  💡 建议的瀑布模型文档结构
+
+  docs/
+  ├── 01-requirements/          # 需求阶段文档
+  │   ├── SRS.md              # 软件需求规格说明书
+  │   ├── functional-reqs.md  # 功能需求详细说明
+  │   └── non-functional-reqs.md # 非功能需求详细说明
+  │
+  ├── 02-design/              # 设计阶段文档
+  │   ├── HLD.md              # 高层设计/概要设计
+  │   ├── LLD/                # 低层设计/详细设计
+  │   │   ├── task-scheduler.md
+  │   │   ├── memory-management.md
+  │   │   ├── ipc.md
+  │   │   └── ...
+  │   └── interface-design.md  # 接口设计
+  │
+  ├── 03-implementation/       # 实现阶段文档
+  │   ├── coding-standards.md # 编码规范（引用CLAUDE.md）
+  │   ├── test-plan.md        # 测试计划
+  │   └── development-plan.md # 开发计划
+  │
+  ├── 04-verification/        # 验证阶段文档
+  │   ├── test-specs.md       # 测试规格
+  │   ├── verification-plan.md # 验证计划
+  │   └── compliance-report.md # 合规性报告
+  │
+  └── 05-project/             # 项目管理文档
+      ├── risk-assessment.md  # 风险评估
+      ├── milestones.md       # 里程碑
+      └── changelog.md        # 变更日志
+
+- 设计文档完整
+- API参考手册
+- 用户指南
+- 测试报告
+
+系统必须支持1-8个CPU核心
+
+  1. 文档导航 - docs/README.md 提供完整的文档索引
+  2. 角色视图 - 支持按角色（项目经理、架构师、工程师等）查找文档
+  3. 阶段视图 - 支持按阶段（需求、设计、实施）查找文档
+  4. 追溯矩阵 - 需求到设计的追溯关系清晰
+
+  当前已完成需求、设计、实施阶段的文档，后续可以创建：
+
+  1. 验证阶段文档 (04-verification/)
+    - 测试计划
+    - 验证报告
+    - 合规性报告 (MISRA-C:2012, ISO 26262)
+  2. 项目管理文档 (05-project/)
+    - 风险评估
+    - 里程碑跟踪
+    - 变更日志

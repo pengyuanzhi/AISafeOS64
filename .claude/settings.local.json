@@ -3,7 +3,12 @@
     "allow": [
       "Bash(wc:*)",
       "Bash(tree:*)",
-      "Bash(./scripts/git_push.sh:*)"
+      "Bash(./scripts/git_push.sh:*)",
+      "Bash(dir:*)",
+      "Bash(find:*)",
+      "Bash(for:*)",
+      "Bash(do if [ -f \"$f\" ])",
+      "Bash(fi:*)"
     ]
   }
 }
