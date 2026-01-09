@@ -9,7 +9,7 @@
 | 项目 | 内容 |
 |------|------|
 | **文档标题** | AISafe64 软件需求规格说明书 |
-| **文档版本** | 1.1 |
+| **文档版本** | 1.2 |
 | **创建日期** | 2025-01-09 |
 | **最后更新** | 2025-01-09 |
 | **作者** | AISafe64 Team |
@@ -25,6 +25,7 @@
 |------|------|------|----------|
 | 1.0 | 2025-01-09 | AISafe64 Team | 初始版本 |
 | 1.1 | 2025-01-09 | AISafe64 Team | 强化三大核心特性<br>- 🎯 高实时性：明确硬实时指标（任务切换<5μs，中断响应<1μs）<br>- 🛡️ 高可靠性：强化功能安全认证和内存保障<br>- 🚀 操作系统先进性：多核1-16核可配置，POSIX兼容层升级为P0<br>- 新增附录4.0详细说明三大核心特性<br>- 添加三大核心特性量化指标总结表 |
+| 1.2 | 2025-01-09 | AISafe64 Team | 补充plan.md中的缺失需求（任务管理+31需求）<br>- **实验性调度类**（FR-TASK-008）：EDF、CFS、RR调度策略（P2）<br>- **时间分区调度**（FR-TASK-009）：ARINC 653风格CPU预算管理（P1）<br>- **用户态Shell**（FR-DBG-001~009）：9个详细需求（P0-P3）<br>- **应用加载器**（FR-LOADER-001~007）：7个需求（P0-P1）<br>- 需求总数：60 → 91个（+31个需求） |
 
 ---
 
@@ -627,10 +628,77 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 - **描述**: 系统必须提供查询任务信息的接口
 - **优先级**: P1
 - **接口**:
-  
+
   ```c
   int task_get_info(uint32_t task_id, TaskInfo_t *info);
   ```
+
+**FR-TASK-008: 实验性调度类支持**
+- **描述**: 系统必须支持多种可选调度策略（实验性，不推荐用于安全关键系统）
+- **优先级**: P2（可选功能）
+- **调度策略**:
+  - **FP-PSS（默认）**: 固定优先级抢占式调度
+    - 256级优先级（0-255）
+    - O(1)时间复杂度
+    - 确定性调度，易于认证
+  - **EDF**: 最早截止时间优先调度
+    - 动态优先级，根据截止时间调整
+    - 适用于动态关键性系统
+    - ⚠️ 增加认证难度，不推荐用于安全关键系统
+  - **RR**: 时间片轮转调度
+    - 固定时间片轮转
+    - 适用于非关键任务
+    - 时间片可配置（1ms-100ms）
+  - **CFS**: 完全公平调度
+    - 动态优先级，公平性保证
+    - ❌ 不适合硬实时系统
+    - ❌ 显著增加认证难度
+- **接口**:
+  ```c
+  /* 设置调度策略 */
+  int task_set_scheduler(uint32_t task_id, int policy, const struct sched_param *param);
+
+  /* 获取调度策略 */
+  int task_get_scheduler(uint32_t task_id, int *policy, struct sched_param *param);
+  ```
+- **验收标准**:
+  - FP-PSS为默认策略，P0级别实现
+  - EDF/RR/CFS为可选策略，P2级别实现
+  - 不同调度策略的任务可共存
+  - 调度策略切换时间 < 10μs
+  - ⚠️ 使用实验性调度策略需特殊配置
+
+**FR-TASK-009: 自适应分区/时间分区（ARINC 653风格）**
+- **描述**: 系统必须支持ARINC 653风格的时间分区调度，确保任务的时间隔离
+- **优先级**: P1（重要功能）
+- **功能要求**:
+  - **CPU预算管理**: 每个分区分配最大执行时间预算
+  - **预算强制执行**: 超时强制切换，防止runaway task
+  - **时间窗口**: 100ms标准时间窗口
+  - **分区数量**: 支持8个分区
+  - **分区隔离**: 分区间时间隔离，互不影响
+- **时间分区配置**:
+  ```c
+  /* 时间分区配置 */
+  typedef struct {
+      uint32_t partition_id;       /* 分区ID（0-7） */
+      uint32_t duration_ms;        /* 分区持续时间（ms） */
+      uint32_t budget_percentage;  /* CPU预算百分比（0-100） */
+      uint32_t period_ms;          /* 分区周期（ms） */
+  } TimePartition_t;
+
+  /* 创建时间分区 */
+  int partition_create(const TimePartition_t *config);
+
+  /* 启动分区调度 */
+  int partition_start(void);
+  ```
+- **验收标准**:
+  - 分区切换开销 < 5μs
+  - 分区预算精度 ±1%
+  - 分区间完全隔离
+  - 分区预算超时强制切换
+  - 支持8个分区并发运行
 
 #### 3.1.2 内存管理需求
 
@@ -954,40 +1022,230 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 
 #### 3.1.8 调试与诊断需求
 
-**FR-DBG-001: Shell接口**
-- **描述**: 系统必须提供用户态Shell调试接口
-- **优先级**: P1
-- **基础命令**:
-  - ps（任务列表）
-  - top（实时监控）
-  - mem（内存统计）
-  - help（帮助）
+**FR-DBG-001: 用户态Shell接口**
+- **描述**: 系统必须提供用户态Shell调试接口（推荐方案）
+- **优先级**: P1（重要功能）
+- **设计原则**:
+  - **用户态优先**: Shell作为用户态任务运行，不在内核空间
+  - **安全第一**: 符合ISO 26262 ASIL-D功能安全要求
+  - **可选编译**: 生产环境可完全禁用以减少代码体积
+  - **权限控制**: 基于能力的细粒度权限控制
+  - **微内核设计**: Shell不增加内核复杂度
+
+**用户态 vs 核心态Shell对比**：
+
+| 对比项 | 用户态Shell（推荐） | 核心态Shell |
+|--------|---------------------|-------------|
+| **安全性** | ✅ 隔离性好，bug不影响内核 | ⚠️ 代码bug可能导致内核崩溃 |
+| **功能安全** | ✅ 符合ASIL-D要求 | ⚠️ 增加内核代码复杂度 |
+| **性能** | ⚠️ 需要系统调用开销 | ✅ 直接访问内核数据 |
+| **灵活性** | ✅ 可选编译，动态加载 | ❌ 必须编译进内核 |
+| **标准兼容** | ✅ 符合POSIX（sh是用户程序） | ❌ 不符合微内核设计 |
+| **代码大小** | ✅ 不增加内核镜像 | ❌ 增加内核镜像大小 |
+
+**基础命令（P0 - 核心功能）**：
+- `ps` - 显示任务列表
+  ```bash
+  ash> ps
+  PID   PRI    STATE       TIME     CPU
+  1     200    RUNNING     12345    0
+  2     150    SLEEPING    5678     1
+  3     180    READY       2345     2
+  ```
+- `top` - 实时任务监控（类似Linux top）
+  ```bash
+  ash> top
+  CPU:  15.3% user,  3.2% kernel, 81.5% idle
+  Mem:  123456K total, 45678K used, 77778K free
+  PID   PRI    STATE    %CPU  TIME
+  1     200    RUN      12.3  12345
+  2     150    SLEEP     3.2   5678
+  ```
+- `mem` - 内存使用统计
+  ```bash
+  ash> mem
+  Total:    1048576 KB
+  Used:     456789 KB (43.6%)
+  Free:     591787 KB (56.4%)
+  Kernel:   123456 KB
+  Tasks:    333333 KB
+  ```
+- `help` - 显示命令帮助
+  ```bash
+  ash> help
+  Available commands:
+    ps     - Show task list
+    top    - Real-time task monitoring
+    mem    - Memory usage statistics
+    klog   - View kernel log
+  ```
+
+**验收标准**:
+- Shell作为用户态任务运行
+- 命令响应时间 < 100ms
+- 支持命令历史（上下键）
+- 支持Tab键自动补全
+- 帮助文档完整
 
 **FR-DBG-002: 诊断命令**
 - **描述**: 系统必须提供高级诊断命令
 - **优先级**: P1
 - **命令**:
-  - klog（内核日志）
-  - task（任务控制）
-  - perf（性能统计）
+- `klog` - 查看内核日志
+  ```bash
+  ash> klog
+  [12345.678] kernel: CPU0: Task 1 started
+  [12346.123] kernel: MMU enabled at 0x40080000
+  [12347.456] kernel: Scheduler started
+  ```
+- `task <pid> <cmd>` - 任务控制
+  ```bash
+  ash> task 1 suspend
+  Task 1 suspended
+  ash> task 1 resume
+  Task 1 resumed
+  ash> task 1 info
+  PID: 1, Priority: 200, State: READY
+  Stack: 0x4000/8192, CPU time: 12345 us
+  ```
+- `perf` - 性能统计
+  ```bash
+  ash> perf
+  Context switches: 12345
+  Interrupts:       67890
+  TLB misses:       1234
+  Cache hits:       98.5%
+  ```
+- **验收标准**:
+  - 日志支持过滤（按级别/模块）
+  - 任务控制响应时间 < 10ms
+  - 性能统计实时更新（1秒刷新）
 
-**FR-DBG-003: 核心转储**
+**FR-DBG-003: 配置命令**
+- **描述**: 系统必须支持运行时配置修改
+- **优先级**: P2（可选功能）
+- **命令**:
+- `set` - 配置参数
+  ```bash
+  ash> set log.level 2
+  Log level set to 2 (WARNING)
+  ash> set scheduler.quantum 10
+  Scheduler quantum set to 10 ms
+  ```
+- `reload` - 重新加载配置
+  ```bash
+  ash> reload
+  Configuration reloaded
+  ```
+- **验收标准**:
+  - 配置立即生效或reload后生效
+  - 配置持久化到文件系统
+  - 配置验证（防止非法值）
+
+**FR-DBG-004: 高级功能**
+- **描述**: 系统必须支持高级调试功能
+- **优先级**: P3（调试专用）
+- **功能**:
+- `script` - Shell脚本支持
+  ```bash
+  ash> script test.ash
+  Running test.ash...
+  Task list: 3 tasks
+  Memory usage: 45%
+  Done.
+  ```
+- `trace` - 系统跟踪
+  ```bash
+  ash> trace enable scheduler
+  Tracing enabled for scheduler
+  ash> trace dump
+  [12345.678] schedule: task 1 -> task 2
+  [12346.123] schedule: task 2 -> task 3
+  ```
+- **验收标准**:
+  - 支持基本Shell语法（if/for/while）
+  - 跟踪缓冲区 > 1000条记录
+  - 跟踪零拷贝（高性能）
+
+**FR-DBG-005: 内核调试系统调用接口**
+- **描述**: Shell通过系统调用访问内核调试接口
+- **优先级**: P1
+- **接口**:
+  ```c
+  /* 任务信息系统调用 */
+  long sys_task_info(TaskInfo_t *tasks, int count);
+
+  /* 性能统计系统调用 */
+  long sys_perf_stats(PerfStats_t *stats);
+
+  /* 内存统计系统调用 */
+  long sys_mem_stats(MemStats_t *stats);
+
+  /* 日志读取系统调用 */
+  long sys_klog_read(char *buf, size_t size, off_t offset);
+
+  /* 任务控制系统调用 */
+  long sys_task_control(int pid, TaskCmd_t cmd, void *arg);
+
+  /* 配置系统调用 */
+  long sys_set_config(const char *key, const char *value);
+  long sys_get_config(const char *key, char *buf, size_t size);
+  ```
+- **验收标准**:
+  - 系统调用响应时间 < 10μs
+  - 数据拷贝优化（零拷贝）
+  - 参数验证完整
+
+**FR-DBG-006: Shell权限控制**
+- **描述**: Shell必须基于Capability的细粒度权限控制
+- **优先级**: P1
+- **Capability定义**:
+  ```c
+  /* Shell能力定义 */
+  typedef enum {
+      CAP_SHELL_VIEW,      /* 只读查看 */
+      CAP_SHELL_TASK,      /* 任务管理 */
+      CAP_SHELL_CONFIG,    /* 配置修改 */
+      CAP_SHELL_DEBUG,     /* 调试功能 */
+  } ShellCapability_t;
+  ```
+- **权限级别**:
+  - **开发环境Shell**: 完全权限（VIEW + TASK + CONFIG + DEBUG）
+  - **生产环境Shell**: 仅查看权限（VIEW）
+  - **运维环境Shell**: 查看和配置权限（VIEW + CONFIG）
+- **验收标准**:
+  - 权限检查在内核态执行
+  - 无Capability的操作失败
+  - 权限可动态撤销
+
+**FR-DBG-007: 核心转储**
 - **描述**: 系统必须支持核心转储生成
 - **优先级**: P1
 - **功能要求**:
-  - ELF格式
+  - ELF格式（ELF64）
   - 包含任务状态
   - 包含内存映像
+  - 符号表信息
+  - 寄存器状态
+- **验收标准**:
+  - 转储生成时间 < 1s
+  - 兼容GDB分析
+  - 支持压缩（可选）
 
-**FR-DBG-004: 栈回溯**
+**FR-DBG-008: 栈回溯**
 - **描述**: 系统必须支持运行时栈回溯
 - **优先级**: P1
 - **功能要求**:
   - 解析栈帧
   - 显示函数调用链
   - 支持符号解析
+  - 显示源代码行号（如果有调试信息）
+- **验收标准**:
+  - 栈回溯深度 > 100层
+  - 回溯时间 < 10ms
+  - 符号解析准确率 100%
 
-**FR-DBG-005: 性能监控**
+**FR-DBG-009: 性能监控**
 - **描述**: 系统必须提供性能统计接口
 - **优先级**: P2
 - **统计项**:
@@ -995,6 +1253,12 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   - 中断次数
   - CPU使用率
   - 内存使用率
+  - 缓存命中率
+  - TLB miss率
+- **验收标准**:
+  - 统计开销 < 1% CPU
+  - 实时更新（1秒刷新）
+  - 历史数据保留（>1小时）
 
 #### 3.1.9 POSIX兼容需求
 
@@ -1055,6 +1319,183 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   - 支持SCHED_FIFO、SCHED_RR策略
   - 优先级范围：0-255
   - sched_yield延迟 < 1μs
+
+#### 3.1.10 应用加载器需求
+
+**FR-LOADER-001: 启动时应用加载**
+- **描述**: 系统必须支持启动时应用加载机制（与运行时动态加载的区别）
+- **优先级**: P1（重要功能）
+- **设计原则**:
+  - **启动时一次性加载**: 系统启动时加载所有应用，运行时不再加载
+  - **可预测性高**: 启动时确定所有应用状态，便于认证
+  - **应用隔离**: 每个应用独立的地址空间（MMU）
+  - **故障隔离**: 应用崩溃不影响内核和其他应用
+  - **可认证性**: 加载逻辑简单、可验证
+
+**与动态加载的区别**：
+
+| 特性 | 动态加载模块 | 启动时应用加载 |
+|------|-------------|---------------|
+| 加载时机 | 运行时任意时刻 | 仅启动时一次 |
+| 卸载能力 | 支持 | 不支持 |
+| 可预测性 | 低（运行时状态复杂） | 高（启动时确定） |
+| 认证复杂度 | 极高 | 中等 |
+| 安全性 | 较低（攻击面大） | 较高（攻击面小） |
+| 实时性影响 | 有（运行时加载阻塞） | 无（启动时完成） |
+
+**FR-LOADER-002: ELF格式支持**
+- **描述**: 应用加载器必须支持标准ELF64格式
+- **优先级**: P1
+- **功能要求**:
+  - 支持ELF64格式（AArch64架构）
+  - 支持位置无关代码（PIC）
+  - 支持程序头解析
+  - 支持段加载（代码段、数据段、BSS段）
+  - 支持符号重定位（如果需要）
+  - 验证ELF魔数（\x7fELF）
+  - 验证架构（EM_AARCH64）
+- **接口**:
+  ```c
+  /* 从initramfs读取ELF文件 */
+  static int load_elf_from_file(const char *path, ElfLoadContext_t *ctx);
+
+  /* 验证ELF文件签名 */
+  static int verify_elf_signature(const uint8_t *data, uint32_t size,
+                                  const uint8_t *expected_signature);
+
+  /* 加载ELF段到内存 */
+  static int load_elf_segments(ElfLoadContext_t *ctx);
+
+  /* 执行符号重定位（如果需要） */
+  static int relocate_elf(ElfLoadContext_t *ctx);
+
+  /* 创建应用任务 */
+  static int create_app_task(ElfLoadContext_t *ctx, const AppConfig_t *config);
+  ```
+- **验收标准**:
+  - ELF加载成功率 100%（对合法ELF文件）
+  - ELF验证失败返回错误码
+  - 加载时间 < 100ms（每个应用）
+  - 支持大小端转换（如果需要）
+
+**FR-LOADER-003: 应用签名验证**
+- **描述**: 加载的应用必须经过ECDSA签名验证
+- **优先级**: P0（必须有）
+- **功能要求**:
+  - **SHA-256哈希**: 计算ELF文件哈希值
+  - **ECDSA-P256签名**: 使用P256曲线签名
+  - **公钥验证**: 使用预置的系统公钥验证
+  - **完整性保护**: 防止应用被篡改
+  - **安全启动**: 确保仅授权应用可运行
+- **验证流程**:
+  1. 计算ELF文件SHA-256哈希
+  2. 使用系统公钥验证ECDSA签名
+  3. 验证失败拒绝加载
+  4. 验证成功继续加载
+- **验收标准**:
+  - 签名验证时间 < 50ms
+  - 签名验证准确率 100%
+  - 签名伪造检测率 100%
+  - 符合ISO 26262 ASIL-D安全要求
+
+**FR-LOADER-004: 应用配置管理**
+- **描述**: 应用加载器必须支持配置文件驱动的应用管理
+- **优先级**: P1
+- **配置文件路径**: `/etc/applications.conf`
+- **配置格式**: INI风格配置文件
+- **配置项**:
+  ```c
+  typedef struct {
+      char     name[64];           /* 应用名称 */
+      char     path[256];          /* ELF文件路径（绝对路径） */
+      char     description[128];   /* 应用描述 */
+      uint8_t  priority;           /* 任务优先级（0-255） */
+      uint32_t stack_size;         /* 栈大小（字节） */
+      uint32_t cpu_affinity;       /* CPU亲和性掩码 */
+      uint64_t max_memory;         /* 最大内存限制（字节） */
+      uint64_t max_cpu_time;       /* 最大CPU时间（ms/s） */
+      uint8_t  signature[64];      /* ECDSA签名（预置） */
+      uint8_t  hash[32];           /* SHA-256哈希（预置） */
+      uint32_t version;            /* 应用版本 */
+      bool     enabled;            /* 是否启用 */
+      bool     auto_restart;       /* 崩溃后自动重启 */
+      uint32_t capabilities;       /* 能力集（位图） */
+  } AppConfig_t;
+  ```
+- **能力集定义**:
+  ```c
+  #define CAP_HARDWARE_ACCESS  (1U << 0)  /* 硬件访问 */
+  #define CAP_NETWORK_ACCESS   (1U << 1)  /* 网络访问 */
+  #define CAP_FILE_IO          (1U << 2)  /* 文件I/O */
+  #define CAP_IPC              (1U << 3)  /* 进程间通信 */
+  #define CAP_RAW_IO           (1U << 4)  /* 原始I/O */
+  ```
+- **验收标准**:
+  - 配置文件解析成功率 100%（合法配置）
+  - 配置文件验证完整（防止非法值）
+  - 支持配置热重载（可选）
+
+**FR-LOADER-005: 应用隔离与安全**
+- **描述**: 每个应用必须独立的地址空间和权限控制
+- **优先级**: P0
+- **功能要求**:
+  - **MMU地址空间隔离**: 每个应用独立的页表
+  - **代码段保护**: 只读（RX权限）
+  - **数据段保护**: 读写但不可执行（RW权限）
+  - **栈保护**: 独立栈空间，栈溢出保护
+  - **Capability限制**: 基于能力集的权限控制
+  - **资源限制**: 最大内存、CPU时间限制
+- **验收标准**:
+  - 应用间隔离 100%
+  - 应用崩溃不影响内核
+  - 应用崩溃不影响其他应用
+  - 权限检查覆盖率 100%
+
+**FR-LOADER-006: 应用生命周期管理**
+- **描述**: 系统必须支持应用的生命周期管理
+- **优先级**: P1
+- **生命周期状态**:
+  - **加载中**: 正在加载ELF文件
+  - **已加载**: ELF文件加载完成，任务创建
+  - **运行中**: 应用任务正在执行
+  - **已暂停**: 应用任务被暂停
+  - **已停止**: 应用任务已停止
+  - **已崩溃**: 应用崩溃（可配置自动重启）
+- **接口**:
+  ```c
+  /* 应用加载器主函数 */
+  int app_loader_load_all(const char *config_path);
+
+  /* 启动应用 */
+  int app_start(uint32_t app_id);
+
+  /* 停止应用 */
+  int app_stop(uint32_t app_id);
+
+  /* 重启应用 */
+  int app_restart(uint32_t app_id);
+
+  /* 查询应用状态 */
+  int app_get_status(uint32_t app_id, AppStatus_t *status);
+  ```
+- **验收标准**:
+  - 应用启动时间 < 100ms
+  - 应用停止时间 < 10ms
+  - 应用重启时间 < 200ms
+  - 应用崩溃恢复时间 < 1s
+
+**FR-LOADER-007: 加载器性能要求**
+- **描述**: 应用加载器必须满足性能要求
+- **优先级**: P1
+- **性能指标**:
+  - ELF加载时间 < 100ms（每个应用）
+  - 签名验证时间 < 50ms（每个应用）
+  - 应用启动时间 < 100ms（每个应用）
+  - 总启动时间 < 5s（假设8个应用）
+- **验收标准**:
+  - 所有性能指标达标
+  - 支持并发加载（可选）
+  - 内存占用 < 1MB（加载器本身）
 
 ### 3.2 非功能需求
 
@@ -1776,20 +2217,38 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 
 ## 🎯 需求优先级分布
 
-- **P0（必须有）**：60个需求 - 系统核心功能，必须实现
-  - 包括：任务管理、内存管理、同步通信、时间管理、中断管理、**POSIX兼容层**（全部升级为P0）
-- **P1（重要）**：15个需求 - 重要功能，强烈建议实现
-  - 包括：调试诊断、Shell接口、部分扩展功能
-- **P2（可选）**：5个需求 - 增强功能，可根据资源决定
-  - 包括：实验性调度算法、eBPF、高级性能监控
+**需求总数**：91个需求
+
+- **P0（必须有）**：62个需求 - 系统核心功能，必须实现
+  - 包括：任务管理（含时间分区）、内存管理、同步通信、时间管理、中断管理、**POSIX兼容层**、应用签名验证、应用隔离
+  - 新增：FR-TASK-009（时间分区）、FR-LOADER-003（签名验证）、FR-LOADER-005（应用隔离）
+
+- **P1（重要）**：21个需求 - 重要功能，强烈建议实现
+  - 包括：用户态Shell接口（9个详细需求）、诊断命令、内核调试接口、应用加载器（6个需求）
+  - 新增：FR-TASK-009、FR-DBG-005/006、FR-LOADER-001/002/004/006/007
+
+- **P2（可选）**：7个需求 - 增强功能，可根据资源决定
+  - 包括：实验性调度算法、配置命令、性能监控
+  - 新增：FR-TASK-008（实验性调度）、FR-DBG-003（配置命令）
+
+- **P3（调试专用）**：1个需求 - 调试专用功能
+  - 包括：高级功能（Shell脚本、系统跟踪）
+  - 新增：FR-DBG-004（高级功能）
+
+**主要新增模块**：
+1. **实验性调度类**（FR-TASK-008）：EDF、CFS、RR调度策略
+2. **时间分区调度**（FR-TASK-009）：ARINC 653风格的CPU预算管理
+3. **用户态Shell**（FR-DBG-001~009）：9个详细Shell需求
+4. **应用加载器**（FR-LOADER-001~007）：ELF加载、签名验证、生命周期管理
 
 ---
 
 **下一步工作**：
 1. ✅ 需求梳理完成（强化三大核心特性）
-2. 需求评审和确认
-3. 创建详细的需求追溯矩阵
-4. 开始系统设计（HLD文档）
+2. ✅ 补充plan.md中的缺失需求（调度类、Shell、加载器）
+3. 需求评审和确认
+4. 创建详细的需求追溯矩阵
+5. 开始系统设计（HLD文档）
 
 **联系方式**：
 - 项目主页: [待补充]
@@ -1799,5 +2258,5 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 ---
 
 *本文档遵循MISRA-C:2012规范和ISO 26262 ASIL-D功能安全要求*
-*文档版本：v1.1 | 最后更新：2025-01-09*
+*文档版本：v1.2 | 最后更新：2025-01-09*
 
