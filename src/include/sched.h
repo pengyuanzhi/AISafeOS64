@@ -216,6 +216,16 @@ typedef struct TCB_t
     struct list_head tasks;   /**< Tasks list */
     struct list_head rq_list; /**< Run queue list */
 
+    /* Semaphore wait node (embedded, avoids dynamic allocation) */
+    struct semaphore_wait_node sem_wait_node; /**< Semaphore wait node */
+
+    /* Parent-child relationship (for resource management) */
+    struct TCB_t *parent;      /**< Parent task (NULL = root task) */
+    struct list_head children; /**< List of child tasks */
+    struct list_head sibling;  /**< Sibling node in parent's children list */
+    int exit_code;             /**< Task exit code */
+    uint8_t zombie_flag;       /**< Zombie flag (1 = waiting for parent to reap) */
+
 } TCB_t;
 
 /*
@@ -413,6 +423,21 @@ uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (
  * @param code Exit code
  */
 void task_exit(int code) __attribute__((noreturn));
+
+/**
+ * @brief Wait for child task to exit
+ * @param child Child task control block pointer
+ * @param status Output: child exit code (can be NULL)
+ * @return 0 on success, negative error code on failure
+ *
+ * @details Parent task waits for child to become zombie and reaps it
+ *          - Releases child's TCB and stack
+ *          - Retrieves child's exit code
+ *          - Blocks until child exits
+ *
+ * @note Parent must not exit before calling task_wait for all children
+ */
+int task_wait(TCB_t *child, int *status);
 
 /**
  * @brief Wake up blocked task

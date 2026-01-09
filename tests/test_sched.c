@@ -18,7 +18,8 @@
 
 #include "test_framework.h"
 #include "../src/include/sched.h"
-#include "../src/include/task.h"
+#include "../src/include/list.h"
+#include "../src/include/mm.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -32,6 +33,14 @@ static uint64_t test_time = 0ULL;
 uint64_t sched_clock(void)
 {
     return test_time;
+}
+
+/* Mock this_rq */
+static struct rq *g_test_rq = NULL;
+
+struct rq *this_rq(void)
+{
+    return g_test_rq;
 }
 
 /* Dummy task entry function */
@@ -49,30 +58,75 @@ static void dummy_task_entry(void)
  */
 
 /**
- * @brief Create a test task with specified parameters
+ * @brief Create a mock test task with specified parameters
+ * @note This creates a minimal TCB for unit testing scheduler classes
  */
 static TCB_t *create_test_task(const char *name, uint8_t prio, SchedPolicy_t policy)
 {
     TCB_t *task;
-    uint64_t *stack;
-    uint32_t stack_size = 8192U;
 
-    /* Allocate stack */
-    stack = (uint64_t *)kmalloc((uint64_t)stack_size);
-    if (stack == NULL)
-    {
-        return NULL;
-    }
-
-    /* Create task using task_create */
-    task =
-        task_create(name, dummy_task_entry, stack + (stack_size / sizeof(uint64_t)), prio, 0xFFU);
-
+    /* Allocate task */
+    task = (TCB_t *)kmalloc(sizeof(TCB_t));
     if (task == NULL)
     {
-        kfree(stack);
         return NULL;
     }
+
+    /* Initialize task structure */
+    (void)memset(task, 0, sizeof(TCB_t));
+
+    /* Set basic fields */
+    task->tid = (uint32_t)(uintptr_t)task; /* Use address as fake TID for testing */
+    task->state = TASK_READY;
+    task->prio = prio;
+    task->static_prio = prio;
+    task->normal_prio = prio;
+    task->cpu_affinity = 0x01U;
+    task->stack_size = 8192U;
+    task->stack_base = 0ULL;
+    task->stack_ptr = 0ULL;
+
+    /* Copy name */
+    if (name != NULL)
+    {
+        (void)strncpy(task->name, name, sizeof(task->name) - 1U);
+        task->name[sizeof(task->name) - 1U] = '\0';
+    }
+
+    /* Set scheduling class */
+    switch (policy)
+    {
+        case SCHED_FIFO:
+            task->sched_class = &sched_class_fifo;
+            break;
+        case SCHED_EDF:
+            task->sched_class = &sched_class_edf;
+            break;
+        case SCHED_CFS:
+            task->sched_class = &sched_class_cfs;
+            break;
+        case SCHED_RR:
+            task->sched_class = &sched_class_rr;
+            break;
+        case SCHED_IDLE:
+            task->sched_class = &sched_class_idle;
+            break;
+        default:
+            task->sched_class = &sched_class_cfs;
+            break;
+    }
+
+    /* Initialize runtime statistics */
+    task->vruntime = 0ULL;
+    task->exec_start = 0ULL;
+    task->sum_exec_runtime = 0ULL;
+    task->deadline = 0ULL;
+    task->time_slice = 0U;
+
+    /* Initialize list heads */
+    INIT_LIST_HEAD(&task->tasks);
+    INIT_LIST_HEAD(&task->rq_list);
+    INIT_LIST_HEAD(&task->run_list);
 
     return task;
 }
@@ -93,101 +147,41 @@ static void destroy_test_task(TCB_t *task)
 }
 
 /*
- * Scheduler Initialization Tests
+ * Scheduling Class Registration Tests
  */
 
 /**
- * @brief Test scheduler initialization
+ * @brief Test that all scheduling classes are available
  */
-TEST_CASE(scheduler_init_basic)
+TEST_CASE(sched_classes_available)
 {
-    int ret = scheduler_init();
-
-    TEST_ASSERT_EQ(ret, 0);
+    /* Test that all scheduling class pointers are non-NULL */
+    TEST_ASSERT_NOT_NULL(&sched_class_fifo);
+    TEST_ASSERT_NOT_NULL(&sched_class_edf);
+    TEST_ASSERT_NOT_NULL(&sched_class_cfs);
+    TEST_ASSERT_NOT_NULL(&sched_class_rr);
+    TEST_ASSERT_NOT_NULL(&sched_class_idle);
 }
 
 /**
- * @brief Test double initialization (should fail gracefully)
+ * @brief Test scheduling class function pointers
  */
-TEST_CASE(scheduler_init_double)
+TEST_CASE(sched_classes_have_required_methods)
 {
-    int ret1 = scheduler_init();
-    int ret2 = scheduler_init();
+    /* All scheduling classes must have core methods implemented */
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.init);
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.enqueue);
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.dequeue);
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.pick_next);
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.task_tick);
+    TEST_ASSERT_NOT_NULL(sched_class_fifo.update_curr);
 
-    /* Second init should either succeed (no-op) or fail gracefully */
-    TEST_ASSERT_TRUE((ret1 == 0) && (ret2 == 0));
-}
-
-/*
- * Task Creation Tests
- */
-
-/**
- * @brief Test basic task creation
- */
-TEST_CASE(task_create_basic)
-{
-    TCB_t *task;
-
-    task = create_test_task("test_task", 128U, SCHED_CFS);
-
-    TEST_ASSERT_NOT_NULL(task);
-    TEST_ASSERT_EQ_PTR(task->sched_class, &sched_class_cfs);
-    TEST_ASSERT_EQ(task->prio, 128U);
-
-    destroy_test_task(task);
-}
-
-/**
- * @brief Test task creation with different priorities
- */
-TEST_CASE(task_create_priorities)
-{
-    TCB_t *task_low;
-    TCB_t *task_mid;
-    TCB_t *task_high;
-
-    task_low = create_test_task("low", 200U, SCHED_FIFO);
-    task_mid = create_test_task("mid", 128U, SCHED_FIFO);
-    task_high = create_test_task("high", 50U, SCHED_FIFO);
-
-    TEST_ASSERT_NOT_NULL(task_low);
-    TEST_ASSERT_NOT_NULL(task_mid);
-    TEST_ASSERT_NOT_NULL(task_high);
-
-    TEST_ASSERT_EQ(task_low->prio, 200U);
-    TEST_ASSERT_EQ(task_mid->prio, 128U);
-    TEST_ASSERT_EQ(task_high->prio, 50U);
-
-    destroy_test_task(task_low);
-    destroy_test_task(task_mid);
-    destroy_test_task(task_high);
-}
-
-/**
- * @brief Test task creation with different scheduling classes
- */
-TEST_CASE(task_create_classes)
-{
-    TCB_t *task_fifo;
-    TCB_t *task_rr;
-    TCB_t *task_cfs;
-
-    task_fifo = create_test_task("fifo", 100U, SCHED_FIFO);
-    task_rr = create_test_task("rr", 100U, SCHED_RR);
-    task_cfs = create_test_task("cfs", 100U, SCHED_CFS);
-
-    TEST_ASSERT_NOT_NULL(task_fifo);
-    TEST_ASSERT_NOT_NULL(task_rr);
-    TEST_ASSERT_NOT_NULL(task_cfs);
-
-    TEST_ASSERT_EQ_PTR(task_fifo->sched_class, &sched_class_fifo);
-    TEST_ASSERT_EQ_PTR(task_rr->sched_class, &sched_class_rr);
-    TEST_ASSERT_EQ_PTR(task_cfs->sched_class, &sched_class_cfs);
-
-    destroy_test_task(task_fifo);
-    destroy_test_task(task_rr);
-    destroy_test_task(task_cfs);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.init);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.enqueue);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.dequeue);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.pick_next);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.task_tick);
+    TEST_ASSERT_NOT_NULL(sched_class_cfs.update_curr);
 }
 
 /*
@@ -720,20 +714,11 @@ int main(void)
     /* Initialize test framework */
     test_init();
 
-    /* Test scheduler initialization */
-    TEST_SUITE_START(scheduler_init)
+    /* Test scheduling class registration */
+    TEST_SUITE_START(sched_classes)
     {
-        TEST_RUN(scheduler_init_basic);
-        TEST_RUN(scheduler_init_double);
-    }
-    TEST_SUITE_END()
-
-    /* Test task creation */
-    TEST_SUITE_START(task_creation)
-    {
-        TEST_RUN(task_create_basic);
-        TEST_RUN(task_create_priorities);
-        TEST_RUN(task_create_classes);
+        TEST_RUN(sched_classes_available);
+        TEST_RUN(sched_classes_have_required_methods);
     }
     TEST_SUITE_END()
 

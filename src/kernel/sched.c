@@ -672,6 +672,11 @@ uint32_t task_create(const char *name, uint8_t prio, uint32_t stack_size, void (
     task->stack_size = stack_size;
     task->stack_ptr = task->stack_base + stack_size;
 
+    /* Initialize semaphore wait node */
+    INIT_LIST_HEAD(&task->sem_wait_node.wait_list);
+    task->sem_wait_node.task = task;
+    task->sem_wait_node.timeout = 0;
+
     /* Copy name */
     /* TODO: Implement safe string copy */
 

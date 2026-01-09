@@ -77,7 +77,7 @@ extern "C"
      */
     typedef struct
     {
-        volatile int32_t count;      /**< 计数 */
+        volatile uint32_t count;     /**< 计数（永远 >= 0）*/
         uint32_t max_count;          /**< 最大计数 */
         struct list_head wait_queue; /**< 等待队列 */
         spinlock_t lock;             /**< 保护 wait_queue 和状态转换 */
@@ -150,11 +150,11 @@ extern "C"
     /**
      * @brief 信号量初始化
      * @param sem 信号量指针
-     * @param initial_count 初始计数
-     * @param max_count 最大计数
+     * @param initial_count 初始计数（必须 >= 0）
+     * @param max_count 最大计数（必须 > 0）
      * @return 成功返回0，失败返回负错误码
      */
-    int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count);
+    int semaphore_init(semaphore_t *sem, uint32_t initial_count, uint32_t max_count);
 
     /**
      * @brief 信号量等待（P操作）
@@ -206,9 +206,12 @@ extern "C"
     /**
      * @brief 获取信号量计数
      * @param sem 信号量指针
-     * @return 当前计数
+     * @param count 输出：当前计数
+     * @return 成功返回0，失败返回负错误码
+     *
+     * @note 通过指针参数返回计数，避免返回值与错误码冲突
      */
-    int32_t semaphore_getcount(semaphore_t *sem);
+    int semaphore_getcount(semaphore_t *sem, uint32_t *count);
 
 /**
  * @brief 临界区保护宏（自旋锁）

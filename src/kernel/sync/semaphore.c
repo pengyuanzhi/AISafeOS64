@@ -31,7 +31,7 @@
  *          - 二值信号量：max_count=1
  *          - 计数信号量：max_count>1
  */
-int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
+int semaphore_init(semaphore_t *sem, uint32_t initial_count, uint32_t max_count)
 {
     if (sem == NULL)
     {
@@ -39,17 +39,12 @@ int semaphore_init(semaphore_t *sem, int32_t initial_count, uint32_t max_count)
     }
 
     /* 参数验证 */
-    if (initial_count < 0)
-    {
-        return -EINVAL;
-    }
-
     if (max_count == 0U)
     {
         return -EINVAL;
     }
 
-    if ((uint32_t)initial_count > max_count)
+    if (initial_count > max_count)
     {
         return -EINVAL;
     }
@@ -98,21 +93,21 @@ int semaphore_trywait(semaphore_t *sem)
         return -EINVAL;
     }
 
-    /* 快速路径：重试循环避免 TOCTOU race */
+    /* 快速路径：重试循环避免 TOCTOU(Time-of-Check vs. Time-of-Use) race */
     for (;;)
     {
-        int32_t current_count = sem->count;
+        uint32_t current_count = sem->count;
 
         /* 检查是否有可用资源 */
-        if (current_count <= 0)
+        if (current_count == 0U)
         {
             /* 计数为0，立即返回失败 */
             return -EAGAIN;
         }
 
         /* 尝试原子减1 */
-        uint32_t expected = (uint32_t)current_count;
-        uint32_t desired = (uint32_t)(current_count - 1);
+        uint32_t expected = current_count;
+        uint32_t desired = current_count - 1U;
 
         if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected, desired))
         {
@@ -126,7 +121,7 @@ int semaphore_trywait(semaphore_t *sem)
 }
 
 /**
- * @brief 信号量等待（P操作，带超时）
+ * @brief 信号量等待（P操作，带超时)
  * @param sem 信号量指针
  * @param timeout_ms 超时时间（毫秒），0表示非阻塞，UINT64_MAX表示无限等待
  * @return 成功返回0，失败返回负错误码
@@ -137,9 +132,10 @@ int semaphore_trywait(semaphore_t *sem)
  *          - 支持无限等待
  *
  * @note 使用约束：
- *       - 必须在任务上下文中调用（不能在中断中调用）
- *       - semaphore_post 可以在中断中调用
- *       - 典型场景：中断释放信号量，任务等待信号量
+ *       - timeout_ms = 0: 可以在任何上下文调用（非阻塞）
+ *       - timeout_ms > 0: 必须在任务上下文中调用（不能在中断中调用）
+ *       - 一个任务不能同时等待多个信号量（会返回 -EBUSY）
+ *       - 典型场景：中断释放信号量（semaphore_post），任务等待信号量
  *
  * @lock_sem: 必须持有 sem->lock 保护 wait_queue
  */
@@ -174,17 +170,25 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
         return -EPERM;
     }
 
+    /* 检查：任务是否已经在等待某个信号量 */
+    /* 通过检查 wait_list 是否为空来判断（如果已在队列中，list 不为空）*/
+    if (!list_empty(&current->sem_wait_node.wait_list))
+    {
+        /* 任务正在等待另一个信号量，不允许同时等待多个 */
+        return -EBUSY;
+    }
+
     /* 首先尝试快速路径：检查是否有可用资源 */
     for (;;)
     {
-        int32_t current_count = sem->count;
+        uint32_t current_count = sem->count;
 
         /* 检查是否有可用资源 */
-        if (current_count > 0)
+        if (current_count > 0U)
         {
             /* 尝试原子减1 */
-            uint32_t expected = (uint32_t)current_count;
-            uint32_t desired = (uint32_t)(current_count - 1);
+            uint32_t expected = current_count;
+            uint32_t desired = current_count - 1U;
 
             if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected,
                                                desired))
@@ -204,6 +208,7 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
 
     /* 任务上下文：使用调度器阻塞 */
     /* 使用 TCB 中嵌入的 wait_node，避免栈上的 lifetime 问题 */
+
     current->sem_wait_node.task = current;
     current->sem_wait_node.timeout =
         (timeout_ms == UINT64_MAX) ? 0 : (sched_clock() + timeout_ms * 1000000ULL);
@@ -249,7 +254,8 @@ int semaphore_wait_timeout(semaphore_t *sem, uint64_t timeout_ms)
     spinlock_lock(&sem->lock);
 
     /* 从等待队列中删除（总是执行，避免内存泄漏和UAF）*/
-    list_del(&current->sem_wait_node.wait_list);
+    /* 使用 list_del_init 重新初始化 wait_list，便于下次使用 */
+    list_del_init(&current->sem_wait_node.wait_list);
 
     /* 释放锁 */
     spinlock_unlock(&sem->lock);
@@ -292,25 +298,27 @@ int semaphore_post(semaphore_t *sem)
 
     for (;;)
     {
-        int32_t current_count = sem->count;
+        uint32_t current_count = sem->count;
 
         /* 检查是否超过最大计数 */
-        if ((uint32_t)current_count >= sem->max_count)
+        if (current_count >= sem->max_count)
         {
             /* 计数已达到上限 */
             return -EOVERFLOW;
         }
 
-        /* 尝试原子加1（使用标准原子操作） */
-        uint32_t expected = (uint32_t)current_count;
-        uint32_t desired = (uint32_t)(current_count + 1);
+        /* 尝试原子加1（使用标准原子操作）*/
+        uint32_t expected = current_count;
+        uint32_t desired = current_count + 1U;
 
         if (atomic_compare_exchange_strong((volatile uint32_t *)&sem->count, &expected, desired))
         {
             /* 成功释放信号量 */
 
-            /* 检查是否有任务在等待（需要锁保护） */
-            spinlock_lock(&sem->lock);
+            /* 检查是否有任务在等待（需要锁保护）*/
+            /* 使用中断安全的自旋锁，因为 semaphore_post 可能在中断中调用 */
+            unsigned long flags;
+            spin_lock_irqsave(sem->lock, flags);
 
             if (!list_empty(&sem->wait_queue))
             {
@@ -320,8 +328,9 @@ int semaphore_post(semaphore_t *sem)
                     list_entry(entry, semaphore_wait_node_t, wait_list);
                 TCB_t *task = wait_node->task;
 
-                /* 从等待队列中移除（避免重复唤醒） */
-                list_del(entry);
+                /* 从等待队列中移除并重新初始化 */
+                /* 使用 list_del_init 确保 wait_list 可被重用，避免 UAF */
+                list_del_init(entry);
 
                 /* 唤醒任务（在锁保护下设置状态） */
                 if (task != NULL)
@@ -331,30 +340,32 @@ int semaphore_post(semaphore_t *sem)
                 }
             }
 
-            spinlock_unlock(&sem->lock);
+            spin_unlock_irqrestore(sem->lock, flags);
 
             return 0;
         }
 
         /* CAS失败，立即重试 */
-        cpu_relax(); /* 退让策略，减少总线压力 */
+        cpu_relax();
     }
 }
 
 /**
  * @brief 获取信号量计数
  * @param sem 信号量指针
- * @return 当前计数
+ * @param count 输出：当前计数
+ * @return 成功返回0，失败返回负错误码
+ *
+ * @details 通过指针参数返回计数，避免返回值与错误码冲突
  */
-int32_t semaphore_getcount(semaphore_t *sem)
+int semaphore_getcount(semaphore_t *sem, uint32_t *count)
 {
-    if (sem == NULL)
+    if (sem == NULL || count == NULL)
     {
-        return -1;
+        return -EINVAL;
     }
 
-    /* 内存屏障确保读取最新值 */
-    MEMORY_BARRIER();
-
-    return sem->count;
+    /* 原子读取（使用 acquire 内存序确保读取最新值）*/
+    *count = atomic_load_acquire_u32((volatile uint32_t *)&sem->count);
+    return 0;
 }
