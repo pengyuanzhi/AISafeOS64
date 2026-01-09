@@ -9,7 +9,7 @@
 | 项目 | 内容 |
 |------|------|
 | **文档标题** | AISafe64 软件需求规格说明书 |
-| **文档版本** | 1.3 |
+| **文档版本** | 1.4 |
 | **创建日期** | 2025-01-09 |
 | **最后更新** | 2025-01-09 |
 | **作者** | AISafe64 Team |
@@ -27,6 +27,7 @@
 | 1.1 | 2025-01-09 | AISafe64 Team | 强化三大核心特性<br>-  高实时性：明确硬实时指标（任务切换<5μs，中断响应<1μs）<br>-  高可靠性：强化功能安全认证和内存保障<br>-  操作系统先进性：多核1-16核可配置，POSIX兼容层升级为P0<br>- 新增附录4.0详细说明三大核心特性<br>- 添加三大核心特性量化指标总结表 |
 | 1.2 | 2025-01-09 | AISafe64 Team | 补充plan.md中的缺失需求（任务管理+31需求）<br>- **实验性调度类**（FR-TASK-008）：EDF、CFS、RR调度策略（P2）<br>- **时间分区调度**（FR-TASK-009）：ARINC 653风格CPU预算管理（P1）<br>- **用户态Shell**（FR-DBG-001~009）：9个详细需求（P0-P3）<br>- **应用加载器**（FR-LOADER-001~007）：7个需求（P0-P1）<br>- 需求总数：60  91个（+31个需求） |
 | 1.3 | 2025-01-09 | AISafe64 Team | 精简文档结构，删除重复内容<br>- 删除2.1.2节详细核心特性描述（保留开头简介）<br>- 删除附录4.0三大核心特性详细说明（~252行）<br>- 删除文档结束处的三大核心特性重复总结<br>- 保持三大核心特性在文档开头的精炼描述<br>- 优化文档可读性和维护性 |
+| 1.4 | 2025-01-09 | AISafe64 Team | 重大重构任务管理模块，完善调度类架构和ARINC 653支持<br>- **调度类架构**（FR-TASK-008）：删除EDF/CFS，保留RR，重构为可扩展架构（P2->P0）<br>- **ARINC 653分区调度**（FR-TASK-009）：从P1提升为P0，完善分区调度需求<br>- **新增7个任务管理需求**（FR-TASK-010~016）：任务组、优先级继承、CPU亲和性、任务锁定、时间调度表、分区生命周期、任务迁移<br>- **需求总数**：91->98个（+7个需求）<br>- **P0需求**：62->68个（+6个任务管理需求）<br>- **P1需求**：21->23个（+2个任务管理需求）<br>- **P2需求**：7->6个（FR-TASK-008升级为P0）<br>- 完整的ARINC 653分区调度支持（时间分区+调度表+生命周期管理）<br>- 混合关键性系统支持（调度类架构共存）<br>- 多核SMP完整支持（CPU亲和性+任务迁移+负载均衡） |
 
 ---
 
@@ -547,72 +548,472 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   int task_get_info(uint32_t task_id, TaskInfo_t *info);
   ```
 
-**FR-TASK-008: 实验性调度类支持**
-- **描述**: 系统必须支持多种可选调度策略（实验性，不推荐用于安全关键系统）
-- **优先级**: P2（可选功能）
-- **调度策略**:
-  - **FP-PSS（默认）**: 固定优先级抢占式调度
-    - 256级优先级（0-255）
-    - O(1)时间复杂度
-    - 确定性调度，易于认证
-  - **EDF**: 最早截止时间优先调度
-    - 动态优先级，根据截止时间调整
-    - 适用于动态关键性系统
-    -  增加认证难度，不推荐用于安全关键系统
-  - **RR**: 时间片轮转调度
-    - 固定时间片轮转
-    - 适用于非关键任务
-    - 时间片可配置（1ms-100ms）
-  - **CFS**: 完全公平调度
-    - 动态优先级，公平性保证
-    -  不适合硬实时系统
-    -  显著增加认证难度
-- **接口**:
+**FR-TASK-008: 调度类架构（混合关键性系统支持）**
+- **描述**: 系统必须采用调度类架构，支持多种调度策略共存，满足混合关键性系统需求
+- **优先级**: P0（必须有）
+- **设计原则**:
+  - 调度类框架：可扩展的调度器架构
+  - 策略隔离：不同调度策略的任务互不干扰
+  - 确定性保证：所有调度策略必须提供WCET上界
+  - 认证友好：优先使用简单可验证的调度算法
+- **支持的调度类**:
+  - **SCHED_FIFO（默认）**: 固定优先级抢占式调度（FP-PSS）
+    - 256级优先级（0-255，255最高）
+    - O(1)时间复杂度调度算法
+    - 确定性调度，易于功能安全认证
+    - 适用于硬实时任务
+  - **SCHED_RR**: 时间片轮转调度
+    - 相同优先级任务轮转执行
+    - 可配置时间片（1ms-100ms）
+    - 适用于非关键分时任务
+    - 保持优先级语义
+  - **SCHED_PARTITION**: 分区调度（ARINC 653）
+    - 时间分区隔离
+    - 周期性调度表
+    - 详见FR-TASK-009
+- **调度策略接口**:
   ```c
+  /* 调度策略定义 */
+  #define SCHED_FIFO    1  /* 固定优先级抢占式（默认） */
+  #define SCHED_RR      2  /* 时间片轮转 */
+  #define SCHED_PARTITION 3  /* 分区调度 */
+
+  /* 调度参数 */
+  struct sched_param {
+      int sched_priority;     /* 优先级（0-255） */
+      unsigned int sched_timeslice;  /* RR时间片（ms） */
+  };
+
   /* 设置调度策略 */
   int task_set_scheduler(uint32_t task_id, int policy, const struct sched_param *param);
 
   /* 获取调度策略 */
   int task_get_scheduler(uint32_t task_id, int *policy, struct sched_param *param);
-  ```
-- **验收标准**:
-  - FP-PSS为默认策略，P0级别实现
-  - EDF/RR/CFS为可选策略，P2级别实现
-  - 不同调度策略的任务可共存
-  - 调度策略切换时间 < 10μs
-  -  使用实验性调度策略需特殊配置
 
-**FR-TASK-009: 自适应分区/时间分区（ARINC 653风格）**
-- **描述**: 系统必须支持ARINC 653风格的时间分区调度，确保任务的时间隔离
-- **优先级**: P1（重要功能）
-- **功能要求**:
-  - **CPU预算管理**: 每个分区分配最大执行时间预算
-  - **预算强制执行**: 超时强制切换，防止runaway task
-  - **时间窗口**: 100ms标准时间窗口
-  - **分区数量**: 支持8个分区
-  - **分区隔离**: 分区间时间隔离，互不影响
-- **时间分区配置**:
+  /* 让出CPU（仅RR策略有效） */
+  int sched_yield(void);
+  ```
+- **调度器要求**:
+  - 默认策略：SCHED_FIFO
+  - 不同调度类的任务可共存于同一系统
+  - 调度类切换开销 < 5μs
+  - 每个CPU核心独立调度（SMP支持）
+  - 支持任务在不同调度类间迁移
+- **验收标准**:
+  - SCHED_FIFO：P0级别实现，确定性调度
+  - SCHED_RR：P1级别实现，支持时间片轮转
+  - SCHED_PARTITION：P0级别实现（详见FR-TASK-009）
+  - 所有调度类必须提供O(1)时间复杂度
+  - 调度器扩展性强，易于添加新调度类
+  - 符合POSIX调度接口标准
+
+**FR-TASK-009: 时间分区调度（ARINC 653分区调度）**
+- **描述**: 系统必须支持ARINC 653风格的时间分区调度，确保混合关键性系统中不同关键性级别任务的时间隔离
+- **优先级**: P0（必须有）- 功能安全关键特性
+- **ARINC 653合规性**:
+  - 符合ARINC 653 Part 1分区调度要求
+  - 支持周期性调度表（Major Frame）
+  - 分区时间隔离和空间隔离
+  - 分区健康监控
+- **分区调度核心概念**:
+  - **Major Frame（主时间帧）**: 一个完整的调度周期（典型100ms）
+  - **Partition Window（分区窗口）**: 分区在主时间帧中的执行时间段
+  - **Minor Frame（次时间帧）**: 最小调度时间粒度（典型1ms）
+  - **Partition Budget**: 分区的CPU时间预算
+- **分区配置要求**:
+  - **分区数量**: 支持8个分区（0-7）
+  - **分区周期**: 可配置（10ms-1000ms）
+  - **分区时长**: 可配置（1ms-100ms）
+  - **分区预算**: CPU时间百分比（1%-100%）
+  - **分区隔离**: 分区间时间和空间完全隔离
+- **分区调度接口**:
   ```c
-  /* 时间分区配置 */
+  /* 分区配置结构 */
   typedef struct {
       uint32_t partition_id;       /* 分区ID（0-7） */
       uint32_t duration_ms;        /* 分区持续时间（ms） */
-      uint32_t budget_percentage;  /* CPU预算百分比（0-100） */
       uint32_t period_ms;          /* 分区周期（ms） */
-  } TimePartition_t;
+      uint32_t budget_percentage;  /* CPU预算百分比（0-100） */
+      uint32_t affinity_cpu;       /* CPU亲和性（0-15） */
+  } PartitionConfig_t;
 
-  /* 创建时间分区 */
-  int partition_create(const TimePartition_t *config);
+  /* 分区状态 */
+  typedef enum {
+      PARTITION_IDLE = 0,      /* 空闲态 */
+      PARTITION_READY,         /* 就绪态 */
+      PARTITION_RUNNING,       /* 运行态 */
+      PARTITION_SUSPENDED,     /* 挂起态 */
+      PARTITION_ERROR          /* 错误态 */
+  } PartitionState_t;
+
+  /* 创建分区 */
+  int partition_create(const PartitionConfig_t *config);
+
+  /* 删除分区 */
+  int partition_delete(uint32_t partition_id);
 
   /* 启动分区调度 */
   int partition_start(void);
+
+  /* 停止分区调度 */
+  int partition_stop(void);
+
+  /* 查询分区状态 */
+  int partition_get_state(uint32_t partition_id, PartitionState_t *state);
+
+  /* 设置分区模式（NORMAL/WARM_START/COLD_START） */
+  int partition_set_mode(uint32_t partition_id, int mode);
   ```
+- **时间调度表管理**:
+  - 支持静态调度表配置
+  - 支持动态调度表切换
+  - 支持多个调度表（热备份）
+  - 详见FR-TASK-014
+- **分区隔离要求**:
+  - **时间隔离**: 分区预算超时强制切换，防止runaway task
+  - **空间隔离**: 分区间内存隔离（MMU/MPU）
+  - **故障隔离**: 分区故障不影响其他分区
+  - **资源隔离**: 分区间资源共享可控
 - **验收标准**:
   - 分区切换开销 < 5μs
   - 分区预算精度 ±1%
-  - 分区间完全隔离
+  - 分区间完全隔离（时间和空间）
   - 分区预算超时强制切换
   - 支持8个分区并发运行
+  - 分区调度可配置（周期、时长、预算）
+  - 符合ARINC 653 Part 1标准要求
+
+**FR-TASK-010: 任务组管理**
+- **描述**: 系统必须支持任务组（Task Group）管理，用于批量操作和资源管理
+- **优先级**: P1（重要功能）
+- **功能要求**:
+  - **任务集合管理**: 将任务组织成逻辑组
+  - **批量操作**: 对组内所有任务执行统一操作
+  - **资源管理**: 为任务组分配共享资源
+  - **优先级管理**: 任务组优先级继承
+  - **生命周期管理**: 任务组的创建、启动、停止、删除
+- **应用场景**:
+  - 分区任务管理（分区内的所有任务）
+  - 应用任务管理（一个应用的所有任务）
+  - 功能模块任务管理（某一功能的所有任务）
+- **任务组接口**:
+  ```c
+  /* 任务组配置 */
+  typedef struct {
+      uint32_t group_id;          /* 任务组ID */
+      char name[32];              /* 任务组名称 */
+      uint32_t partition_id;      /* 所属分区ID */
+      uint32_t cpu_affinity;      /* CPU亲和性 */
+      uint64_t resource_quota;    /* 资源配额 */
+  } TaskGroupConfig_t;
+
+  /* 创建任务组 */
+  int task_group_create(const TaskGroupConfig_t *config);
+
+  /* 删除任务组 */
+  int task_group_delete(uint32_t group_id);
+
+  /* 添加任务到组 */
+  int task_group_add_task(uint32_t group_id, uint32_t task_id);
+
+  /* 从组中移除任务 */
+  int task_group_remove_task(uint32_t group_id, uint32_t task_id);
+
+  /* 启动任务组（启动组内所有任务） */
+  int task_group_start(uint32_t group_id);
+
+  /* 停止任务组（停止组内所有任务） */
+  int task_group_stop(uint32_t group_id);
+
+  /* 挂起任务组 */
+  int task_group_suspend(uint32_t group_id);
+
+  /* 恢复任务组 */
+  int task_group_resume(uint32_t group_id);
+
+  /* 查询任务组信息 */
+  int task_group_get_info(uint32_t group_id, TaskGroupInfo_t *info);
+  ```
+- **验收标准**:
+  - 支持至少32个任务组
+  - 每个任务组支持至少256个任务
+  - 任务组操作开销 < 10μs
+  - 批量操作（启动/停止）开销 < 100μs
+  - 任务组间资源隔离
+
+**FR-TASK-011: 任务优先级继承（解决优先级反转）**
+- **描述**: 系统必须支持优先级继承协议，解决优先级反转问题
+- **优先级**: P0（必须有）- 实时系统关键特性
+- **功能要求**:
+  - **优先级继承**: 当高优先级任务等待低优先级任务持有的资源时，低优先级任务临时提升到高优先级
+  - **优先级天花板**: 资源被分配一个天花板优先级（所有可能使用该资源的任务的最高优先级）
+  - **嵌套支持**: 支持嵌套资源访问
+  - **死锁预防**: 配合互斥锁防止死锁
+- **实现要求**:
+  - 优先级继承协议（PIP）
+  - 优先级天花板协议（PCP）
+  - 最长等待时间有界
+  - 易于验证和认证
+- **优先级继承接口**:
+  ```c
+  /* 优先级继承属性（用于互斥锁） */
+  #define PRIORITY_INHERIT     0x1  /* 优先级继承 */
+  #define PRIORITY_CEILING     0x2  /* 优先级天花板 */
+
+  /* 创建互斥锁（支持优先级继承） */
+  int mutex_init_prio(Mutex_t *mutex, uint32_t flags, int ceiling_prio);
+
+  /* 优先级继承自动处理 */
+  /* 当高优先级任务等待低优先级任务持有的互斥锁时，系统自动提升低优先级任务 */
+  ```
+- **验收标准**:
+  - 优先级反转时间 < 100μs（最坏情况）
+  - 优先级继承开销 < 5μs
+  - 支持嵌套资源访问（最多8层）
+  - 无死锁风险
+  - 符合POSIX pthread_mutex优先级继承协议
+
+**FR-TASK-012: 任务CPU亲和性（多核SMP支持）**
+- **描述**: 系统必须支持任务CPU亲和性（CPU Affinity），控制任务在指定CPU核心上运行
+- **优先级**: P1（重要功能）- 多核SMP必需
+- **功能要求**:
+  - **CPU绑定**: 任务绑定到特定CPU核心
+  - **CPU集合**: 任务绑定到CPU核心集合
+  - **亲和性继承**: 子任务继承父任务的CPU亲和性
+  - **动态调整**: 运行时调整任务CPU亲和性
+  - **负载均衡**: 配合调度器实现负载均衡
+- **应用场景**:
+  - 中断处理任务绑定到特定CPU
+  - 高优先级实时任务独占CPU核心
+  - 缓存局部性优化
+  - NUMA架构优化
+- **CPU亲和性接口**:
+  ```c
+  /* CPU集合（最大16核） */
+  typedef struct {
+      uint64_t cpu_mask;  /* CPU掩码（bit0=CPU0, bit1=CPU1, ...） */
+  } CpuSet_t;
+
+  /* 设置任务CPU亲和性 */
+  int task_set_affinity(uint32_t task_id, const CpuSet_t *cpuset);
+
+  /* 获取任务CPU亲和性 */
+  int task_get_affinity(uint32_t task_id, CpuSet_t *cpuset);
+
+  /* 设置当前任务CPU亲和性 */
+  int task_setaffinity(const CpuSet_t *cpuset);
+
+  /* 获取当前任务CPU亲和性 */
+  int task_getaffinity(CpuSet_t *cpuset);
+  ```
+- **验收标准**:
+  - 支持1-16核CPU绑定
+  - 支持CPU集合绑定
+  - CPU亲和性设置开销 < 10μs
+  - 任务迁移开销 < 20μs
+  - 符合POSIX CPU亲和性接口
+
+**FR-TASK-013: 任务锁定/解锁（禁止调度）**
+- **描述**: 系统必须支持任务锁定功能，禁止任务在临界区被抢占
+- **优先级**: P0（必须有）
+- **功能要求**:
+  - **任务锁定**: 禁止任务在临界区被抢占
+  - **嵌套锁定**: 支持嵌套锁定（计数器）
+  - **快速操作**: 锁定/解锁操作必须快速
+  - **SMP安全**: 多核环境下正确工作
+- **应用场景**:
+  - 保护临界区数据结构
+  - 保护多核共享数据
+  - 配合自旋锁使用
+  - 替代关中断保护数据
+- **任务锁定接口**:
+  ```c
+  /* 禁止任务调度（锁定调度器） */
+  void sched_lock(void);
+
+  /* 恢复任务调度（解锁调度器） */
+  void sched_unlock(void);
+
+  /* 获取当前锁定深度（嵌套计数） */
+  uint32_t sched_get_lock_depth(void);
+  ```
+- **实现要求**:
+  - 基于每CPU变量（per-CPU variable）
+  - 嵌套计数器
+  - 不使用自旋锁或互斥锁
+  - 配合内存屏障使用
+- **验收标准**:
+  - sched_lock开销 < 50ns
+  - sched_unlock开销 < 50ns
+  - 支持嵌套锁定（最多32层）
+  - SMP安全（多核并发调用）
+  - 不会导致死锁或优先级反转
+
+**FR-TASK-014: 时间调度表管理（ARINC 653 Schedule）**
+- **描述**: 系统必须支持ARINC 653时间调度表管理，实现周期性分区调度
+- **优先级**: P0（必须有）- ARINC 653核心特性
+- **功能要求**:
+  - **调度表定义**: 定义完整的Major Frame周期调度
+  - **调度表加载**: 将调度表加载到调度器
+  - **调度表激活**: 激活并开始执行调度表
+  - **调度表切换**: 支持运行时切换调度表（热切换）
+  - **多调度表**: 支持定义多个调度表（备份）
+- **时间调度表结构**:
+  ```c
+  /* 分区窗口定义 */
+  typedef struct {
+      uint32_t partition_id;       /* 分区ID（0-7） */
+      uint32_t offset_ms;          /* 在Major Frame中的偏移（ms） */
+      uint32_t duration_ms;        /* 分区窗口持续时间（ms） */
+  } PartitionWindow_t;
+
+  /* 时间调度表 */
+  typedef struct {
+      uint32_t schedule_id;        /* 调度表ID */
+      char name[32];               /* 调度表名称 */
+      uint32_t major_frame_ms;     /* Major Frame周期（ms） */
+      uint32_t num_windows;        /* 分区窗口数量 */
+      PartitionWindow_t windows[16]; /* 分区窗口数组 */
+  } ScheduleTable_t;
+
+  /* 创建时间调度表 */
+  int schedule_table_create(const ScheduleTable_t *schedule);
+
+  /* 删除时间调度表 */
+  int schedule_table_delete(uint32_t schedule_id);
+
+  /* 激活调度表（开始执行） */
+  int schedule_table_activate(uint32_t schedule_id);
+
+  /* 停止调度表 */
+  int schedule_table_deactivate(void);
+
+  /* 获取当前调度表ID */
+  int schedule_table_get_current(uint32_t *schedule_id);
+
+  /* 获取调度表状态 */
+  int schedule_table_get_status(uint32_t schedule_id, ScheduleStatus_t *status);
+  ```
+- **调度表切换**:
+  - 支持当前Major Frame结束时切换
+  - 支持立即切换（紧急情况）
+  - 切换过程无任务丢失
+  - 切换开销 < 100μs
+- **验收标准**:
+  - 支持至少8个调度表
+  - 每个调度表支持至少16个分区窗口
+  - Major Frame周期可配置（10ms-1000ms）
+  - 分区窗口粒度 1ms
+  - 调度表切换开销 < 100μs
+  - 调度表精度 ±1ms
+  - 符合ARINC 653 Part 1标准
+
+**FR-TASK-015: 分区生命周期管理**
+- **描述**: 系统必须支持分区完整的生命周期管理，包括分区模式切换和健康监控
+- **优先级**: P0（必须有）- ARINC 653核心特性
+- **分区状态**:
+  - **IDLE**: 分区创建后的初始状态
+  - **READY**: 分区已配置，等待启动
+  - **RUNNING**: 分区正在运行
+  - **SUSPENDED**: 分区被挂起
+  - **ERROR**: 分区检测到错误
+- **分区模式（ARINC 653）**:
+  - **NORMAL**: 正常模式（分区正常运行）
+  - **IDLE**: 空闲模式（分区不执行任务）
+  - **WARM_START**: 热启动模式（分区重启，保留数据）
+  - **COLD_START**: 冷启动模式（分区重启，清空数据）
+- **分区生命周期接口**:
+  ```c
+  /* 分区模式 */
+  #define PARTITION_MODE_NORMAL     0
+  #define PARTITION_MODE_IDLE       1
+  #define PARTITION_MODE_WARM_START 2
+  #define PARTITION_MODE_COLD_START 3
+
+  /* 启动分区 */
+  int partition_start(uint32_t partition_id);
+
+  /* 停止分区 */
+  int partition_stop(uint32_t partition_id);
+
+  /* 重置分区（热启动） */
+  int partition_reset_warm(uint32_t partition_id);
+
+  /* 重置分区（冷启动） */
+  int partition_reset_cold(uint32_t partition_id);
+
+  /* 设置分区模式 */
+  int partition_set_mode(uint32_t partition_id, int mode);
+
+  /* 获取分区模式 */
+  int partition_get_mode(uint32_t partition_id, int *mode);
+
+  /* 分区健康检查 */
+  int partition_health_check(uint32_t partition_id, HealthStatus_t *status);
+
+  /* 分区恢复 */
+  int partition_recovery(uint32_t partition_id, int recovery_action);
+  ```
+- **分区健康监控**:
+  - 分区预算超时检测
+  - 分区任务状态监控
+  - 分区内存使用监控
+  - 分区CPU使用率监控
+  - 分区错误统计
+- **验收标准**:
+  - 分区启动时间 < 100μs
+  - 分区停止时间 < 50μs
+  - 分区切换开销 < 10μs
+  - 分区恢复时间 < 1ms
+  - 健康监控开销 < 1% CPU
+  - 符合ARINC 653 Part 1标准
+
+**FR-TASK-016: 任务迁移（多核负载均衡）**
+- **描述**: 系统必须支持任务在CPU核心间迁移，实现多核负载均衡
+- **优先级**: P1（重要功能）- 多核SMP必需
+- **功能要求**:
+  - **手动迁移**: 用户主动发起任务迁移
+  - **自动迁移**: 调度器自动迁移任务（负载均衡）
+  - **迁移策略**: 推送/拉取模型
+  - **迁移开销**: 最小化迁移开销
+  - **缓存亲和性**: 考虑缓存局部性
+- **负载均衡策略**:
+  - **Push策略**: CPU主动推送任务到其他CPU
+  - **Pull策略**: CPU从其他CPU拉取任务
+  - **周期性均衡**: 定期检查并均衡负载
+  - **触发式均衡**: 负载不均衡时触发
+- **任务迁移接口**:
+  ```c
+  /* 手动迁移任务到指定CPU */
+  int task_migrate(uint32_t task_id, uint32_t target_cpu);
+
+  /* 查询任务当前运行的CPU */
+  int task_get_cpu(uint32_t task_id, uint32_t *cpu_id);
+
+  /* 启用自动负载均衡 */
+  int sched_enable_autobalance(void);
+
+  /* 禁用自动负载均衡 */
+  int sched_disable_autobalance(void);
+
+  /* 设置负载均衡策略 */
+  int sched_set_balance_policy(int policy);
+
+  /* 设置负载均衡周期（ms） */
+  int sched_set_balance_period(uint32_t period_ms);
+  ```
+- **负载均衡要求**:
+  - 负载差异阈值：20%
+  - 均衡周期：可配置（10ms-1000ms）
+  - 迁移开销：尽量小
+  - 避免频繁迁移（抖动）
+- **验收标准**:
+  - 任务迁移开销 < 20μs
+  - 负载均衡差异 < 20%
+  - 自动负载均衡开销 < 2% CPU
+  - 避免任务频繁迁移（抖动）
+  - 支持实时任务优先级感知迁移
+  - SMP安全（多核并发迁移）
 
 #### 3.1.2 内存管理需求
 
@@ -1820,6 +2221,7 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 | 1.1 | 2025-01-09 | 强化三大核心特性：高实时性、高可靠性、操作系统先进性<br>- 将POSIX兼容层升级为P0（必须有）<br>- 多核CPU范围扩展为1-16核可配置<br>- 添加三大核心特性量化指标总结表<br>- 新增附录4.0详细说明三大核心特性<br>- 所有POSIX相关需求添加详细验收标准 | AISafe64 Team |
 | 1.2 | 2025-01-09 | 补充plan.md中的缺失需求（任务管理+31需求）<br>- 实验性调度类（FR-TASK-008）：EDF、CFS、RR调度策略<br>- 时间分区调度（FR-TASK-009）：ARINC 653风格CPU预算管理<br>- 用户态Shell（FR-DBG-001~009）：9个详细需求<br>- 应用加载器（FR-LOADER-001~007）：7个需求<br>- 需求总数：60 -> 91个（+31个需求） | AISafe64 Team |
 | 1.3 | 2025-01-09 | 精简文档结构，删除重复内容<br>- 删除2.1.2节详细核心特性描述（保留开头简介）<br>- 删除附录4.0三大核心特性详细说明（~252行）<br>- 删除文档结束处的三大核心特性重复总结<br>- 保持三大核心特性在文档开头的精炼描述<br>- 优化文档可读性和维护性 | AISafe64 Team |
+| 1.4 | 2025-01-09 | 重大重构任务管理模块，完善调度类架构和ARINC 653支持<br>- 调度类架构（FR-TASK-008）：删除EDF/CFS，保留RR，重构为可扩展架构（P2->P0）<br>- ARINC 653分区调度（FR-TASK-009）：从P1提升为P0，完善分区调度需求<br>- 新增7个任务管理需求（FR-TASK-010~016）<br>- 需求总数：91 -> 98个（+7个需求）<br>- P0需求：62 -> 68个；P1需求：21 -> 23个；P2需求：7 -> 6个 | AISafe64 Team |
 
 ### 4.6 审查记录
 
@@ -1856,29 +2258,57 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 
 ##  需求优先级分布
 
-**需求总数**：91个需求
+**需求总数**：98个需求
 
-- **P0（必须有）**：62个需求 - 系统核心功能，必须实现
-  - 包括：任务管理（含时间分区）、内存管理、同步通信、时间管理、中断管理、**POSIX兼容层**、应用签名验证、应用隔离
-  - 新增：FR-TASK-009（时间分区）、FR-LOADER-003（签名验证）、FR-LOADER-005（应用隔离）
+- **P0（必须有）**：68个需求 - 系统核心功能，必须实现
+  - 包括：任务管理（调度类架构、ARINC 653分区调度、优先级继承、任务锁定）、内存管理、同步通信、时间管理、中断管理、**POSIX兼容层**、应用签名验证、应用隔离
+  - 任务管理模块强化：
+    - FR-TASK-008（调度类架构）：P0，混合关键性系统支持
+    - FR-TASK-009（ARINC 653分区调度）：P0，时间隔离和分区调度
+    - FR-TASK-011（优先级继承）：P0，解决优先级反转
+    - FR-TASK-013（任务锁定）：P0，禁止调度
+    - FR-TASK-014（时间调度表）：P0，ARINC 653 Schedule
+    - FR-TASK-015（分区生命周期）：P0，分区管理
 
-- **P1（重要）**：21个需求 - 重要功能，强烈建议实现
-  - 包括：用户态Shell接口（9个详细需求）、诊断命令、内核调试接口、应用加载器（6个需求）
-  - 新增：FR-TASK-009、FR-DBG-005/006、FR-LOADER-001/002/004/006/007
+- **P1（重要）**：23个需求 - 重要功能，强烈建议实现
+  - 包括：用户态Shell接口（9个详细需求）、诊断命令、内核调试接口、应用加载器（6个需求）、任务组管理、CPU亲和性、任务迁移
+  - 任务管理模块增强：
+    - FR-TASK-010（任务组管理）：P1，批量操作
+    - FR-TASK-012（CPU亲和性）：P1，多核SMP支持
+    - FR-TASK-016（任务迁移）：P1，多核负载均衡
 
-- **P2（可选）**：7个需求 - 增强功能，可根据资源决定
-  - 包括：实验性调度算法、配置命令、性能监控
-  - 新增：FR-TASK-008（实验性调度）、FR-DBG-003（配置命令）
+- **P2（可选）**：6个需求 - 增强功能，可根据资源决定
+  - 包括：配置命令、性能监控
+  - 注意：FR-TASK-008已从P2升级为P0（调度类架构现在是核心功能）
 
 - **P3（调试专用）**：1个需求 - 调试专用功能
   - 包括：高级功能（Shell脚本、系统跟踪）
   - 新增：FR-DBG-004（高级功能）
 
-**主要新增模块**：
-1. **实验性调度类**（FR-TASK-008）：EDF、CFS、RR调度策略
-2. **时间分区调度**（FR-TASK-009）：ARINC 653风格的CPU预算管理
-3. **用户态Shell**（FR-DBG-001~009）：9个详细Shell需求
-4. **应用加载器**（FR-LOADER-001~007）：ELF加载、签名验证、生命周期管理
+**任务管理模块架构（v1.4重大更新）**：
+1. **调度类架构**（FR-TASK-008）：P0，支持SCHED_FIFO（默认）、SCHED_RR、SCHED_PARTITION
+2. **ARINC 653分区调度**（FR-TASK-009/014/015）：P0，时间分区、调度表、分区生命周期管理
+3. **任务组管理**（FR-TASK-010）：P1，批量操作和资源管理
+4. **优先级继承**（FR-TASK-011）：P0，解决优先级反转（PIP/PCP）
+5. **CPU亲和性**（FR-TASK-012）：P1，多核SMP支持
+6. **任务锁定**（FR-TASK-013）：P0，禁止调度（sched_lock/unlock）
+7. **时间调度表**（FR-TASK-014）：P0，ARINC 653 Major Frame管理
+8. **分区生命周期**（FR-TASK-015）：P0，分区模式切换和健康监控
+9. **任务迁移**（FR-TASK-016）：P1，多核负载均衡
+
+**删除的调度策略**：
+- EDF（最早截止时间优先）：不符合硬实时系统要求，增加认证难度
+- CFS（完全公平调度）：不适合硬实时系统，显著增加认证难度
+
+**主要新增模块**（基于v1.2）：
+1. **调度类架构**（FR-TASK-008）：重构为可扩展架构，删除EDF/CFS，保留RR
+2. **ARINC 653分区调度**（FR-TASK-009/014/015）：完整的时间分区调度支持
+3. **任务组管理**（FR-TASK-010）：批量操作和资源管理
+4. **优先级继承**（FR-TASK-011）：解决优先级反转
+5. **CPU亲和性**（FR-TASK-012）：多核SMP支持
+6. **任务锁定**（FR-TASK-013）：禁止调度
+7. **用户态Shell**（FR-DBG-001~009）：9个详细Shell需求
+8. **应用加载器**（FR-LOADER-001~007）：ELF加载、签名验证、生命周期管理
 
 ---
 
