@@ -141,4 +141,22 @@ debug: $(BUILD_DIR)/$(PROJECT).bin
 # 依赖关系
 -include $(OBJECTS:.o=.d)
 
-.PHONY: all clean qemu debug
+# Git提交和推送
+git-push:
+	@echo "GIT: Committing and pushing changes..."
+	@./scripts/git_push.sh "$(MSG)"
+
+# 快捷提交命令
+commit:
+	@echo "GIT: Quick commit..."
+	@./scripts/git_push.sh "$(MSG)"
+
+# 查看Git状态
+status:
+	@git status
+
+# 查看提交历史
+log:
+	@git log --oneline --graph -10
+
+.PHONY: all clean qemu debug git-push commit status log

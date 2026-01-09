@@ -1357,3 +1357,12 @@ if (stat("file", &st) == 0 && S_ISREG(st.st_mode)) {
   - 普通自旋锁：spin_lock/spin_unlock（不关中断）
   - 中断上下文：spin_lock_irq/spin_unlock_irq（关中断）
   - 可能嵌套的中断：spin_lock_irqsave/spin_unlock_irqrestore（保存并恢复中断状态）
+
+
+
+`.claude/rules/` 的最佳实践：
+
+- **保持规则专注**：每个文件应涵盖一个主题（例如 `testing.md`、`api-design.md`）
+- **使用描述性文件名**：文件名应指示规则涵盖的内容
+- **谨慎使用条件规则**：仅在规则确实适用于特定文件类型时添加 `paths` 前置事项
+- **使用子目录组织**：分组相关规则（例如 `frontend/`、`backend/`）

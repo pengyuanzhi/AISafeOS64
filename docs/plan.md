@@ -28,18 +28,54 @@
 - **保护域简化版**: 预定义保护域（内核/驱动/关键应用/普通应用/非可信应用）（专项6）
 
 **高级扩展特性（专项7-10）**
-- **调度类架构**: 支持FIFO、EDF、RR、CFS等多种调度算法共存，满足混合关键性系统需求
+- **实验性调度类**: EDF、RR、CFS等调度算法（不推荐用于安全关键系统）
 - **自适应分区**: CPU预算管理，100ms时间窗口，支持8个分区，预算强制执行（专项7）
 - **AISafe-eBPF**: 64条指令的扩展BPF，解释器+验证器+钩子系统，性能开销<5%（专项8）
 - **模块化驱动框架**: 统一设备操作接口，VFS集成，热插拔支持（专项9）
 - **形式化验证**: 多级验证策略（静态分析、模型检查、定理证明），关键模块100%覆盖（专项10）
 
 ### 1.3 设计原则
+
+#### 核心设计原则
 - **安全性第一**: 遵循功能安全开发流程，确保可预测性和确定性
 - **可认证性**: 所有设计决策可追溯，满足安全标准要求
 - **模块化**: 采用分层架构，便于验证和测试
 - **可配置性**: 支持编译时配置，适应不同应用需求
 - **实时性**: 硬实时调度，保证任务响应时间
+
+#### 安全关键RTOS设计原则（ISO 26262 ASIL-D）
+
+**内存管理策略**
+- **静态内存池优先**: 内核核心模块禁止使用运行时动态分配（malloc/free）
+- **预分配资源**: 所有资源在系统启动时分配，运行后不可动态分配
+- **固定资源上限**: 最大任务数、信号量数、队列深度等在编译时确定
+- **防碎片化设计**: 使用固定大小块分配，确保内存分配确定性
+
+**同步与通信机制**
+- **阻塞操作超时**: 所有阻塞操作必须带超时（信号量、消息队列、任务休眠等）
+- **优先级继承**: 互斥锁必须支持优先级继承协议（PIP），防止优先级反转
+- **固定队列深度**: 消息队列深度在编译时确定，防止溢出
+
+**调度策略**
+- **默认调度策略**: 固定优先级抢占式调度（FP-PSS）
+  - 优先级范围: 0-255（0为最低，255为最高）
+  - O(1)时间复杂度调度算法
+  - 确定性调度，便于认证
+- **可选调度策略**: EDF、RR、CFS等（需要特殊配置，增加认证难度）
+  - EDF: 用于动态关键性系统
+  - CFS: 用于公平性要求高的场景
+  - RR: 用于时间片轮转
+
+**时间分区（ARINC 653风格）**
+- **CPU预算管理**: 每个任务分配最大执行时间窗
+- **预算强制执行**: 超时强制切换，防止 runaway task
+- **时间窗口**: 100ms时间窗口，支持8个分区
+
+**禁止的设计模式**
+- ❌ 禁止内核核心模块使用 malloc/free
+- ❌ 禁止无超时的阻塞操作
+- ❌ 禁止运行时动态增加资源上限
+- ❌ 禁止不可预测的内存分配行为
 
 ---
 
@@ -48,11 +84,23 @@
 ### 2.1 任务管理
 
 #### 2.1.1 多任务调度
+
+**默认调度策略：固定优先级抢占式调度（FP-PSS）**
+
+AISafe64 **默认且推荐**使用固定优先级抢占式调度（FP-PSS），
+以满足安全关键系统的确定性要求：
+
 - **256级优先级调度**
   - 优先级范围: 0-255（0为最低，255为最高）
   - O(1)时间复杂度的最高优先级查找算法
   - 使用4×64位位图 + CLZ指令实现
-  - 支持优先级抢占和时间片轮转
+  - 支持优先级抢占
+
+- **确定性保证**
+  - 调度延迟: ~130ns（固定开销）
+  - 最坏情况执行时间（WCET）可分析
+  - 易于ISO 26262 ASIL-D认证
+  - 无动态优先级反转风险
 
 - **多核调度支持**
   - 每个CPU核心独立的就绪队列
@@ -60,53 +108,96 @@
   - 任务迁移和核心亲和性
   - CPU隔离配置
 
-- **任务状态管理**
-  - 就绪态 (READY)
-  - 运行态 (RUNNING)
-  - 阻塞态 (BLOCKED)
-  - 休眠态 (SLEEPING)
-  - 挂起态 (SUSPENDED)
+**实验性调度策略（不推荐用于安全关键系统）**
 
-- **任务操作**
-  - 任务创建/删除
-  - 任务挂起/恢复
-  - 任务休眠/唤醒
-  - 优先级动态调整
-  - 任务迁移
-  - 任务自删除
+以下调度策略仅用于研究或非安全关键应用：
+- ❌ EDF（最早截止时间优先）：动态优先级，增加认证难度
+- ❌ CFS（完全公平调度）：动态优先级，不适合硬实时系统
+- ⚠️ RR（时间片轮转）：可用于非关键任务
+
+**注意**：使用实验性调度策略将显著增加认证难度和调度开销。
+
+**任务状态管理**
+- 就绪态 (READY)
+- 运行态 (RUNNING)
+- 阻塞态 (BLOCKED)
+- 休眠态 (SLEEPING)
+- 挂起态 (SUSPENDED)
+
+**任务操作**
+- 任务创建/删除
+- 任务挂起/恢复
+- 任务休眠/唤醒
+- 优先级动态调整（仅限非安全关键任务）
+- 任务迁移
+- 任务自删除
 
 #### 2.1.2 内存管理
 
+**静态内存池管理（核心策略）**
+
+内核核心模块**严格禁止**使用运行时动态分配（malloc/free），
+所有资源必须使用静态内存池在系统启动时预分配。
+
+**内存池类型**：
+- **任务控制块池**：预分配 CONFIG_MAX_TASKS 个 TCB
+- **信号量池**：预分配 CONFIG_MAX_SEMAPHORES 个信号量结构
+- **互斥锁池**：预分配 CONFIG_MAX_MUTEXES 个互斥锁结构
+- **消息队列池**：预分配固定大小的消息缓冲区
+- **栈空间池**：预分配固定大小的任务栈
+
+**内存池特性**：
+- 固定大小块分配（防碎片化）
+- O(1)时间复杂度的分配/释放
+- 内存对齐（16字节对齐）
+- 编译时确定所有池大小
+- 分配失败返回错误码（不阻塞、不重试）
+
+**内存池实现**：
+```c
+/* 内存池接口 */
+void* pool_alloc(uint32_t pool_id);
+void  pool_free(uint32_t pool_id, void *ptr);
+
+/* 示例：分配任务控制块 */
+TCB_t* tcb = pool_alloc(POOL_TASK);
+if (tcb == NULL) {
+    return -ENOMEM;
+}
+```
+
 **MMU虚拟内存管理**
+
 - **4级页表结构**
   - L0: Page Global Directory (PGD) - 512项
   - L1: Page Upper Directory (PUD) - 512项
   - L2: Page Middle Directory (PMD) - 512项
-  - L3: Page Table Entry (PTE) - 512项
+  - L3: Page Table (PTE) - 512项
+  - 48位虚拟地址空间（256TB）
+  - 支持4KB、2MB、1GB页大小
 
 - **虚拟地址空间布局**
-  - 48位虚拟地址空间
-  - 用户空间: 0x0000_0000_0000 - 0x0000_FFFF_FFFF (256TB)
-  - 内核空间: 0xFFFF_0000_0000 - 0xFFFF_FFFF_FFFF (256TB)
+  - 用户空间：0x0000_0000_0000 - 0x0000_FFFF_FFFF (256TB)
+  - 内核空间：0xFFFF_0000_0000 - 0xFFFF_FFFF_FFFF (256TB)
+  - 内核代码段：0xFFFF_0000_0000 - 0xFFFF_0000_FFFF
+  - 内核数据段：0xFFFF_0001_0000 - 0xFFFF_FFFF_EFFF
+  - 设备映射区：0xFFFF_FFFF_F000 - 0xFFFF_FFFF_FFFF
 
-- **页大小支持**
-  - 4KB页（标准页）
-  - 2MB页（大页）
-  - 1GB页（巨页）
-
-- **内存保护**
+- **页表权限管理**
   - 用户/内核空间隔离
-  - 页级权限控制（读/写/执行）
-  - 地址空间布局随机化（ASLR）
-  - 堆栈溢出检测
+  - 读/写/执行权限控制
+  - PXN/UXN位（禁止执行）
+  - AF位（访问标志）
+  - 共享内存支持
 
-**静态内存管理**
-- 内存池管理
-- 固定大小块分配
-- 防碎片化设计
-- 内存对齐（16字节对齐）
+- **地址空间组（ASG）**
+  - 共享地址空间模式（高性能）
+  - 独立地址空间模式（高安全）
+  - 混合模式（平衡）
+  - 支持动态切换
 
 **栈溢出保护**
+
 - **金丝雀值（Canary）**
   - 栈底4字节检测（0xDEADBEEF）
   - 任务切换时自动验证
@@ -531,7 +622,107 @@ endmenu
 4. **MISRA-C合规**：POSIX适配层必须通过MISRA-C:2012静态分析
 5. **认证范围**：启用POSIX兼容层会增加需要认证的代码量
 
-#### 2.1.8 Shell调试接口
+#### 2.1.8 资源上限配置
+
+所有资源的上限在**编译时确定**，禁止运行时动态分配。这符合安全关键RTOS的可预测性和可认证性要求。
+
+**Kconfig 配置示例**：
+
+```kconfig
+menu "Resource Limits"
+
+config MAX_TASKS
+    int "Maximum number of tasks"
+    range 1 256
+    default 32
+    help
+      Maximum number of concurrent tasks in the system.
+      This value is fixed at compile time for safety certification.
+
+config MAX_SEMAPHORES
+    int "Maximum number of semaphores"
+    range 1 128
+    default 16
+    help
+      Maximum number of semaphore objects in the system.
+      Must be a power of 2 for efficient bitmap indexing.
+
+config MAX_MUTEXES
+    int "Maximum number of mutexes"
+    range 1 128
+    default 16
+    help
+      Maximum number of mutex objects in the system.
+
+config MAX_MESSAGE_QUEUES
+    int "Maximum number of message queues"
+    range 1 64
+    default 8
+    help
+      Maximum number of message queue objects.
+
+config MESSAGE_QUEUE_DEPTH
+    int "Default message queue depth"
+    range 1 256
+    default 16
+    help
+      Default depth for message queues (fixed at compile time).
+
+config KERNEL_HEAP_SIZE
+    hex "Kernel heap size (bytes)"
+    range 0x1000 0x100000
+    default 0x10000
+    help
+      Size of the kernel memory pool for static allocation.
+      Must be aligned to page boundary (4KB).
+
+config TASK_STACK_SIZE
+    int "Default task stack size (bytes)"
+    range 4096 1048576
+    default 8192
+    help
+      Default stack size for tasks (fixed at compile time).
+
+endmenu
+```
+
+**编译时断言验证**：
+
+```c
+/* 验证资源上限合理性 */
+STATIC_ASSERT(CONFIG_MAX_TASKS <= 256, max_tasks_exceeded);
+STATIC_ASSERT(CONFIG_MAX_SEMAPHORES <= 128, max_semaphores_exceeded);
+STATIC_ASSERT(CONFIG_MAX_MUTEXES <= 128, max_mutexes_exceeded);
+STATIC_ASSERT((CONFIG_KERNEL_HEAP_SIZE & 0xFFF) == 0, heap_not_aligned);
+STATIC_ASSERT((CONFIG_TASK_STACK_SIZE & 0xF) == 0, stack_not_aligned);
+```
+
+**资源使用统计**：
+
+所有资源池必须提供运行时查询接口：
+
+```c
+/* 查询资源使用情况 */
+typedef struct {
+    uint32_t total;      /* 总数 */
+    uint32_t used;       /* 已使用 */
+    uint32_t peak_used;  /* 峰值使用 */
+    uint32_t fail_count; /* 分配失败次数 */
+} ResourceStats_t;
+
+ResourceStats_t task_stats(void);
+ResourceStats_t semaphore_stats(void);
+ResourceStats_t mutex_stats(void);
+```
+
+**设计原则**：
+- 所有资源上限在编译时确定（Kconfig）
+- 禁止运行时动态增加资源上限
+- 资源分配失败返回错误码（不阻塞、不重试）
+- 提供运行时查询接口用于监控
+- 符合ISO 26262 ASIL-D可认证性要求
+
+#### 2.1.9 Shell调试接口
 
 AISafe64提供可选的Shell调试接口，用于系统开发、调试和运行时诊断。采用**用户态Shell + 核心态调试接口**的混合架构，确保安全性与功能性的平衡。
 
@@ -904,7 +1095,7 @@ Shell用户态代码和内核调试接口必须符合MISRA-C:2012规范：
 4. **资源限制**：Shell任务内存和CPU使用受限
 5. **日志审计**：所有Shell命令必须记录到审计日志
 
-#### 2.1.9 Initramfs和启动脚本
+#### 2.1.10 Initramfs和启动脚本
 
 AISafe64支持cpio格式的内存文件系统（initramfs）和简化的rcS启动脚本，用于简化系统启动流程，实现早期用户空间初始化。
 
@@ -1787,7 +1978,7 @@ CONFIG_RC_SCRIPT_VERBOSE=y
 - [ ] 更多rcS命令
 - [ ] 网络配置集成
 
-#### 2.1.10 虚拟文件系统（VFS）
+#### 2.1.11 虚拟文件系统（VFS）
 
 AISafe64支持虚拟文件系统（VFS），为不同的文件系统类型提供统一的接口，实现POSIX兼容的文件I/O操作（open, read, write, close等）。
 
@@ -2306,15 +2497,15 @@ int mount(const char *source, const char *target,
     }
 
     /* 分配挂载点结构 */
-    mount = (VFSMount_t *)malloc(sizeof(VFSMount_t));
+    mount = (VFSMount_t *)pool_alloc(POOL_VFS_MOUNT);
     if (mount == NULL) {
         return -ENOMEM;
     }
 
     /* 初始化挂载点 */
-    mount->mount_point = strdup(target);
+    mount->mount_point = str_pool_dup(target);
     if (mount->mount_point == NULL) {
-        free(mount);
+        pool_free(POOL_VFS_MOUNT, mount);
         return -ENOMEM;
     }
 
@@ -2355,8 +2546,8 @@ int umount(const char *target) {
             }
 
             /* 释放资源 */
-            free((void *)mount->mount_point);
-            free(mount);
+            str_pool_free((void *)mount->mount_point);
+            pool_free(POOL_VFS_MOUNT, mount);
 
             return 0;
         }
@@ -2626,7 +2817,7 @@ uint32_t get_random_number(void) {
 - [ ] 目录操作（opendir, readdir）
 - [ ] 文件权限管理
 
-#### 2.1.11 应用加载器（Application Loader）
+#### 2.1.12 应用加载器（Application Loader）
 
 ##### 设计目标
 
@@ -2856,7 +3047,7 @@ static int load_elf_from_file(const char *path, ElfLoadContext_t *ctx) {
     ctx->elf_size = (uint32_t)ret;
 
     /* 分配缓冲区 */
-    ctx->elf_data = (uint8_t *)malloc(ctx->elf_size);
+    ctx->elf_data = (uint8_t *)pool_alloc(POOL_ELF_DATA, ctx->elf_size);
     if (ctx->elf_data == NULL) {
         close(fd);
         return -ENOMEM;
@@ -2868,20 +3059,20 @@ static int load_elf_from_file(const char *path, ElfLoadContext_t *ctx) {
     close(fd);
 
     if (ret != (ssize_t)ctx->elf_size) {
-        free(ctx->elf_data);
+        pool_free(POOL_ELF_DATA, ctx->elf_data);
         return -EIO;
     }
 
     /* 验证ELF魔数 */
     ehdr = (Elf64_Ehdr *)ctx->elf_data;
     if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
-        free(ctx->elf_data);
+        pool_free(POOL_ELF_DATA, ctx->elf_data);
         return -EINVAL;
     }
 
     /* 验证架构 */
     if (ehdr->e_machine != EM_AARCH64) {
-        free(ctx->elf_data);
+        pool_free(POOL_ELF_DATA, ctx->elf_data);
         return -EINVAL;
     }
 
@@ -2930,7 +3121,7 @@ static int load_elf_segments(ElfLoadContext_t *ctx) {
             uint32_t mmu_flags = 0;
 
             /* 分配内存 */
-            vaddr = malloc(phdr[i].p_memsz);
+            vaddr = pool_alloc(POOL_APP_MEMORY, phdr[i].p_memsz);
             if (vaddr == NULL) {
                 return -ENOMEM;
             }
@@ -2962,7 +3153,7 @@ static int load_elf_segments(ElfLoadContext_t *ctx) {
                                      phdr[i].p_memsz,
                                      mmu_flags);
             if (ret != 0) {
-                free(vaddr);
+                pool_free(POOL_APP_MEMORY, vaddr);
                 return ret;
             }
 
@@ -2983,7 +3174,7 @@ static int create_app_task(ElfLoadContext_t *ctx, const AppConfig_t *config) {
     uint8_t *stack;
 
     /* 分配栈 */
-    stack = (uint8_t *)malloc(config->stack_size);
+    stack = (uint8_t *)pool_alloc(POOL_STACK, config->stack_size);
     if (stack == NULL) {
         return -ENOMEM;
     }
@@ -2999,7 +3190,7 @@ static int create_app_task(ElfLoadContext_t *ctx, const AppConfig_t *config) {
                       config->cpu_affinity);
 
     if (tcb == NULL) {
-        free(stack);
+        pool_free(POOL_STACK, stack);
         return -ENOMEM;
     }
 
@@ -3065,7 +3256,7 @@ int app_loader_load_all(const char *config_path) {
                                     config.signature);
         if (ret != 0) {
             printk("Signature verification failed\n");
-            free(elf_ctx.elf_data);
+            pool_free(POOL_ELF_DATA, elf_ctx.elf_data);
             continue;
         }
 
@@ -3073,7 +3264,7 @@ int app_loader_load_all(const char *config_path) {
         ret = load_elf_segments(&elf_ctx);
         if (ret != 0) {
             printk("Failed to load segments: %d\n", ret);
-            free(elf_ctx.elf_data);
+            pool_free(POOL_ELF_DATA, elf_ctx.elf_data);
             continue;
         }
 
@@ -3081,7 +3272,7 @@ int app_loader_load_all(const char *config_path) {
         ret = relocate_elf(&elf_ctx);
         if (ret != 0) {
             printk("Failed to relocate: %d\n", ret);
-            free(elf_ctx.elf_data);
+            pool_free(POOL_ELF_DATA, elf_ctx.elf_data);
             continue;
         }
 
@@ -3089,12 +3280,12 @@ int app_loader_load_all(const char *config_path) {
         ret = create_app_task(&elf_ctx, &config);
         if (ret != 0) {
             printk("Failed to create task: %d\n", ret);
-            free(elf_ctx.elf_data);
+            pool_free(POOL_ELF_DATA, elf_ctx.elf_data);
             continue;
         }
 
         /* 释放ELF数据 */
-        free(elf_ctx.elf_data);
+        pool_free(POOL_ELF_DATA, elf_ctx.elf_data);
 
         loaded_count++;
         printk("Successfully loaded application '%s'\n", config.name);
@@ -3567,7 +3758,7 @@ endmenu
 - Week 6: 故障隔离和恢复功能完成
 - Week 7: 所有测试通过，可交付使用
 
-#### 2.1.12 调度类（Scheduling Classes）
+#### 2.1.13 调度类（Scheduling Classes）
 
 ##### 设计目标
 
@@ -5624,7 +5815,7 @@ void generate_coredump(TCB_t *task, uint32_t signal) {
     core_size = sizeof(CoreDump_t) + task->stack_size;
 
     /* 分配核心转储缓冲区 */
-    core = (CoreDump_t *)malloc(core_size);
+    core = (CoreDump_t *)pool_alloc(POOL_COREDUMP, core_size);
     if (core == NULL) {
         return;
     }
@@ -5657,7 +5848,7 @@ void generate_coredump(TCB_t *task, uint32_t signal) {
     /* 写入文件 */
     coredump_write_to_file(core, core_size);
 
-    free(core);
+    pool_free(POOL_COREDUMP, core);
 }
 ```
 
@@ -6254,7 +6445,7 @@ int stack_protection_init(TCB_t *task, uint32_t size) {
     }
 
     /* 分配栈 */
-    task->stack_base = (uint64_t)malloc(size);
+    task->stack_base = (uint64_t)pool_alloc(POOL_STACK, size);
     if (task->stack_base == 0ULL) {
         return -ENOMEM;
     }
@@ -7300,7 +7491,7 @@ typedef struct {
 AddressSpaceGroup_t *create_address_space_group(uint32_t group_id) {
     AddressSpaceGroup_t *group;
 
-    group = (AddressSpaceGroup_t *)malloc(sizeof(AddressSpaceGroup_t));
+    group = (AddressSpaceGroup_t *)pool_alloc(POOL_ADDR_SPACE_GROUP, sizeof(AddressSpaceGroup_t));
     if (group == NULL) {
         return NULL;
     }
@@ -7308,7 +7499,7 @@ AddressSpaceGroup_t *create_address_space_group(uint32_t group_id) {
     /* 创建新的页表 */
     group->page_table = mmu_create_page_table();
     if (group->page_table == 0U) {
-        free(group);
+        pool_free(POOL_ADDR_SPACE_GROUP, group);
         return NULL;
     }
 

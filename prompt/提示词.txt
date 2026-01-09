@@ -13,6 +13,8 @@ claude -r恢复会话
 帮我在该项目下增加git忽略提交的配置文件
 使用gh命令，将AISafeOS64项目推送到github
 
+信号量要求只能在中断中释放，但是不能再中断中获取，所以semaphore_wait_timeout等接口是否有优化空间
+
   /* ISO 26262 ASIL-D认证需要： */
   /* - 需求追溯矩阵 */
   /* - 安全案例分析 */
@@ -86,3 +88,78 @@ SYSCALL_DESIGN.md
 继续编写剩余模块，每个模块编写完成后自动提交到远程仓库
 配置 clang-format 自动格式化
 帮我整理 @assistant_ticket_bot-1.py 的代码逻辑，整理到 .html中，可以利用mermaid和svg
+
+你是 Linus Torvalds，Linux 内核的创造者和首席架构师。你已经维护 Linux 内核超过30年，
+审核过数百万行代码，建立了世界上最成功的开源项目。现在我们正在开创一个新项目，
+你将以你独特的视角来分析代码质量的潜在风险，确保项目从一开始就建立在坚实的技术基础上。
+
+的错误码约定使用EINVAL的POSIX错误码
+per-CPU 变量功能
+1. 添加 strerror() 实现：
+char *strerror(int errnum);
+2. 添加 errno 支持：
+__thread int errno;
+
+ LSP Plugin Recommendation
+   LSP provides code intelligence like go-to-definition and error checking
+
+   Plugin: clangd-lsp
+   C/C++ language server (clangd) for code intelligence
+   Triggered by: .c files
+
+   Would you like to install this LSP plugin?
+   > 1. Yes, install clangd-lsp
+     2. No, not now
+     3. Never for clangd-lsp
+     4. Disable all LSP recommendations 
+
+内核启动参数，可配置内核的行为
+对象管理，引用计数
+在大多数嵌入式 RTOS 或自研内核中，禁止任务同时等待多个信号量是一种优秀实践。
+整个系统是否需要考虑对象的管理，如kobject，并且引入引用计数管理资源，对功能安全是否有影响
+
+引入对象管理和引用计数的优先级？ → 高优先级 - 必须立即实施
+     · 对功能安全（ISO 26262 ASIL-D）的要求程度？ → 严格遵循 - 必须认证
+     · 引入引用计数的范围？ → 任务管理（TCB）, 文件系统（VFS）, 设备管理, 同步原语
+     · 对性能的影响容忍度？ → 零容忍 - 关键路径
+高优先级 + ASIL-D 认证 + 全面引用计数 + 零性能损失
+https://code.claude.com/docs/zh-CN/cli-reference
+  | 方案         | 复杂度 | 性能 | 适用场景           |
+  |--------------|--------|------|--------------------|
+  | 通用 kobject | 高     | 中   | Linux（通用 OS）   |
+  | 专用引用计数 | 低     | 高   | 嵌入式 RTOS        |
+  | 层次化释放   | 极低   | 最高 | 生命周期明确的场景 |
+
+信号量：
+    /* 信号量的计数值，有符号，负值表示资源需求，正值表示可用资源数量 */
+    T_WORD semaControlValue;
+
+动态内存分配（malloc/free）—— 不可预测、碎片化
+静态内存池（Static Memory Pools）
+所有资源系统启动时可分配，应用运行后不可动态分配
+所有阻塞操作必须带超时
+固定资源上限，如最大信号量数 = N（编译时确定），队列深度 = 固定值（防溢出）
+固定优先级抢占式调度（FP-PSS）
+优先级继承（PIP）
+时间分区（Time Partitioning）
+   每个任务分配最大执行时间窗（如 ARINC 653）
+    超时强制切换（防 runaway task）
+
+内核核心模块必须使用静态内存池
+添加专门的资源配置章节
+明确FP-PSS为默认策略
+
+ - EDF：用于动态关键性系统
+ - CFS：用于公平性要求高的场景
+
+  1. 可读性差：难以快速定位特定规则
+  2. 维护困难：更新某个领域需要编辑整个文件
+  3. 内容混杂：MISRA规则、代码风格、测试规范、CMake配置等内容交织
+  4. 上下文浪费：每次对话都加载大量可能无关的内容
+进行规则设置，而不是全部在CLAUDE.md中
+我们应该按照├── .claude/
+│   ├── CLAUDE.md           # Main project instructions
+│   └── rules/
+│       ├── code-style.md   # Code style guidelines
+│       ├── testing.md      # Testing conventions
+│       └── security.md     # Security requirements
