@@ -1366,3 +1366,48 @@ if (stat("file", &st) == 0 && S_ISREG(st.st_mode)) {
 - **使用描述性文件名**：文件名应指示规则涵盖的内容
 - **谨慎使用条件规则**：仅在规则确实适用于特定文件类型时添加 `paths` 前置事项
 - **使用子目录组织**：分组相关规则（例如 `frontend/`、`backend/`）
+
+
+
+```
+  🚀 快速开始
+    1. 安装 Git Hooks（一次性）：
+  # Linux/macOS/Git Bash
+  ./scripts/install_hooks.sh
+
+  # Windows PowerShell
+  .\scripts\install_hooks.ps1
+
+    2. 日常提交：
+  # 暂存文件
+
+  git add <files>
+
+  # 智能提交（推荐）
+
+  ./scripts/smart_commit.sh
+
+  📋 支持的提交类型
+
+  feat | fix | docs | style | refactor | perf | test | chore | ci | revert
+
+  🎯 提交消息格式
+
+  <type>(<scope>): <subject>
+
+  <body>
+
+  <footer>
+
+
+  示例：
+  feat(mm): add transparent huge page support
+
+  - Implement 2MB page allocation
+  - Add automatic huge page promotion
+
+  This reduces TLB pressure and improves performance.
+
+  Closes #123
+```
+

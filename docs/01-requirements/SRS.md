@@ -226,8 +226,8 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
 
 **ARINC 653分区调度**：
 - **时间分区调度**: Major Frame周期调度，支持8个分区
-- **时间调度表**: 支持定义和切换多个调度表（热备份）
-- **分区隔离**: 分区间时间和空间完全隔离，防止runaway task
+- **时间调度表**: 支持定义和切换多个调度表
+- **分区隔离**: 分区间时间和空间完全隔离
 - **分区生命周期**: 分区启动/停止/重置（热启动/冷启动），健康监控
 - 分区切换开销 < 5μs，分区预算精度 ±1%
 
@@ -584,19 +584,19 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   #define SCHED_FIFO    1  /* 固定优先级抢占式（默认） */
   #define SCHED_RR      2  /* 时间片轮转 */
   #define SCHED_PARTITION 3  /* 分区调度 */
-
+  
   /* 调度参数 */
   struct sched_param {
       int sched_priority;     /* 优先级（0-255） */
       unsigned int sched_timeslice;  /* RR时间片（ms） */
   };
-
+  
   /* 设置调度策略 */
   int task_set_scheduler(uint32_t task_id, int policy, const struct sched_param *param);
-
+  
   /* 获取调度策略 */
   int task_get_scheduler(uint32_t task_id, int *policy, struct sched_param *param);
-
+  
   /* 让出CPU（仅RR策略有效） */
   int sched_yield(void);
   ```
@@ -643,7 +643,7 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
       uint32_t budget_percentage;  /* CPU预算百分比（0-100） */
       uint32_t affinity_cpu;       /* CPU亲和性（0-15） */
   } PartitionConfig_t;
-
+  
   /* 分区状态 */
   typedef enum {
       PARTITION_IDLE = 0,      /* 空闲态 */
@@ -652,22 +652,22 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
       PARTITION_SUSPENDED,     /* 挂起态 */
       PARTITION_ERROR          /* 错误态 */
   } PartitionState_t;
-
+  
   /* 创建分区 */
   int partition_create(const PartitionConfig_t *config);
-
+  
   /* 删除分区 */
   int partition_delete(uint32_t partition_id);
-
+  
   /* 启动分区调度 */
   int partition_start(void);
-
+  
   /* 停止分区调度 */
   int partition_stop(void);
-
+  
   /* 查询分区状态 */
   int partition_get_state(uint32_t partition_id, PartitionState_t *state);
-
+  
   /* 设置分区模式（NORMAL/WARM_START/COLD_START） */
   int partition_set_mode(uint32_t partition_id, int mode);
   ```
@@ -713,31 +713,31 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
       uint32_t cpu_affinity;      /* CPU亲和性 */
       uint64_t resource_quota;    /* 资源配额 */
   } TaskGroupConfig_t;
-
+  
   /* 创建任务组 */
   int task_group_create(const TaskGroupConfig_t *config);
-
+  
   /* 删除任务组 */
   int task_group_delete(uint32_t group_id);
-
+  
   /* 添加任务到组 */
   int task_group_add_task(uint32_t group_id, uint32_t task_id);
-
+  
   /* 从组中移除任务 */
   int task_group_remove_task(uint32_t group_id, uint32_t task_id);
-
+  
   /* 启动任务组（启动组内所有任务） */
   int task_group_start(uint32_t group_id);
-
+  
   /* 停止任务组（停止组内所有任务） */
   int task_group_stop(uint32_t group_id);
-
+  
   /* 挂起任务组 */
   int task_group_suspend(uint32_t group_id);
-
+  
   /* 恢复任务组 */
   int task_group_resume(uint32_t group_id);
-
+  
   /* 查询任务组信息 */
   int task_group_get_info(uint32_t group_id, TaskGroupInfo_t *info);
   ```
@@ -766,10 +766,10 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   /* 优先级继承属性（用于互斥锁） */
   #define PRIORITY_INHERIT     0x1  /* 优先级继承 */
   #define PRIORITY_CEILING     0x2  /* 优先级天花板 */
-
+  
   /* 创建互斥锁（支持优先级继承） */
   int mutex_init_prio(Mutex_t *mutex, uint32_t flags, int ceiling_prio);
-
+  
   /* 优先级继承自动处理 */
   /* 当高优先级任务等待低优先级任务持有的互斥锁时，系统自动提升低优先级任务 */
   ```
@@ -800,16 +800,16 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   typedef struct {
       uint64_t cpu_mask;  /* CPU掩码（bit0=CPU0, bit1=CPU1, ...） */
   } CpuSet_t;
-
+  
   /* 设置任务CPU亲和性 */
   int task_set_affinity(uint32_t task_id, const CpuSet_t *cpuset);
-
+  
   /* 获取任务CPU亲和性 */
   int task_get_affinity(uint32_t task_id, CpuSet_t *cpuset);
-
+  
   /* 设置当前任务CPU亲和性 */
   int task_setaffinity(const CpuSet_t *cpuset);
-
+  
   /* 获取当前任务CPU亲和性 */
   int task_getaffinity(CpuSet_t *cpuset);
   ```
@@ -837,10 +837,10 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   ```c
   /* 禁止任务调度（锁定调度器） */
   void sched_lock(void);
-
+  
   /* 恢复任务调度（解锁调度器） */
   void sched_unlock(void);
-
+  
   /* 获取当前锁定深度（嵌套计数） */
   uint32_t sched_get_lock_depth(void);
   ```
@@ -873,7 +873,7 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
       uint32_t offset_ms;          /* 在Major Frame中的偏移（ms） */
       uint32_t duration_ms;        /* 分区窗口持续时间（ms） */
   } PartitionWindow_t;
-
+  
   /* 时间调度表 */
   typedef struct {
       uint32_t schedule_id;        /* 调度表ID */
@@ -882,22 +882,22 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
       uint32_t num_windows;        /* 分区窗口数量 */
       PartitionWindow_t windows[16]; /* 分区窗口数组 */
   } ScheduleTable_t;
-
+  
   /* 创建时间调度表 */
   int schedule_table_create(const ScheduleTable_t *schedule);
-
+  
   /* 删除时间调度表 */
   int schedule_table_delete(uint32_t schedule_id);
-
+  
   /* 激活调度表（开始执行） */
   int schedule_table_activate(uint32_t schedule_id);
-
+  
   /* 停止调度表 */
   int schedule_table_deactivate(void);
-
+  
   /* 获取当前调度表ID */
   int schedule_table_get_current(uint32_t *schedule_id);
-
+  
   /* 获取调度表状态 */
   int schedule_table_get_status(uint32_t schedule_id, ScheduleStatus_t *status);
   ```
@@ -936,28 +936,28 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   #define PARTITION_MODE_IDLE       1
   #define PARTITION_MODE_WARM_START 2
   #define PARTITION_MODE_COLD_START 3
-
+  
   /* 启动分区 */
   int partition_start(uint32_t partition_id);
-
+  
   /* 停止分区 */
   int partition_stop(uint32_t partition_id);
-
+  
   /* 重置分区（热启动） */
   int partition_reset_warm(uint32_t partition_id);
-
+  
   /* 重置分区（冷启动） */
   int partition_reset_cold(uint32_t partition_id);
-
+  
   /* 设置分区模式 */
   int partition_set_mode(uint32_t partition_id, int mode);
-
+  
   /* 获取分区模式 */
   int partition_get_mode(uint32_t partition_id, int *mode);
-
+  
   /* 分区健康检查 */
   int partition_health_check(uint32_t partition_id, HealthStatus_t *status);
-
+  
   /* 分区恢复 */
   int partition_recovery(uint32_t partition_id, int recovery_action);
   ```
@@ -993,19 +993,19 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   ```c
   /* 手动迁移任务到指定CPU */
   int task_migrate(uint32_t task_id, uint32_t target_cpu);
-
+  
   /* 查询任务当前运行的CPU */
   int task_get_cpu(uint32_t task_id, uint32_t *cpu_id);
-
+  
   /* 启用自动负载均衡 */
   int sched_enable_autobalance(void);
-
+  
   /* 禁用自动负载均衡 */
   int sched_disable_autobalance(void);
-
+  
   /* 设置负载均衡策略 */
   int sched_set_balance_policy(int policy);
-
+  
   /* 设置负载均衡周期（ms） */
   int sched_set_balance_period(uint32_t period_ms);
   ```
@@ -1496,19 +1496,19 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   ```c
   /* 任务信息系统调用 */
   long sys_task_info(TaskInfo_t *tasks, int count);
-
+  
   /* 性能统计系统调用 */
   long sys_perf_stats(PerfStats_t *stats);
-
+  
   /* 内存统计系统调用 */
   long sys_mem_stats(MemStats_t *stats);
-
+  
   /* 日志读取系统调用 */
   long sys_klog_read(char *buf, size_t size, off_t offset);
-
+  
   /* 任务控制系统调用 */
   long sys_task_control(int pid, TaskCmd_t cmd, void *arg);
-
+  
   /* 配置系统调用 */
   long sys_set_config(const char *key, const char *value);
   long sys_get_config(const char *key, char *buf, size_t size);
@@ -1680,17 +1680,17 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   ```c
   /* 从initramfs读取ELF文件 */
   static int load_elf_from_file(const char *path, ElfLoadContext_t *ctx);
-
+  
   /* 验证ELF文件签名 */
   static int verify_elf_signature(const uint8_t *data, uint32_t size,
                                   const uint8_t *expected_signature);
-
+  
   /* 加载ELF段到内存 */
   static int load_elf_segments(ElfLoadContext_t *ctx);
-
+  
   /* 执行符号重定位（如果需要） */
   static int relocate_elf(ElfLoadContext_t *ctx);
-
+  
   /* 创建应用任务 */
   static int create_app_task(ElfLoadContext_t *ctx, const AppConfig_t *config);
   ```
@@ -1787,16 +1787,16 @@ AISafe64是一个符合功能安全认证标准（ISO 26262 ASIL-D / IEC 61508 S
   ```c
   /* 应用加载器主函数 */
   int app_loader_load_all(const char *config_path);
-
+  
   /* 启动应用 */
   int app_start(uint32_t app_id);
-
+  
   /* 停止应用 */
   int app_stop(uint32_t app_id);
-
+  
   /* 重启应用 */
   int app_restart(uint32_t app_id);
-
+  
   /* 查询应用状态 */
   int app_get_status(uint32_t app_id, AppStatus_t *status);
   ```

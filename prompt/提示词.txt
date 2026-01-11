@@ -163,7 +163,7 @@ https://code.claude.com/docs/zh-CN/cli-reference
 │       ├── code-style.md   # Code style guidelines
 │       ├── testing.md      # Testing conventions
 │       └── security.md     # Security requirements
-
+生成.gitignore文件
 为需求(SRS)、概要设计(HLD)、详细设计(LLD)、实施计划等4个主要文档
   💡 建议的瀑布模型文档结构
 
@@ -223,3 +223,5 @@ https://code.claude.com/docs/zh-CN/cli-reference
 现在我们依次讨论需求，先讨论任务管理，AISafe64需采用调度类架构，支持多种调度算法共存，满足混合关键性系统的需求。不
 同类型的任务可以使用不同的调度策略，在保持实时性的同时提供最大的灵活性，不需要支持EDF、CFS，但是必须自适应分区+时间
 调度表满足ARINC653调度需求，并且审查任务管理功能是否有缺失
+
+任务组管理
