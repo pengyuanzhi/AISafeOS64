@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# 全自动 Git 提交脚本 - 自动暂存文件并遵循 Conventional Commits 规范
+# 全自动 Git 提交脚本 v2.0
+# 自动暂存文件并遵循 Conventional Commits 规范
 #
 # 使用方法:
-#   ./scripts/smart_commit.sh
-#   或
-#   source scripts/smart_commit.sh
-#   smart_commit
+#   ./scripts/smart_commit.sh           # 默认模式：暂存所有更改
+#   ./scripts/smart_commit.sh -i       # 交互模式：选择文件
+#   ./scripts/smart_commit.sh -p       # 提交后自动推送到远程
+#   ./scripts/smart_commit.sh -i -p    # 交互模式 + 推送
+#   ./scripts/smart_commit.sh --help   # 显示帮助信息
 #
 
 set -e
@@ -23,6 +25,11 @@ RESET='\033[0m'
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_SCRIPT="$SCRIPT_DIR/conventional_commit.py"
+
+# 默认选项
+INTERACTIVE_MODE=false
+AUTO_PUSH=false
+SHOW_HELP=false
 
 # 打印信息
 print_info() {
@@ -45,6 +52,58 @@ print_header() {
     echo -e "\n${BOLD}${BLUE}========================================${RESET}"
     echo -e "${BOLD}${BLUE}$1${RESET}"
     echo -e "${BOLD}${BLUE}========================================${RESET}\n"
+}
+
+# 显示帮助信息
+show_help() {
+    cat << EOF
+${BOLD}智能 Git 提交助手 v2.0${RESET}
+
+${BOLD}用法:${RESET}
+  $0 [选项]
+
+${BOLD}选项:${RESET}
+  -i, --interactive     交互模式：手动选择要暂存的文件
+  -p, --push            提交后自动推送到远程仓库
+  -h, --help            显示此帮助信息
+
+${BOLD}示例:${RESET}
+  $0                    默认模式：暂存所有更改并提交
+  $0 -i                交互模式：选择要暂存的文件
+  $0 -p                暂存所有更改、提交并推送
+  $0 -i -p             交互模式选择文件、提交并推送
+
+${BOLD}说明:${RESET}
+  - 默认模式下会自动暂存所有修改的文件
+  - 交互模式允许逐个选择要暂存的文件
+  - 使用 -p 选项可在提交后自动推送到远程
+
+EOF
+}
+
+# 解析命令行参数
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -i|--interactive)
+                INTERACTIVE_MODE=true
+                shift
+                ;;
+            -p|--push)
+                AUTO_PUSH=true
+                shift
+                ;;
+            -h|--help)
+                SHOW_HELP=true
+                shift
+                ;;
+            *)
+                print_error "未知选项: $1"
+                echo "使用 -h 或 --help 查看帮助信息"
+                exit 1
+                ;;
+        esac
+    done
 }
 
 # 检查是否有暂存的更改
@@ -246,12 +305,10 @@ interactive_select_files() {
                 # 更新显示
                 for i in "${!file_map[@]}"; do
                     local file="${file_map[$i]}"
-                    local status="✓"
-                    local color="${GREEN}"
                     if [ ${selected_map[$i]} -eq 1 ]; then
-                        printf "  ${GREEN}[%2d]${RESET} ${GREEN}%s${RESET} %s\n" "$i" "$status" "$file"
+                        printf "  ${GREEN}[%2d]${RESET} ${GREEN}✓${RESET} %s\n" "$i" "$file"
                     else
-                        printf "  ${CYAN}[%2d]${RESET}   %s\n" "$i" "$file"
+                        printf "  ${CYAN}[%2d]${RESET}  %s\n" "$i" "$file"
                     fi
                 done
                 ;;
@@ -261,7 +318,7 @@ interactive_select_files() {
                 done
                 for i in "${!file_map[@]}"; do
                     local file="${file_map[$i]}"
-                    printf "  ${CYAN}[%2d]${RESET}   %s\n" "$i" "$file"
+                    printf "  ${CYAN}[%2d]${RESET}  %s\n" "$i" "$file"
                 done
                 ;;
             d\ *|D\ *)
@@ -363,15 +420,40 @@ stage_all_changes() {
 show_staged_changes() {
     print_info "暂存的更改:"
     git diff --cached --stat
+}
 
-    echo ""
-    print_info "详细的更改 (按 q 退出):"
-    git diff --cached --stat
+# 推送到远程仓库
+push_to_remote() {
+    print_header "推送到远程仓库"
+
+    # 获取当前分支
+    local branch=$(git branch --show-current 2>/dev/null || echo "master")
+    local remote=$(git config branch.${branch}.remote || echo "origin")
+
+    print_info "推送分支: ${BOLD}${CYAN}${branch}${RESET}"
+    print_info "远程仓库: ${BOLD}${CYAN}${remote}${RESET}\n"
+
+    if git push "${remote}" "${branch}"; then
+        print_success "推送成功!"
+        return 0
+    else
+        print_error "推送失败"
+        print_info "\n请检查网络连接或远程仓库配置"
+        return 1
+    fi
 }
 
 # 主函数
 smart_commit() {
-    print_header "全自动 Git 提交助手"
+    parse_args "$@"
+
+    # 显示帮助
+    if [ "$SHOW_HELP" = true ]; then
+        show_help
+        exit 0
+    fi
+
+    print_header "智能 Git 提交助手 v2.0"
 
     # 检查是否在 Git 仓库中
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -401,52 +483,21 @@ smart_commit() {
         return 0
     fi
 
-    # 询问暂存方式
+    # 暂存文件
     if [ $has_unstaged -eq 1 ]; then
-        echo ""
-        print_info "选择暂存方式:"
-        echo "  1) 交互式选择文件 (推荐)"
-        echo "  2) 暂存所有更改"
-        echo "  3) 跳过暂存 (仅使用已暂存的文件)"
-        echo "  q) 取消"
-        echo ""
-
-        while true; do
-            echo -n -e "${CYAN}选择 (1-3/q): ${RESET}"
-            read choice
-
-            case "$choice" in
-                1)
-                    if interactive_select_files; then
-                        break
-                    else
-                        print_info "取消操作"
-                        return 0
-                    fi
-                    ;;
-                2)
-                    if ! stage_all_changes; then
-                        return 1
-                    fi
-                    break
-                    ;;
-                3)
-                    if [ $has_staged -eq 0 ]; then
-                        print_error "没有已暂存的文件"
-                        continue
-                    fi
-                    print_info "跳过暂存，使用已有文件"
-                    break
-                    ;;
-                q|Q)
-                    print_info "取消操作"
-                    return 0
-                    ;;
-                *)
-                    print_warning "无效的选择"
-                    ;;
-            esac
-        done
+        if [ "$INTERACTIVE_MODE" = true ]; then
+            # 交互模式
+            if ! interactive_select_files; then
+                print_info "取消操作"
+                return 0
+            fi
+        else
+            # 默认模式：暂存所有
+            print_info "暂存所有更改...\n"
+            if ! stage_all_changes; then
+                return 1
+            fi
+        fi
     fi
 
     # 显示将要提交的更改
@@ -466,7 +517,12 @@ smart_commit() {
     if [ ! -f "$PYTHON_SCRIPT" ]; then
         print_error "找不到 Python 脚本: $PYTHON_SCRIPT"
         print_info "将使用普通的 git commit"
-        git commit
+        if git commit; then
+            print_success "提交成功!"
+            if [ "$AUTO_PUSH" = true ]; then
+                push_to_remote
+            fi
+        fi
         return $?
     fi
 
@@ -497,6 +553,11 @@ smart_commit() {
         # 清理临时文件
         rm -f "$COMMIT_FILE"
 
+        # 推送到远程
+        if [ "$AUTO_PUSH" = true ]; then
+            push_to_remote
+        fi
+
         return 0
     else
         print_error "提交失败"
@@ -506,5 +567,5 @@ smart_commit() {
 
 # 如果直接运行脚本
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    smart_commit
+    smart_commit "$@"
 fi
