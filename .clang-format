@@ -1,34 +1,36 @@
 ---
-# AISafe64 RTOS - clang-format 配置
-# 基于 MISRA-C:2012 和项目现有代码风格
+# AISafe64 项目 .clang-format 配置
+#
+# 基于项目编码规范（.claude/rules/）：
+# - Allman 括号风格（左大括号必须换行）
+# - 4空格缩进（不使用Tab）
+# - 每行最多120字符
+# - 符合MISRA-C:2012规范
+# - 单语句也必须使用大括号
+#
 
-# 语言选项
+# 基础样式
+BasedOnStyle: None
+
+# 语言设置
 Language: Cpp
-Standard: c++11  # C11/C++11 标准
+Standard: c++11
 
-# 换行选项
-BreakBeforeBraces: Allman
-BraceWrapping:
-  AfterClass:      true
-  AfterControlStatement: Never
-  AfterEnum:       true
-  AfterFunction:   true
-  AfterNamespace:  true
-  AfterStruct:     true
-  AfterUnion:      true
-  BeforeCatch:     true
-  BeforeElse:      false
-  IndentBraces:    false
+# 字符集和编码
+Charset: utf-8
 
-# 缩进选项
+# ============================================
+# 缩进和对齐
+# ============================================
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
 ContinuationIndentWidth: 4
-IndentCaseLabels: true
+IndentCaseLabels: false
 IndentPPDirectives: None
+IndentWrappedFunctionNames: false
 
-# 对齐选项
+# 对齐
 AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
@@ -36,25 +38,52 @@ AlignEscapedNewlines: Left
 AlignOperands: true
 AlignTrailingComments: true
 
-# 允许的选项
-AllowAllArgumentsOnNextLine: true
-AllowAllConstructorInitializersOnNextLine: true
-AllowAllParametersOfDeclarationOnNextLine: true
+# ============================================
+# 括号样式 - Allman 风格（强制）
+# ============================================
+BreakBeforeBraces: Allman
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: Always  # 单语句也必须使用大括号
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: true
+
+# ============================================
+# 行长度限制
+# ============================================
+ColumnLimit: 120
+
+# ============================================
+# 允许的格式化选项（严格模式）
+# ============================================
+AllowAllArgumentsOnNextLine: false
+AllowAllConstructorInitializersOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortBlocksOnASingleLine: Never
 AllowShortCaseLabelsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: None
+AllowShortFunctionsOnASingleLine: Empty  # 只允许空函数
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortEnumsOnASingleLine: false
 
+# ============================================
 # 空格选项
+# ============================================
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
 SpaceAfterTemplateKeyword: true
 SpaceBeforeAssignmentOperators: true
 SpaceBeforeCpp11BracedList: false
-SpaceBeforeCtorInitializerColon: true
-SpaceBeforeInheritanceColon: true
 SpaceBeforeParens: ControlStatements
 SpaceBeforeRangeBasedForLoopColon: true
 SpaceInEmptyParentheses: false
@@ -65,47 +94,63 @@ SpacesInContainerLiterals: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
 
+# ============================================
 # 指针对齐
+# ============================================
 PointerAlignment: Right
 DerivePointerAlignment: false
 
-# 格式化选项
+# ============================================
+# 函数声明和调用
+# ============================================
 BinPackArguments: true
 BinPackParameters: true
 BreakBeforeBinaryOperators: None
 BreakBeforeTernaryOperators: true
 BreakConstructorInitializers: BeforeColon
 BreakInheritanceList: BeforeColon
-ColumnLimit: 100
-CompactNamespaces: false
-ConstructorInitializerAllOnOneLineOrOnePerLine: false
-Cpp11BracedListStyle: true
-FixNamespaceComments: true
-IncludeBlocks: Preserve
-IndentAccessModifiers: false
-IndentRequiresClause: false
-IndentWrappedFunctionNames: false
-KeepEmptyLinesAtTheStartOfBlocks: false
-MaxEmptyLinesToKeep: 1
-NamespaceIndentation: None
-ReflowComments: true
-SortIncludes: Never
-SortUsingDeclarations: false
 
-# 其他选项
+# ============================================
+# 其他格式化选项
+# ============================================
+AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: true
+BreakStringLiterals: true
+CompactNamespaces: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+Cpp11BracedListInit: true
+DisableFormat: false
+ExperimentalAutoDetectBinPacking: false
+FixNamespaceComments: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^".*\.h"'
+    Priority: 1
+  - Regex: '^<.*\.h>'
+    Priority: 2
+  - Regex: '^<.*>'
+    Priority: 3
+IncludeIsMainRegex: '(Test)?$'
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
 PenaltyBreakAssignment: 2
 PenaltyBreakBeforeFirstCallParameter: 19
 PenaltyBreakComment: 300
-PenaltyBreakFirstLessLess: 120
+PenaltyBreakFirstLess: 120
 PenaltyBreakString: 1000
 PenaltyExcessCharacter: 1000000
 PenaltyReturnTypeOnItsOwnLine: 60
+ReflowComments: true
+SortIncludes: true
+SortUsingDeclarations: true
 
-# 带属性的格式化
-AlignArrayOfStructures: None
+# ============================================
+# 属性宏
+# ============================================
 AttributeMacros:
   - __attribute__
   - __declspec
