@@ -157,7 +157,47 @@ Migrate to task_create_ex() which supports additional parameters.
 
 Closes #789
 
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+Co-Authored-By: 张三 <zhangsan@example.com>
+```
+
+#### 标准提交页脚格式
+
+**AISafe64 项目要求在提交消息末尾添加标准的生成信息**。
+
+```bash
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>
+```
+
+**说明**：
+- `🤖 Generated with [GLM4.7](https://bigmodel.cn/)` - 标识 AI 辅助生成
+- `Co-Authored-By: pengyz <340589344@qq.com>` - 联合署名（实际开发者）
+
+**中文示例**：
+```
+feat(hooks): 添加 Claude Code Hooks 完整会话记录系统
+
+- 实现 SessionStart、UserPromptSubmit、Stop、SessionEnd 四个 Hooks
+- 修正 Hook 事件命名格式为驼峰命名（CamelCase）
+- 修正数据传递方式为 stdin JSON（而非环境变量）
+- 添加完整的测试脚本和文档
+
+特性：
+- 完整记录会话生命周期（开始、提示词、响应、结束）
+- 自动生成 Markdown 格式日志
+- 支持统计分析工具
+- 跨平台兼容（Windows/Linux/macOS）
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>
 ```
 
 ### 15.3.2 提交消息示例
@@ -259,13 +299,34 @@ This ensures consistent commit messages across the project.
 2. **使用 Conventional Commits 格式**
 3. **每条提交只做一件事**
 4. **提交消息清晰描述"是什么"和"为什么"**
+5. **提交消息末尾必须添加标准页脚**：
+   ```
+   🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+   Co-Authored-By: pengyz <340589344@qq.com>
+   ```
 
 #### DO（推荐做法）
 
 ```bash
 # 1. 每个提交做一件事（使用中文）
-git commit -m "feat(scheduler): 添加 EDF 调度算法"
-git commit -m "test(scheduler): 添加 EDF 单元测试"
+git commit -m "feat(scheduler): 添加 EDF 调度算法
+
+- 实现最早截止时间优先（EDF）调度算法
+- 添加红黑树用于截止时间跟踪
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>"
+
+git commit -m "test(scheduler): 添加 EDF 单元测试
+
+- 添加 EDF 调度算法的单元测试
+- 测试覆盖率 100%
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>"
 
 # 2. 使用完整的中文句子解释
 git commit -m "fix(mm): 修复页分配器中的内存泄漏
@@ -273,14 +334,22 @@ git commit -m "fix(mm): 修复页分配器中的内存泄漏
 页分配器在错误路径上未释放页面，导致每次失败分配
 泄漏 4KB 内存。
 
-修复：在错误处理路径中添加适当的清理。"
+修复：在错误处理路径中添加适当的清理。
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>"
 
 # 3. 引用相关 Issue
 git commit -m "feat(driver): 添加 GPIO 驱动
 
 为树莓派 4 实现基本的 GPIO 操作。
 
-关闭 #456"
+关闭 #456
+
+🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+Co-Authored-By: pengyz <340589344@qq.com>"
 ```
 
 #### DON'T（不推荐做法）
@@ -313,6 +382,12 @@ git commit -m "feat(scheduler): 实现一个非常复杂的调度算法，它做
 - [ ] 正文解释了"是什么"和"为什么"
 - [ ] 正文每行不超过 72 个字符
 - [ ] 没有包含敏感信息
+- [ ] **添加了标准页脚**：
+  ```
+  🤖 Generated with [GLM4.7](https://bigmodel.cn/)
+
+  Co-Authored-By: pengyz <340589344@qq.com>
+  ```
 - [ ] 关联了相关 Issue（如果存在）
 - [ ] 标记了破坏性变更（如果有）
 
