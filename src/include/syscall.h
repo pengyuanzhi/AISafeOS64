@@ -132,7 +132,7 @@ extern "C"
         asm volatile("svc #0" : : "r"(x0), "r"(x8) : "memory", "cc");
 
         /* 永不返回 */
-        while (1)
+        for (;;)
         {
             __asm__ volatile("wfe");
         }

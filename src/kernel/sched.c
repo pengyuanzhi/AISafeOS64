@@ -744,7 +744,7 @@ void task_exit(int code)
     if (rq == NULL)
     {
         /* Cannot do much */
-        while (1)
+        for (;;)
         {
             __asm__ volatile("wfi");
         }
@@ -754,7 +754,7 @@ void task_exit(int code)
     curr = rq->curr;
     if (curr == NULL)
     {
-        while (1)
+        for (;;)
         {
             __asm__ volatile("wfi");
         }

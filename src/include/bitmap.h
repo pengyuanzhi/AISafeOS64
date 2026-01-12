@@ -11,6 +11,8 @@
  *          - 位运算
  *
  * @note MISRA-C:2012合规
+ *
+ * @copyright Copyright (c) 2025 AISafe64 Team
  */
 
 #ifndef BITMAP_H

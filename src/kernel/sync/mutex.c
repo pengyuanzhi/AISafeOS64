@@ -98,7 +98,7 @@ int mutex_lock(mutex_t *mutex)
     }
 
     /* 尝试获取锁 */
-    while (1)
+    for (;;)
     {
         /* 原子尝试加锁（使用标准原子操作） */
         if (atomic_cas_u32(&mutex->locked, 0U, 1U))

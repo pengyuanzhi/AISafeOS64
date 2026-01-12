@@ -48,15 +48,15 @@ extern "C"
  * - EBUSY (16): Device or resource busy
  * - ENOTSUP (95): Not supported (Linux: EOPNOTSUPP)
  */
-#define EPERM 1       /**< Operation not permitted */
-#define ENOENT 2      /**< No such file or directory */
-#define EINVAL 22     /**< Invalid argument */
-#define EAGAIN 11     /**< Resource temporarily unavailable */
-#define ETIMEDOUT 110 /**< Connection timed out */
-#define EOVERFLOW 75  /**< Value too large */
-#define ENOMEM 12     /**< Out of memory */
-#define EBUSY 16      /**< Device or resource busy */
-#define ENOTSUP 95    /**< Not supported */
+#define EPERM 1U       /**< Operation not permitted */
+#define ENOENT 2U      /**< No such file or directory */
+#define EINVAL 22U     /**< Invalid argument */
+#define EAGAIN 11U     /**< Resource temporarily unavailable */
+#define ETIMEDOUT 110U /**< Connection timed out */
+#define EOVERFLOW 75U  /**< Value too large */
+#define ENOMEM 12U     /**< Out of memory */
+#define EBUSY 16U      /**< Device or resource busy */
+#define ENOTSUP 95U    /**< Not supported */
 
 /**
  * @brief NULL指针定义
@@ -69,11 +69,11 @@ extern "C"
  * @brief true/false定义
  */
 #ifndef true
-#define true 1
+#define true 1U
 #endif
 
 #ifndef false
-#define false 0
+#define false 0U
 #endif
 
 #ifdef __cplusplus

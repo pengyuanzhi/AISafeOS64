@@ -6,8 +6,15 @@
  * @version 1.0
  *
  * @details 位图操作实现
+ *          - 查找第一位（置位/清零）
+ *          - 位运算（与/或/异或/非）
+ *          - 位图统计和比较
+ *          - 使用 ARM64 CLZ/CTZ 指令优化性能
  *
  * @note MISRA-C:2012合规
+ * @note 使用内建函数 __builtin_clzll/__builtin_ctzll
+ *
+ * @copyright Copyright (c) 2025 AISafe64 Team
  */
 
 #include "bitmap.h"
@@ -15,9 +22,17 @@
 
 /**
  * @brief 查找第一个置位（从低位开始）
- * @param bitmap 位图
- * @param nbits 位图总位数
- * @return 位号，未找到返回-1
+ *
+ * @details 从位图的低位（第0位）开始查找第一个值为1的位
+ *          使用 CLZ（Count Leading Zeros）指令优化性能
+ *
+ * @param bitmap 位图指针（不能为NULL）
+ * @param nbits 位图总位数（必须大于0）
+ *
+ * @return 成功返回位号（0到nbits-1），失败返回-1
+ *
+ * @note 时间复杂度：O(n) 其中 n 为 uint64_t 字数
+ * @note 未找到置位时返回-1
  */
 int find_first_set_bit(const uint64_t *bitmap, uint32_t nbits)
 {

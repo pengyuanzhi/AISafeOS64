@@ -121,7 +121,7 @@ void scheduler_start(void)
 
 kernel_panic:
     printk("[FATAL] Scheduler failed to start!\n");
-    while (1)
+    for (;;)
     {
         __asm__ volatile("wfi");
     }
@@ -723,7 +723,7 @@ void idle_task_entry(void *arg)
     if (rq == NULL)
     {
         /* Should not happen */
-        while (1)
+        for (;;)
         {
             __asm__ volatile("wfi");
         }
@@ -732,7 +732,7 @@ void idle_task_entry(void *arg)
     /* Initialize last time */
     last_time = sched_clock();
 
-    while (1)
+    for (;;)
     {
         /* Wait for interrupt */
         __asm__ volatile("wfi");

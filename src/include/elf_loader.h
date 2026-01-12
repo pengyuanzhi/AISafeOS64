@@ -11,6 +11,8 @@
  * @author AISafe64 Team
  * @version 1.0
  * @date 2025-01-08
+ *
+ * @copyright Copyright (c) 2025 AISafe64 Team
  */
 
 #ifndef ELF_LOADER_H
@@ -24,37 +26,37 @@
 #define ELF_MAGIC_SIZE 16U
 
 /* ELF class */
-#define ELFCLASS_NONE 0
-#define ELFCLASS32 1
-#define ELFCLASS64 2
+#define ELFCLASS_NONE 0U
+#define ELFCLASS32 1U
+#define ELFCLASS64 2U
 
 /* ELF data encoding (endianness) */
-#define ELFDATANONE 0
-#define ELFDATA2LSB 1 /* Little-endian */
-#define ELFDATA2MSB 2 /* Big-endian */
+#define ELFDATANONE 0U
+#define ELFDATA2LSB 1U /* Little-endian */
+#define ELFDATA2MSB 2U /* Big-endian */
 
 /* ELF version */
-#define EV_CURRENT 1
+#define EV_CURRENT 1U
 
 /* ELF machine types */
-#define EM_NONE 0
-#define EM_AARCH64 183 /* ARM AArch64 */
+#define EM_NONE 0U
+#define EM_AARCH64 183U /* ARM AArch64 */
 
 /* ELF segment types */
-#define PT_NULL 0
-#define PT_LOAD 1
-#define PT_DYNAMIC 2
-#define PT_INTERP 3
-#define PT_NOTE 4
-#define PT_SHLIB 5
-#define PT_PHDR 6
-#define PT_GNU_STACK 0x6474E551
-#define PT_GNU_RELRO 0x6474E552
+#define PT_NULL 0U
+#define PT_LOAD 1U
+#define PT_DYNAMIC 2U
+#define PT_INTERP 3U
+#define PT_NOTE 4U
+#define PT_SHLIB 5U
+#define PT_PHDR 6U
+#define PT_GNU_STACK 0x6474E551U
+#define PT_GNU_RELRO 0x6474E552U
 
 /* ELF segment permissions */
-#define PF_X 0x1 /* Execute */
-#define PF_W 0x2 /* Write */
-#define PF_R 0x4 /* Read */
+#define PF_X 0x1U /* Execute */
+#define PF_W 0x2U /* Write */
+#define PF_R 0x4U /* Read */
 
 /* ARM64 AArch64 relocation types */
 #define R_AARCH64_NONE 0            /* No relocation */

@@ -12,6 +12,8 @@
  *
  * @note ARMv8-A原子操作（LDXR/STXR）
  * @note MISRA-C:2012合规
+ *
+ * @copyright Copyright (c) 2025 AISafe64 Team
  */
 
 #ifndef SYNC_H

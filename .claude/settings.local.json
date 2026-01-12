@@ -18,9 +18,29 @@
     ]
   },
   "hooks": {
-    "SessionStart": "python .claude/hooks/session_start.py",
-    "UserPromptSubmit": "python .claude/hooks/user_prompt_submit.py",
-    "Stop": "python .claude/hooks/stop.py",
-    "SessionEnd": "python .claude/hooks/session_end.py"
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python .claude/hooks/session_start.py"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "python .claude/hooks/user_prompt_submit.py"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python .claude/hooks/stop.py"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "python .claude/hooks/session_end.py"
+      }
+    ]
   }
 }

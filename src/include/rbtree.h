@@ -10,6 +10,8 @@
  *          - 用于EDF和CFS调度器
  *
  * @note MISRA-C:2012合规
+ *
+ * @copyright Copyright (c) 2025 AISafe64 Team
  */
 
 #ifndef RBTREE_H
@@ -26,8 +28,8 @@ extern "C"
 /**
  * @brief 红黑树节点颜色
  */
-#define RB_RED 0
-#define RB_BLACK 1
+#define RB_RED 0U
+#define RB_BLACK 1U
 
     /**
      * @brief 红黑树节点
