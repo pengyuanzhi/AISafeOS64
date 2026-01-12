@@ -1,0 +1,15 @@
+# Claude Code 提示词记录
+
+**时间**: 2026-01-12 11:13:52
+**会话ID**: test-session-123
+**模型**: claude-sonnet-4.5
+
+## 提示词
+
+如何实现信号量？
+
+## 上下文文件
+
+- `src/kernel/sync/semaphore.c` (行: 1-100)
+- `include/kernel/sync.h`
+

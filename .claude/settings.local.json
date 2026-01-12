@@ -9,7 +9,14 @@
       "Bash(for:*)",
       "Bash(do if [ -f \"$f\" ])",
       "Bash(fi:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git add:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": "python .claude/hooks/session_start.py",
+    "UserPromptSubmit": "python .claude/hooks/user_prompt_submit.py",
+    "Stop": "python .claude/hooks/stop.py",
+    "SessionEnd": "python .claude/hooks/session_end.py"
   }
 }
