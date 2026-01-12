@@ -203,7 +203,37 @@ uint32_t result = scheduler_task_create(
 
 ### 4.3 注释规范
 
-#### 4.3.1 文件头注释
+#### 4.3.0 语言规范
+
+**AISafe64 项目强制使用中文编写所有代码注释和文档**。
+
+- ✅ **必须**：所有注释使用中文（包括 Doxygen 文档）
+- ✅ **必须**：使用 Doxygen 风格的文档注释
+- ✅ **推荐**：代码注释简洁明了，使用中文
+- ❌ **禁止**：使用英文编写注释（除非特殊情况并经团队同意）
+
+**示例对比**：
+
+```c
+/* ✅ 正确：中文 Doxygen 注释 */
+/**
+ * @brief 创建新任务
+ * @param entry 任务入口函数指针
+ * @return 成功返回任务ID，失败返回0
+ */
+
+/* ❌ 错误：英文注释 */
+/**
+ * @brief Create new task
+ * @param entry Task entry point
+ * @return Task ID on success, 0 on failure
+ */
+```
+
+#### 4.3.1 文件头注释（Doxygen 格式）
+
+**必须使用 Doxygen 格式的文件头注释**。
+
 ```c
 /**
  * @file    scheduler.c
@@ -213,16 +243,41 @@ uint32_t result = scheduler_task_create(
  * @version 1.0
  *
  * @details 本文件实现了256级优先级的多核任务调度器
- *          支持抢占式调度、负载均衡和任务迁移
+ *          - 支持抢占式调度
+ *          - 支持负载均衡和任务迁移
+ *          - O(1)时间复杂度的调度算法
+ *
+ * @note MISRA-C:2012 合规
+ * @warning 调度器必须在多核环境下使用
  *
  * @copyright Copyright (c) 2025 AISafe64 Team
  */
 ```
 
-#### 4.3.2 函数注释
+**Doxygen 标签说明**：
+
+| 标签 | 说明 | 必填 |
+|------|------|------|
+| `@file` | 文件名 | ✅ |
+| `@brief` | 简短描述 | ✅ |
+| `@author` | 作者 | ✅ |
+| `@date` | 创建日期 | ✅ |
+| `@version` | 版本号 | ✅ |
+| `@details` | 详细描述 | 推荐 |
+| `@note` | 注意事项 | 可选 |
+| `@warning` | 警告信息 | 可选 |
+| `@copyright` | 版权声明 | ✅ |
+
+#### 4.3.2 函数注释（Doxygen 格式）
+
+**所有公共函数必须使用 Doxygen 格式的注释**。
+
 ```c
 /**
  * @brief 创建新任务
+ *
+ * @details 创建一个新的任务并添加到调度器就绪队列
+ *          任务将在调度器启动后开始执行
  *
  * @param entry 任务入口函数指针（不能为NULL）
  * @param priority 任务优先级（0-255，255为最高）
@@ -231,15 +286,26 @@ uint32_t result = scheduler_task_create(
  *
  * @return 成功返回任务ID，失败返回0
  *
- * @note 必须在调度器启动前调用
- * @warning 任务入口函数不得返回
+ * @retval 非0 任务创建成功，返回任务ID
+ * @retval 0 任务创建失败
  *
+ * @note 必须在调度器启动前调用
+ * @note 任务入口函数不得返回，应使用 task_exit() 退出
+ * @warning 优先级值过大会导致低优先级任务饥饿
+ *
+ * @par 示例代码
  * @code
  * uint32_t tid = task_create(my_task, 255, 8192, "MyTask");
- * if (tid != 0U) {
- *     printf("Task created: %u\n", tid);
+ * if (tid != 0U)
+ * {
+ *     printf("任务创建成功: %u\n", tid);
  * }
  * @endcode
+ *
+ * @see task_exit()
+ * @see scheduler_start()
+ *
+ * @since 1.0.0
  */
 uint32_t task_create(void (*entry)(void),
                     uint8_t priority,
@@ -247,10 +313,121 @@ uint32_t task_create(void (*entry)(void),
                     const char *name);
 ```
 
-#### 4.3.3 代码注释
+**函数注释 Doxygen 标签说明**：
+
+| 标签 | 说明 | 用法 |
+|------|------|------|
+| `@brief` | 简短描述（一行） | 必填 |
+| `@details` | 详细描述 | 推荐 |
+| `@param` | 参数说明 | 每个参数必填 |
+| `@return` | 返回值描述 | 必填 |
+| `@retval` | 特定返回值说明 | 多种返回值时使用 |
+| `@note` | 注意事项 | 可选 |
+| `@warning` | 警告信息 | 有风险时必填 |
+| `@par` | 段落标题 | 可选 |
+| `@code` | 代码示例开始 | 配合 @endcode |
+| `@endcode` | 代码示例结束 | 配合 @code |
+| `@see` | 参考其他函数 | 可选 |
+| `@since` | 起始版本 | 推荐 |
+
+#### 4.3.3 结构体注释（Doxygen 格式）
+
 ```c
-/* 单行注释: 简短说明 */
+/**
+ * @brief 任务控制块（TCB）
+ *
+ * @details 包含任务的所有状态信息
+ *          - 寄存器保存
+ *          - 堆栈信息
+ *          - 调度信息
+ *          - 优先级
+ *          - 状态
+ */
+typedef struct TaskControlBlock
+{
+    uint64_t regs[32];      /**< @brief 寄存器保存区 */
+    uint64_t stack_base;    /**< @brief 堆栈基地址 */
+    uint64_t stack_ptr;     /**< @brief 当前堆栈指针 */
+    uint64_t stack_size;    /**< @brief 堆栈大小（字节） */
+    uint8_t  priority;      /**< @brief 任务优先级（0-255） */
+    uint8_t  state;         /**< @brief 任务状态 */
+    uint32_t time_slice;    /**< @brief 时间片（毫秒） */
+    char     name[16];      /**< @brief 任务名称 */
+} TCB_t;
+```
+
+**结构体成员注释**：
+- 使用 `/**< @brief 说明 */` 行内注释
+- 或在结构体定义后单独注释
+
+#### 4.3.4 宏定义注释（Doxygen 格式）
+
+```c
+/**
+ * @def MAX_TASK_COUNT
+ * @brief 系统支持的最大任务数量
+ *
+ * @details 最大任务数受限于：
+ *          - 可用内存大小
+ *          - 调度器性能
+ *          - 硬件配置
+ */
+#define MAX_TASK_COUNT     256U
+
+/**
+ * @def TICK_RATE_HZ
+ * @brief 系统时钟节拍频率（Hz）
+ *
+ * @note 建议值为 100Hz、1000Hz 或 10000Hz
+ */
+#define TICK_RATE_HZ       1000U
+```
+
+#### 4.3.5 枚举注释（Doxygen 格式）
+
+```c
+/**
+ * @brief 任务状态枚举
+ *
+ * @details 定义任务的所有可能状态
+ */
+typedef enum
+{
+    TASK_READY = 0U,      /**< @brief 就绪态：等待CPU调度 */
+    TASK_RUNNING,         /**< @brief 运行态：正在执行 */
+    TASK_BLOCKED,         /**< @brief 阻塞态：等待资源（信号量、消息队列） */
+    TASK_SLEEPING,        /**< @brief 休眠态：延时等待，超时自动唤醒 */
+    TASK_SUSPENDED        /**< @brief 挂起态：被挂起，需要显式恢复 */
+} TaskState_t;
+```
+
+#### 4.3.6 类型定义注释（Doxygen 格式）
+
+```c
+/**
+ * @brief 信号量类型定义
+ *
+ * @details 用于进程间同步和互斥
+ *          - 支持二值信号量（max_count=1）
+ *          - 支持计数信号量（max_count>1）
+ */
+typedef struct Semaphore
+{
+    int32_t count;              /**< @brief 当前计数值 */
+    int32_t max_count;          /**< @brief 最大计数值 */
+    struct list_head wait_queue; /**< @brief 等待队列 */
+    spinlock_t lock;            /**< @brief 自旋锁 */
+} semaphore_t;
+```
+
+#### 4.3.7 行内注释规范
+
+**简洁的行内注释使用 `//` 或 `/* */`**。
+
+```c
+/* ✅ 正确：简洁的中文注释 */
 uint32_t task_id;  /* 任务唯一标识 */
+uint64_t system_ticks;  /* 系统时钟计数器 */
 
 /* 多行注释: 详细说明 */
 /*
@@ -262,7 +439,11 @@ uint32_t task_id;  /* 任务唯一标识 */
  * - bitmap[3]: 优先级 192-255
  */
 static uint64_t priority_bitmap[4];
+```
 
+#### 4.3.8 特殊注释标记
+
+```c
 /* TODO注释: 标记待完成的工作 */
 /* TODO: 实现优先级捐赠算法 */
 
@@ -271,6 +452,68 @@ static uint64_t priority_bitmap[4];
 
 /* HACK注释: 标记临时解决方案 */
 /* HACK: 临时使用忙等待，后续改为WFE指令 */
+
+/* XXX注释: 标记需要警惕的代码 */
+/* XXX: 此处未做边界检查，调用方需确保参数有效 */
+
+/* NOTE注释: 重要说明 */
+/* NOTE: 此函数必须在锁保护下调用 */
+```
+
+#### 4.3.9 注释最佳实践
+
+**DO（推荐做法）**：
+
+```c
+/* ✅ 1. 函数必须有 Doxygen 注释 */
+/**
+ * @brief 计算两个数的和
+ * @param a 第一个数
+ * @param b 第二个数
+ * @return 两数之和
+ */
+int32_t add(int32_t a, int32_t b);
+
+/* ✅ 2. 复杂逻辑需要注释 */
+/* 检查页表项是否有效 */
+if ((pte & PTE_VALID) == PTE_VALID)
+{
+    /* 提取物理页号 */
+    uint64_t phys_page = pte >> PTE_PHYS_SHIFT;
+
+    /* 映射到虚拟地址空间 */
+    void *virt_addr = phys_to_virt(phys_page);
+}
+
+/* ✅ 3. 使用有意义的变量名 */
+uint32_t timeout_ms;  /* 超时时间（毫秒） */
+
+/* ✅ 4. 注释解释"为什么"而非"是什么" */
+/* 使用CLZ指令而非循环，性能提升10倍 */
+priority = 63U - (uint8_t)__builtin_clzll(bitmap);
+```
+
+**DON'T（不推荐做法）**：
+
+```c
+/* ❌ 1. 不要使用英文注释 */
+/* Calculate the sum of two numbers */
+
+/* ❌ 2. 不要注释显而易见的代码 */
+/* 将a加1 */
+a = a + 1U;
+
+/* ❌ 3. 不要使用过长的注释 */
+/*
+ * 这是一个非常非常非常非常非常非常非常非常非常长的注释，
+ * 读者很难一眼看明白它想说什么。
+ */
+
+/* ❌ 4. 不要使用错误的Doxygen标签 */
+/**
+ * @brief 简短描述
+ * @description 详细描述  ❌ 应使用 @details
+ */
 ```
 
 ### 4.4 文件组织规范
