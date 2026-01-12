@@ -10,7 +10,11 @@
       "Bash(do if [ -f \"$f\" ])",
       "Bash(fi:*)",
       "Bash(python:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(./scripts/smart_commit.sh:*)",
+      "Bash(bash scripts/smart_commit.sh:*)"
     ]
   },
   "hooks": {
