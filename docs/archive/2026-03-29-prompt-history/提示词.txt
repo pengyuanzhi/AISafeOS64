@@ -1,0 +1,227 @@
+我想设计一个多任务的64位嵌入式操作系统，符合功能安全认证，支持ARM64架构，首先生成项目需求和技术方案到plan.md文件中
+，代码符合MISRC-2012规范，并且将C语言代码生成规范系统提示词输出到CLAUDE.MD中，编译系统采用camke,配置系统采用menuconfig根据两个新增需求更新plan.md和CLAUDE.md
+
+AISafe64 – AI-Generated, Safety-Certifiable, Native 64-bit RTOS
+plan.md和CLAUDE.md
+把上述方案同步更新到plan.md和CLAUDE.md
+统一驱动框架、设备树、DMA引擎
+开始按照plan.md的计划开始开发，并且在写代码时参考CLAUDE.md规范
+回滚到上次的代码
+claude -c继续上次会话
+claude -r恢复会话
+按照plan.md文档进行模型划分，并且进行详细设计，生成文档到design.md
+帮我在该项目下增加git忽略提交的配置文件
+使用gh命令，将AISafeOS64项目推送到github
+
+信号量要求只能在中断中释放，但是不能再中断中获取，所以semaphore_wait_timeout等接口是否有优化空间
+
+  /* ISO 26262 ASIL-D认证需要： */
+  /* - 需求追溯矩阵 */
+  /* - 安全案例分析 */
+  /* - FMEA（失效模式与影响分析）*/
+  /* - FTA（故障树分析）*/
+  /* - DFMEA（设计FMEA）*/
+  /* - 安全用例（Safety Case）*/
+  /* - 验证和确认（V&V）报告 */
+认证文档模板、追溯工具
+
+  /* 当前仅基础日志，缺失： */
+  /* - 核心转储生成 */
+  /* - 运行时栈回溯 */
+  /* - 性能剖析器 */
+  /* - 逻辑分析仪接口 */
+  /* - JTAG/SWD调试支持 */
+  /* - 系统跟踪宏单元（STM）*/
+
+  建议添加：完整调试工具链
+
+  模式1：独立地址空间（完全隔离）
+
+  // 每个任务有独立的虚拟地址空间
+  TaskA: 虚拟地址空间 A (页表A)
+  TaskB: 虚拟地址空间 B (页表B)
+  // 优点：最强隔离，安全性高
+  // 缺点：上下文切换开销大（需要切换页表）
+
+  模式2：共享地址空间（高性能）
+
+  // 多个任务共享一个虚拟地址空间
+  TaskA, TaskB: 共享虚拟地址空间 (页表Shared)
+  // 优点：快速上下文切换，低开销
+  // 缺点：任务间可以互相访问内存
+
+  模式3：混合模式（推荐）
+
+  // 关键任务独立空间，普通任务共享空间
+  CriticalTask: 独立地址空间 (页表A)
+  NormalTaskA, NormalTaskB: 共享地址空间 (页表Shared)
+
+扁平化任务模型 + 可选的地址空间隔离 三种任务隔离模式
+三种任务隔离模式专利
+自适应系统调用专利
+
+POSIX子集 + 可选适配层
+  我的推荐：支持POSIX子集，但不是完整实现
+
+  理由：
+  1. ✅ 可移植性收益大：大量库可以复用
+  2. ✅ 实施成本可控：只支持常用子集，复杂度有限
+  3. ✅ 不破坏原生设计：扁平化任务模型保持完整
+  4. ✅ 可编译选项：不需要POSIX的系统可以禁用，减少代码量
+  5. ✅ 便于移植：开发者可以先在Linux上用POSIX开发，再移植到AISafe64
+  不推荐：完整POSIX实现
+  理由：
+  1. ❌ fork/exec与扁平化模型冲突严重
+  2. ❌ 信号处理过于复杂，认证困难
+  3. ❌ 实施成本高，收益有限（嵌入式系统很少用完整POSIX）
+
+POSIX接口是否由C库实现，并且如果支持了地址空间隔离是否需要支持系统调用，请详细思考下
+earlymmu是否需要支持，以尽快开启mmu加速系统启动
+是否支持shell功能，是放在用户态还是核心态好
+是否支持cpio内存文件系统，便于启动，并支持简化版本的rcS脚本功能
+是否支持应用的动态加载功能，深度思考后请给出建议和方案
+VFS文件系统是否支持，深度思考后请给出建议和方案
+调度是否支持调度类，便于扩展不同的调度算法，深度思考后请给出建议和方案
+请分析Linux、zephyer、nuttx、qnx、VxWorks，seL4等操作系统，是否有值得借鉴的技术，可以完善现有操作系统的安全性和架构合理性、扩展性和灵活性
+根据plan.md和CLAUDE.md开始编码任务，依次按照模块进行编写，每个模块编写完成后自动提交到远程仓库
+SYSCALL_DESIGN.md
+继续编写剩余模块，每个模块编写完成后自动提交到远程仓库
+配置 clang-format 自动格式化
+帮我整理 @assistant_ticket_bot-1.py 的代码逻辑，整理到 .html中，可以利用mermaid和svg
+
+你是 Linus Torvalds，Linux 内核的创造者和首席架构师。你已经维护 Linux 内核超过30年，
+审核过数百万行代码，建立了世界上最成功的开源项目。现在我们正在开创一个新项目，
+你将以你独特的视角来分析代码质量的潜在风险，确保项目从一开始就建立在坚实的技术基础上。
+
+的错误码约定使用EINVAL的POSIX错误码
+per-CPU 变量功能
+1. 添加 strerror() 实现：
+char *strerror(int errnum);
+2. 添加 errno 支持：
+__thread int errno;
+
+ LSP Plugin Recommendation
+   LSP provides code intelligence like go-to-definition and error checking
+
+   Plugin: clangd-lsp
+   C/C++ language server (clangd) for code intelligence
+   Triggered by: .c files
+
+   Would you like to install this LSP plugin?
+   > 1. Yes, install clangd-lsp
+     2. No, not now
+     3. Never for clangd-lsp
+     4. Disable all LSP recommendations 
+
+内核启动参数，可配置内核的行为
+对象管理，引用计数
+在大多数嵌入式 RTOS 或自研内核中，禁止任务同时等待多个信号量是一种优秀实践。
+整个系统是否需要考虑对象的管理，如kobject，并且引入引用计数管理资源，对功能安全是否有影响
+
+引入对象管理和引用计数的优先级？ → 高优先级 - 必须立即实施
+     · 对功能安全（ISO 26262 ASIL-D）的要求程度？ → 严格遵循 - 必须认证
+     · 引入引用计数的范围？ → 任务管理（TCB）, 文件系统（VFS）, 设备管理, 同步原语
+     · 对性能的影响容忍度？ → 零容忍 - 关键路径
+高优先级 + ASIL-D 认证 + 全面引用计数 + 零性能损失
+https://code.claude.com/docs/zh-CN/cli-reference
+  | 方案         | 复杂度 | 性能 | 适用场景           |
+  |--------------|--------|------|--------------------|
+  | 通用 kobject | 高     | 中   | Linux（通用 OS）   |
+  | 专用引用计数 | 低     | 高   | 嵌入式 RTOS        |
+  | 层次化释放   | 极低   | 最高 | 生命周期明确的场景 |
+
+信号量：
+    /* 信号量的计数值，有符号，负值表示资源需求，正值表示可用资源数量 */
+    T_WORD semaControlValue;
+
+动态内存分配（malloc/free）—— 不可预测、碎片化
+静态内存池（Static Memory Pools）
+所有资源系统启动时可分配，应用运行后不可动态分配
+所有阻塞操作必须带超时
+固定资源上限，如最大信号量数 = N（编译时确定），队列深度 = 固定值（防溢出）
+固定优先级抢占式调度（FP-PSS）
+优先级继承（PIP）
+时间分区（Time Partitioning）
+   每个任务分配最大执行时间窗（如 ARINC 653）
+    超时强制切换（防 runaway task）
+
+内核核心模块必须使用静态内存池
+添加专门的资源配置章节
+明确FP-PSS为默认策略
+
+ - EDF：用于动态关键性系统
+ - CFS：用于公平性要求高的场景
+
+  1. 可读性差：难以快速定位特定规则
+  2. 维护困难：更新某个领域需要编辑整个文件
+  3. 内容混杂：MISRA规则、代码风格、测试规范、CMake配置等内容交织
+  4. 上下文浪费：每次对话都加载大量可能无关的内容
+进行规则设置，而不是全部在CLAUDE.md中
+我们应该按照├── .claude/
+│   ├── CLAUDE.md           # Main project instructions
+│   └── rules/
+│       ├── code-style.md   # Code style guidelines
+│       ├── testing.md      # Testing conventions
+│       └── security.md     # Security requirements
+生成.gitignore文件
+为需求(SRS)、概要设计(HLD)、详细设计(LLD)、实施计划等4个主要文档
+  💡 建议的瀑布模型文档结构
+
+  docs/
+  ├── 01-requirements/          # 需求阶段文档
+  │   ├── SRS.md              # 软件需求规格说明书
+  │   ├── functional-reqs.md  # 功能需求详细说明
+  │   └── non-functional-reqs.md # 非功能需求详细说明
+  │
+  ├── 02-design/              # 设计阶段文档
+  │   ├── HLD.md              # 高层设计/概要设计
+  │   ├── LLD/                # 低层设计/详细设计
+  │   │   ├── task-scheduler.md
+  │   │   ├── memory-management.md
+  │   │   ├── ipc.md
+  │   │   └── ...
+  │   └── interface-design.md  # 接口设计
+  │
+  ├── 03-implementation/       # 实现阶段文档
+  │   ├── coding-standards.md # 编码规范（引用CLAUDE.md）
+  │   ├── test-plan.md        # 测试计划
+  │   └── development-plan.md # 开发计划
+  │
+  ├── 04-verification/        # 验证阶段文档
+  │   ├── test-specs.md       # 测试规格
+  │   ├── verification-plan.md # 验证计划
+  │   └── compliance-report.md # 合规性报告
+  │
+  └── 05-project/             # 项目管理文档
+      ├── risk-assessment.md  # 风险评估
+      ├── milestones.md       # 里程碑
+      └── changelog.md        # 变更日志
+
+- 设计文档完整
+- API参考手册
+- 用户指南
+- 测试报告
+
+系统必须支持1-8个CPU核心
+
+  1. 文档导航 - docs/README.md 提供完整的文档索引
+  2. 角色视图 - 支持按角色（项目经理、架构师、工程师等）查找文档
+  3. 阶段视图 - 支持按阶段（需求、设计、实施）查找文档
+  4. 追溯矩阵 - 需求到设计的追溯关系清晰
+
+  当前已完成需求、设计、实施阶段的文档，后续可以创建：
+
+  1. 验证阶段文档 (04-verification/)
+    - 测试计划
+    - 验证报告
+    - 合规性报告 (MISRA-C:2012, ISO 26262)
+  2. 项目管理文档 (05-project/)
+    - 风险评估
+    - 里程碑跟踪
+    - 变更日志
+
+现在我们依次讨论需求，先讨论任务管理，AISafe64需采用调度类架构，支持多种调度算法共存，满足混合关键性系统的需求。不
+同类型的任务可以使用不同的调度策略，在保持实时性的同时提供最大的灵活性，不需要支持EDF、CFS，但是必须自适应分区+时间
+调度表满足ARINC653调度需求，并且审查任务管理功能是否有缺失
+
+任务组管理
