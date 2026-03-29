@@ -14,32 +14,57 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(./scripts/smart_commit.sh:*)",
-      "Bash(bash scripts/smart_commit.sh:*)"
+      "Bash(bash scripts/smart_commit.sh:*)",
+      "Bash(ls:*)",
+      "Bash(done:*)",
+      "Bash(echo \"archive exists: $?\")",
+      "Bash(echo \"logs exists: $?\")",
+      "Bash(git checkout:*)",
+      "Bash(git status:*)",
+      "Bash(git config:*)",
+      "Bash(git:*)"
     ]
   },
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "python .claude/hooks/session_start.py"
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session_start.py"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "type": "command",
-        "command": "python .claude/hooks/user_prompt_submit.py"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/user_prompt_submit.py"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": "python .claude/hooks/stop.py"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/stop.py"
+          }
+        ]
       }
     ],
     "SessionEnd": [
       {
-        "type": "command",
-        "command": "python .claude/hooks/session_end.py"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session_end.py"
+          }
+        ]
       }
     ]
   }
