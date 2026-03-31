@@ -1,26 +1,27 @@
-# AISafe64 CMakeLists.txt
-cmake_minimum_required(VERSION 3.20)
-project(AISafe64 C ASM)
+# AISafeOS64 微内核 CMakeLists.txt
+# @version 2.0
+# @date 2026-03-31
 
-# 设置C标准
+cmake_minimum_required(VERSION 3.20)
+project(AISafeOS64 C ASM)
+
+# C 标准设置
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # 项目版本
-set(PROJECT_VERSION_MAJOR 1)
-set(PROJECT_VERSION_MINOR 0)
+set(PROJECT_VERSION_MAJOR 0)
+set(PROJECT_VERSION_MINOR 1)
 set(PROJECT_VERSION_PATCH 0)
 
-# 包含目录
+# 微内核公共头文件搜索路径
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/generated
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/hal
+    ${CMAKE_SOURCE_DIR}/include/kernel
 )
 
-# 编译选项
+# MISRA-C:2012 合规编译选项
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(
         -Wall                   # 所有警告
@@ -43,34 +44,24 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 endif()
 
-# 生成配置头文件
-if(EXISTS ${CMAKE_SOURCE_DIR}/.config)
-    execute_process(
-        COMMAND ${CMAKE_SOURCE_DIR}/scripts/parse_config.py
-                ${CMAKE_SOURCE_DIR}/.config
-                ${CMAKE_BINARY_DIR}/config/autoconf.h
-        )
-    include_directories(${CMAKE_BINARY_DIR}/config)
-endif()
+# 微内核子目录
+add_subdirectory(kernel)
 
-# 子目录
-add_subdirectory(src)
-add_subdirectory(hal)
-add_subdirectory(lib)
-add_subdirectory(tests)
-
-# 链接选项
-set(CMAKE_EXE_LINKER_FLAGS
-    "${CMAKE_EXE_LINKER_FLAGS}
-    -nostartfiles
-    -nostdlib
-    -T ${CMAKE_SOURCE_DIR}/lds/linker.ld
-    -Wl,--gc-sections
-    -Wl,-Map=${CMAKE_BINARY_DIR}/aisafe64.map"
+# QEMU 运行目标
+add_custom_target(qemu
+    COMMAND qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 1
+            -m 1024 -nographic -kernel ${CMAKE_BINARY_DIR}/aisafe64.bin
+    DEPENDS aisafe64.elf
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "在 QEMU virt 平台上运行 AISafeOS64 微内核"
 )
 
-# 安装规则
-install(TARGETS aisafe64
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib
+# QEMU 调试目标
+add_custom_target(qemu-debug
+    COMMAND qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 1
+            -m 1024 -nographic -kernel ${CMAKE_BINARY_DIR}/aisafe64.bin
+            -S -s
+    DEPENDS aisafe64.elf
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "在 QEMU 中启动 AISafeOS64 并等待 GDB 连接（端口 1234）"
 )
