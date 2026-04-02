@@ -368,7 +368,7 @@ typedef struct Capability
 ┌─────────────────┐                 ┌─────────────────┐
 │ Cap 0: Thread   │                 │ Cap 0: Thread   │
 │ Cap 1: VMSpace  │                 │ Cap 1: VMSpace  │
-│ Cap 2: Endpoint │◄── 共享 ──────►│ Cap 2: Endpoint │
+│ Cap 2: Endpoint │◄── 共享 ──────►  │ Cap 2: Endpoint │
 │ Cap 3: PageFrame│                 │ Cap 3: Notification│
 │ Cap 4: CSpace   │                 │ Cap 4: CSpace   │
 └─────────────────┘                 └─────────────────┘
