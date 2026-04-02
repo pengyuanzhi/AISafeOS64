@@ -1,9 +1,347 @@
 /**
- * @file thread.c
- * @brief 内核线程管理（占位）
- * @author AISafe64 Team
- * @date 2026-03-31
+ * @file    thread.c
+ * @brief   内核线程管理实现
+ * @author  AISafe64 Team
+ * @date    2026-03-31
  * @version 2.0
  *
- * @details 将在 P0-1 W3-4 阶段实现
+ * @details 本文件实现了内核线程的创建、退出、挂起、恢复和优先级设置等功能。
+ *
+ * @note 使用简单的 bump allocator 从 __heap_start 分配栈空间
+ * @note 初始上下文由 arch_setup_thread_context 设置
+ *
+ * @warning entry 函数不应直接返回，应调用 kthread_exit() 退出
+ *
+ * @copyright Copyright (c) 2026 AISafe64 Team
  */
+
+#include "thread.h"
+#include "scheduler.h"
+
+#include <kernel/errno.h>
+#include <kernel/config.h>
+#include <kernel/barrier.h>
+#include <kernel/compiler.h>
+#include <stdint.h>
+#include <string.h>
+
+/* 前向声明: ARM64 上下文初始化（定义在 context.S） */
+extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
+                                      uint64_t arg, uint64_t stack_top);
+
+/* 前向声明: 栈分配器（定义在 scheduler.c） */
+extern vaddr_t stack_alloc_by_scheduler(uint32_t size);
+
+/* HAL 接口 */
+extern uint32_t hal_get_cpu_id(void);
+
+/* ========================================================================
+ * 内部辅助函数
+ * ======================================================================== */
+
+/**
+ * @brief 查找空闲的线程控制块
+ *
+ * @details 遍历全局线程表，找到第一个状态为 DEAD 的 TCB
+ *
+ * @return 空闲线程 ID，无空闲时返回 THREAD_ID_INVALID
+ */
+static thread_id_t alloc_thread_id(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < CONFIG_MAX_THREADS; i++)
+    {
+        if (g_scheduler.thread_table[i].state == KTHREAD_STATE_DEAD)
+        {
+            return (thread_id_t)i;
+        }
+    }
+
+    return THREAD_ID_INVALID;
+}
+
+/**
+ * @brief 根据 tid 获取线程控制块指针
+ *
+ * @param tid 线程 ID
+ *
+ * @return 线程控制块指针，无效 ID 返回 NULL
+ */
+static KThread_t *get_thread_by_id(thread_id_t tid)
+{
+    if (tid >= CONFIG_MAX_THREADS)
+    {
+        return NULL;
+    }
+
+    return &g_scheduler.thread_table[tid];
+}
+
+/**
+ * @brief 复制线程名称
+ *
+ * @details 安全地复制线程名称，确保不超过最大长度且以 '\0' 结尾
+ *
+ * @param dest 目标缓冲区
+ * @param src  源字符串
+ */
+static void copy_thread_name(char *dest, const char *src)
+{
+    uint32_t i;
+
+    if ((dest == NULL) || (src == NULL))
+    {
+        return;
+    }
+
+    for (i = 0U; i < (KTHREAD_NAME_MAX - 1U); i++)
+    {
+        dest[i] = src[i];
+        if (src[i] == '\0')
+        {
+            break;
+        }
+    }
+
+    dest[KTHREAD_NAME_MAX - 1U] = '\0';
+}
+
+/* ========================================================================
+ * 线程创建
+ * ======================================================================== */
+
+thread_id_t kthread_create(const char *name,
+                           kthread_entry_t entry,
+                           void *arg,
+                           priority_t prio,
+                           KThreadPolicy_t policy,
+                           uint32_t stack_size)
+{
+    thread_id_t tid;
+    KThread_t *thread;
+    vaddr_t stack_top;
+
+    /* 参数校验 */
+    if (name == NULL)
+    {
+        return THREAD_ID_INVALID;
+    }
+
+    if (entry == NULL)
+    {
+        return THREAD_ID_INVALID;
+    }
+
+    if ((uint32_t)prio >= CONFIG_PRIORITY_LEVELS)
+    {
+        return THREAD_ID_INVALID;
+    }
+
+    if (stack_size < CONFIG_STACK_SIZE_MIN)
+    {
+        stack_size = CONFIG_STACK_SIZE_MIN;
+    }
+
+    if (stack_size > CONFIG_STACK_SIZE_MAX)
+    {
+        stack_size = CONFIG_STACK_SIZE_MAX;
+    }
+
+    /* 对齐栈大小到 16 字节 */
+    stack_size = (stack_size + 15U) & ~15U;
+
+    /* 分配线程 ID */
+    tid = alloc_thread_id();
+    if (tid == THREAD_ID_INVALID)
+    {
+        return THREAD_ID_INVALID;
+    }
+
+    thread = &g_scheduler.thread_table[tid];
+
+    /* 分配栈空间（由调度器的 bump allocator 提供） */
+    stack_top = stack_alloc_by_scheduler(stack_size);
+    if (stack_top == 0U)
+    {
+        return THREAD_ID_INVALID;
+    }
+
+    /* 初始化线程控制块 */
+    thread->tid = tid;
+    thread->state = KTHREAD_STATE_READY;
+    thread->entry = entry;
+    thread->entry_arg = arg;
+    thread->stack_base = stack_top - (vaddr_t)stack_size;
+    thread->stack_size = stack_size;
+    thread->prio = prio;
+    thread->policy = policy;
+    thread->time_slice = (policy == KTHREAD_POLICY_RR)
+                         ? (CONFIG_TIME_SLICE_MS * CONFIG_TICK_RATE_HZ / 1000U)
+                         : 0U;
+    thread->time_slice_reload = thread->time_slice;
+    thread->rq_list.next = &thread->rq_list;
+    thread->rq_list.prev = &thread->rq_list;
+    thread->sleep_node.next = &thread->sleep_node;
+    thread->sleep_node.prev = &thread->sleep_node;
+    thread->wakeup_tick = 0ULL;
+
+    copy_thread_name(thread->name, name);
+
+    /* 初始化上下文（ARM64 寄存器） */
+    arch_setup_thread_context(thread->context,
+                              (uint64_t)((uintptr_t)entry),
+                              (uint64_t)((uintptr_t)arg),
+                              (uint64_t)stack_top);
+
+    barrier();
+
+    /* 将线程加入就绪队列 */
+    scheduler_enqueue(thread);
+
+    return tid;
+}
+
+/* ========================================================================
+ * 线程退出
+ * ======================================================================== */
+
+void kthread_exit(void)
+{
+    KThread_t *current;
+    uint32_t cpu_id;
+
+    cpu_id = hal_get_cpu_id();
+    current = g_scheduler.cpu_queues[cpu_id].current_thread;
+
+    if (current == NULL)
+    {
+        for (;;)
+        {
+            __asm__ volatile("wfe" ::: "memory");
+        }
+    }
+
+    /* 标记为 DEAD 状态 */
+    current->state = KTHREAD_STATE_DEAD;
+    barrier();
+
+    /* 触发调度，切换到下一个线程 */
+    schedule();
+
+    /* 永不到达 */
+    for (;;)
+    {
+        __asm__ volatile("wfe" ::: "memory");
+    }
+}
+
+/* ========================================================================
+ * 线程挂起
+ * ======================================================================== */
+
+kernel_status_t kthread_suspend(thread_id_t tid)
+{
+    KThread_t *thread;
+
+    thread = get_thread_by_id(tid);
+    if (thread == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 只有就绪状态的线程可以被挂起 */
+    if (thread->state == KTHREAD_STATE_READY)
+    {
+        /* 从就绪队列移除 */
+        scheduler_dequeue(thread);
+        thread->state = KTHREAD_STATE_SUSPENDED;
+        barrier();
+        return KERNEL_OK;
+    }
+
+    /* 运行状态的线程不能挂起（应由自身调用） */
+    return -(int32_t)EINVAL;
+}
+
+/* ========================================================================
+ * 线程恢复
+ * ======================================================================== */
+
+kernel_status_t kthread_resume(thread_id_t tid)
+{
+    KThread_t *thread;
+
+    thread = get_thread_by_id(tid);
+    if (thread == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 只有挂起状态的线程可以被恢复 */
+    if (thread->state != KTHREAD_STATE_SUSPENDED)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 恢复为就绪状态并加入就绪队列 */
+    thread->state = KTHREAD_STATE_READY;
+    scheduler_enqueue(thread);
+    barrier();
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 设置线程优先级
+ * ======================================================================== */
+
+kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio)
+{
+    KThread_t *thread;
+
+    if ((uint32_t)prio >= CONFIG_PRIORITY_LEVELS)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    thread = get_thread_by_id(tid);
+    if (thread == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 如果线程在就绪队列中，需要先出队再入队 */
+    if (thread->state == KTHREAD_STATE_READY)
+    {
+        scheduler_dequeue(thread);
+        thread->prio = prio;
+        scheduler_enqueue(thread);
+    }
+    else
+    {
+        thread->prio = prio;
+    }
+
+    barrier();
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 获取当前线程
+ * ======================================================================== */
+
+KThread_t *kthread_get_current(void)
+{
+    uint32_t cpu_id;
+
+    cpu_id = hal_get_cpu_id();
+
+    if (cpu_id < CONFIG_MAX_CPUS)
+    {
+        return g_scheduler.cpu_queues[cpu_id].current_thread;
+    }
+
+    return NULL;
+}

@@ -18,6 +18,8 @@
 #include "hal.h"
 #include <kernel/types.h>
 #include <kernel/config.h>
+#include <kernel/timer.h>
+#include "../../sched/scheduler.h"
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
 
@@ -71,16 +73,29 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Kernel initialized\n");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Waiting for scheduler...\n");
 
-    /* ---- 第四步：后续阶段将在这里初始化调度器 ---- */
-    /* TODO: scheduler_init() */
-    /* TODO: timer_init() */
-    /* TODO: scheduler_start() */
+    /* ---- 第四步：初始化定时器 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing timer...\n");
+    timer_init();
 
-    /* 当前阶段：只输出启动信息后永停 */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Halting (scheduler not yet available)\n");
+    /* ---- 第五步：初始化调度器 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing scheduler...\n");
+    kernel_status_t ret = scheduler_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] FATAL: scheduler_init failed\n");
+        for (;;)
+        {
+            __asm__ volatile("wfe" ::: "memory");
+        }
+    }
 
+    /* ---- 第六步：启动调度器（永不返回） ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Starting scheduler...\n");
+    scheduler_start();
+
+    /* 永不到达 */
     for (;;)
     {
-        __asm__ volatile("wfe");
+        __asm__ volatile("wfe" ::: "memory");
     }
 }

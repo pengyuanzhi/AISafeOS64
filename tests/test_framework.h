@@ -96,7 +96,7 @@ extern "C"
 #define TEST_SUITE_START(suite_name)   \
     void test_suite_##suite_name(void) \
     {                                  \
-        test_suite_start(suite_name);
+        test_suite_start(#suite_name);
 
 /* 测试套件结束 */
 #define TEST_SUITE_END() \

@@ -221,6 +221,85 @@
 #define CONFIG_CSPACE_SIZE              256U
 
 /* ========================================================================
+ * IPC 子系统配置
+ * ======================================================================== */
+
+/**
+ * @def CONFIG_IPC_MAX_ENDPOINTS
+ * @brief 系统支持的最大 IPC 端点数量
+ *
+ * @details 每个 IPC 端点代表一个消息传递的端接点。
+ *          服务端线程通过端点接收消息。
+ *
+ * @note 有效范围：[1, 65535]
+ */
+#define CONFIG_IPC_MAX_ENDPOINTS        128U
+
+/**
+ * @def CONFIG_IPC_MAX_CHANNELS
+ * @brief 系统支持的最大 IPC 通道数量
+ *
+ * @details 通道是 QNX 风格消息传递的服务端入口点。
+ *          客户端通过连接（Connection）附加到通道。
+ *
+ * @note 有效范围：[1, 65535]
+ */
+#define CONFIG_IPC_MAX_CHANNELS         64U
+
+/**
+ * @def CONFIG_IPC_MAX_CONNECTIONS
+ * @brief 系统支持的最大 IPC 连接数量
+ *
+ * @details 连接代表客户端到通道的附着关系。
+ *          每个连接关联一个客户端线程和一个通道。
+ *
+ * @note 有效范围：[1, 65535]
+ */
+#define CONFIG_IPC_MAX_CONNECTIONS      256U
+
+/**
+ * @def CONFIG_IPC_MAX_NOTIFICATIONS
+ * @brief 系统支持的最大通知对象数量
+ *
+ * @details 通知对象用于异步事件信号传递。
+ *          常用于中断到线程的通知投递。
+ *
+ * @note 有效范围：[1, 65535]
+ */
+#define CONFIG_IPC_MAX_NOTIFICATIONS    128U
+
+/**
+ * @def CONFIG_IPC_MAX_PULSE_QUEUE
+ * @brief 每个通道的 Pulse 队列最大深度
+ *
+ * @details Pulse 是轻量级异步消息，按优先级排队。
+ *
+ * @note 有效范围：[1, 1024]
+ */
+#define CONFIG_IPC_MAX_PULSE_QUEUE      32U
+
+/**
+ * @def CONFIG_IPC_MSG_MAX_SIZE
+ * @brief 单条 IPC 消息的最大有效负载大小（字节）
+ *
+ * @details 超过此大小的消息应使用共享内存传输。
+ *
+ * @note 有效范围：[64, 65536]
+ */
+#define CONFIG_IPC_MSG_MAX_SIZE         4096U
+
+/**
+ * @def CONFIG_IPC_REG_MSG_WORDS
+ * @brief 寄存器传递消息的最大字数（uint64_t）
+ *
+ * @details 小消息（≤ 4 个 uint64_t）通过寄存器直接传递，
+ *          避免内存拷贝，实现快速路径优化。
+ *
+ * @note 固定为 4（使用 x2-x5 寄存器）
+ */
+#define CONFIG_IPC_REG_MSG_WORDS       4U
+
+/* ========================================================================
  * 编译时配置合法性检查
  * ======================================================================== */
 
