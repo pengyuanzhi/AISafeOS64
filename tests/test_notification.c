@@ -102,6 +102,24 @@ typedef struct
 } ipc_notification_t;
 
 /* ========================================================================
+ * 通知有效性检查（与 notification.c 逻辑一致）
+ * ======================================================================== */
+
+/**
+ * @brief 检查通知对象是否有效
+ * @details 销毁后 id 被置为 KOBJ_ID_INVALID，state 回到 IDLE
+ */
+static bool notification_is_valid(const ipc_notification_t *ntf)
+{
+    if (ntf == NULL)
+    {
+        return false;
+    }
+
+    return (ntf->id != KOBJ_ID_INVALID) ? true : false;
+}
+
+/* ========================================================================
  * 通知子系统模拟实现（与 notification.c 逻辑一致）
  * ======================================================================== */
 
@@ -246,7 +264,7 @@ static kernel_status_t notification_destroy(kobj_id_t notify_id)
     ipc_notification_t *ntf;
 
     ntf = get_notification(notify_id);
-    if (ntf == NULL)
+    if (!notification_is_valid(ntf))
     {
         return -(int32_t)EINVAL;
     }
@@ -278,7 +296,7 @@ static kernel_status_t notification_signal(kobj_id_t notify_id,
     }
 
     ntf = get_notification(notify_id);
-    if (ntf == NULL)
+    if (!notification_is_valid(ntf))
     {
         return -(int32_t)EINVAL;
     }
@@ -309,7 +327,7 @@ static kernel_status_t notification_try_wait(kobj_id_t notify_id,
     }
 
     ntf = get_notification(notify_id);
-    if (ntf == NULL)
+    if (!notification_is_valid(ntf))
     {
         return -(int32_t)EINVAL;
     }
@@ -350,7 +368,7 @@ static kernel_status_t notification_wait_sim(kobj_id_t notify_id,
     }
 
     ntf = get_notification(notify_id);
-    if (ntf == NULL)
+    if (!notification_is_valid(ntf))
     {
         return -(int32_t)EINVAL;
     }

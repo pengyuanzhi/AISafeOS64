@@ -57,6 +57,7 @@ typedef int32_t kernel_status_t;
 #define ENOMEM         12U
 #define EBUSY          16U
 #define EPERM           1U
+#define EAGAIN         11U
 #define ETIMEDOUT     116U
 
 /* 地址类型 */
