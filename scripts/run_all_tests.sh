@@ -64,6 +64,7 @@ run_test "test_timer.c"
 run_test "test_phys_mem.c"
 run_test "test_endpoint.c"
 run_test "test_notification.c"
+run_test "test_channel.c"
 
 echo ""
 echo "============================================"
