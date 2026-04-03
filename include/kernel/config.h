@@ -220,6 +220,19 @@
  */
 #define CONFIG_CSPACE_SIZE              256U
 
+/**
+ * @def CONFIG_MAX_CSPACES
+ * @brief 系统支持的最大能力空间（CSpace）数量
+ *
+ * @details 定义系统可同时存在的最大 CSpace 实例数。
+ *          每个 CSpace 对应一个进程的能力空间。
+ *          使用静态池预分配，避免运行时动态内存分配。
+ *
+ * @note 有效范围：[1, 256]
+ * @note 增大此值会增加内核静态内存占用
+ */
+#define CONFIG_MAX_CSPACES              32U
+
 /* ========================================================================
  * IPC 子系统配置
  * ======================================================================== */
@@ -394,6 +407,12 @@ _Static_assert(
     (CONFIG_CSPACE_SIZE != 0U) &&
     ((CONFIG_CSPACE_SIZE & (CONFIG_CSPACE_SIZE - 1U)) == 0U),
     "CONFIG_CSPACE_SIZE must be a power of 2"
+);
+
+/* 验证：最大 CSpace 数量必须在 [1, 256] 范围内 */
+_Static_assert(
+    (CONFIG_MAX_CSPACES >= 1U) && (CONFIG_MAX_CSPACES <= 256U),
+    "CONFIG_MAX_CSPACES must be in range [1, 256]"
 );
 
 /* 验证：内核对象类型数量至少为 8 */

@@ -39,8 +39,7 @@
 /** @brief 最大 CSpace 容量 */
 #define CSPACE_MAX_CAPACITY         256U
 
-/** @brief CSpace 静态池最大数量 */
-#define CONFIG_MAX_CSPACES          32U
+/* CONFIG_MAX_CSPACES 定义在 config.h 中 */
 
 /* ========================================================================
  * CSpace 结构

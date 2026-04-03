@@ -225,4 +225,44 @@ kernel_status_t cap_validate(cap_slot_t cspace_root,
  */
 kobj_type_t cap_get_object_type(cap_slot_t cspace_root, cap_slot_t slot);
 
+/**
+ * @brief 更新能力的 Badge 值
+ *
+ * @details 修改指定能力的 badge 字段。调用者必须具有 WRITE 权限。
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param slot        能力槽索引
+ * @param new_badge   新的 Badge 值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_badge_update(cap_slot_t cspace_root,
+                                   cap_slot_t slot,
+                                   uint16_t new_badge);
+
+/**
+ * @brief 检查权限是否可以从父能力派生
+ *
+ * @details 验证请求的权限是否为父能力权限的子集，
+ *          且父能力具有 GRANT 权限。
+ *
+ * @param cspace_root     CSpace 根能力槽
+ * @param slot            父能力槽索引
+ * @param request_rights  请求的权限位
+ *
+ * @return KERNEL_OK 可以派生
+ * @return -ENOENT 父能力不存在
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_rights_derive_check(cap_slot_t cspace_root,
+                                          cap_slot_t slot,
+                                          uint8_t request_rights);
+
 #endif /* KERNEL_CAPABILITY_H */

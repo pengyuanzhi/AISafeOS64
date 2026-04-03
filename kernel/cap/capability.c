@@ -183,7 +183,9 @@ kernel_status_t cap_copy(cap_slot_t src_cspace,
         return -(int32_t)EACCES;
     }
 
-    /* 在目标 CSpace 中插入能力 */
+    /* 在目标 CSpace 中插入能力。
+     * cspace_insert_cap 传入 parent_slot=src_slot 时会自动将子能力
+     * 加入父能力的 children 链表，无需再次手动添加。 */
     ret = cspace_insert_cap(dst_cs,
                              dest_slot,
                              src_cap->kobj_type,
@@ -191,23 +193,8 @@ kernel_status_t cap_copy(cap_slot_t src_cspace,
                              dest_rights,
                              src_cap->badge,
                              src_slot);
-    if (ret != KERNEL_OK)
-    {
-        return ret;
-    }
 
-    /* 建立父子关系：将子能力加入源能力的 children 链表 */
-    {
-        cap_t *dest_cap;
-
-        dest_cap = cspace_lookup(dst_cs, dest_slot);
-        if (dest_cap != NULL)
-        {
-            list_add_tail(&dest_cap->sibling, &src_cap->children);
-        }
-    }
-
-    return KERNEL_OK;
+    return ret;
 }
 
 /* ========================================================================
@@ -378,9 +365,10 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
 {
     cspace_t *cs;
     cap_t *target_cap;
-    /* 显式栈：用于非递归级联撤销 */
-    static cap_slot_t revoke_stack[REVOKE_STACK_SIZE];
+    /* 显式栈：用于非递归级联撤销（栈分配，多核安全） */
+    cap_slot_t revoke_stack[REVOKE_STACK_SIZE];
     uint32_t stack_top;
+    bool overflow;
 
     /* 参数检查 */
     if ((cspace_root == CAP_SLOT_INVALID) || (slot == CAP_SLOT_INVALID))
@@ -416,6 +404,7 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
 
     /* 初始化显式栈 */
     stack_top = 0U;
+    overflow = false;
     revoke_stack[stack_top] = slot;
     stack_top++;
 
@@ -449,8 +438,20 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
 
                 if (stack_top < REVOKE_STACK_SIZE)
                 {
-                    revoke_stack[stack_top] = child_cap->cspace_root;
+                    /* 使用子能力在其所属 cap_table 中的索引，
+                     * 而非 cspace_root，以确保 cspace_lookup 能正确找到它 */
+                    cap_slot_t child_idx =
+                        (cap_slot_t)(child_cap -
+                                    &cs->cap_table[0U]);
+                    revoke_stack[stack_top] = child_idx;
                     stack_top++;
+                }
+                else
+                {
+                    /* 栈溢出：记录溢出，终止子能力遍历。
+                     * 已入栈的能力仍会被正确撤销。 */
+                    overflow = true;
+                    break;
                 }
             }
         }
@@ -461,6 +462,12 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
         /* 从父能力的 children 链表移除 */
         list_del_init(&cur_cap->sibling);
         INIT_LIST_HEAD(&cur_cap->children);
+    }
+
+    /* 栈溢出时返回错误，告知调用者部分子能力未被撤销 */
+    if (overflow)
+    {
+        return -(int32_t)ENOMEM;
     }
 
     return KERNEL_OK;
@@ -661,4 +668,142 @@ kobj_type_t cap_get_object_type(cap_slot_t cspace_root, cap_slot_t slot)
     }
 
     return cap->kobj_type;
+}
+
+/* ========================================================================
+ * 能力 Badge 更新
+ * ======================================================================== */
+
+/**
+ * @brief 更新能力的 Badge 值
+ *
+ * @details 修改指定能力的 badge 字段。Badge 用于 IPC 连接中
+ *          标识客户端身份（如进程 ID 或自定义标记）。
+ *          调用者必须具有 WRITE 权限。
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param slot        能力槽索引
+ * @param new_badge   新的 Badge 值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ * @return -EACCES 权限不足（无 WRITE 权限）
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_badge_update(cap_slot_t cspace_root,
+                                   cap_slot_t slot,
+                                   uint16_t new_badge)
+{
+    cspace_t *cs;
+    cap_t *cap;
+
+    /* 参数检查 */
+    if ((cspace_root == CAP_SLOT_INVALID) || (slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 CSpace */
+    cs = cspace_from_root(cspace_root);
+    if (cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 查找能力 */
+    cap = cspace_lookup(cs, slot);
+    if (cap == NULL)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 验证状态 */
+    if (cap->state != CAP_STATE_VALID)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 检查 WRITE 权限 */
+    if ((cap->rights & CAP_RIGHT_WRITE) == CAP_RIGHT_NONE)
+    {
+        return -(int32_t)EACCES;
+    }
+
+    /* 更新 badge */
+    cap->badge = new_badge;
+
+    /* 内存屏障确保更新可见 */
+    barrier_store();
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 能力权限派生检查
+ * ======================================================================== */
+
+/**
+ * @brief 检查权限是否可以从父能力派生
+ *
+ * @details 验证请求的权限是否为父能力权限的子集。
+ *          用于在能力复制前预先检查合法性。
+ *
+ * @param cspace_root   CSpace 根能力槽
+ * @param slot          父能力槽索引
+ * @param request_rights 请求的权限位
+ *
+ * @return KERNEL_OK 可以派生
+ * @return -ENOENT 父能力不存在
+ * @return -EACCES 权限不足或无 GRANT 权限
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_rights_derive_check(cap_slot_t cspace_root,
+                                          cap_slot_t slot,
+                                          uint8_t request_rights)
+{
+    cspace_t *cs;
+    cap_t *cap;
+
+    /* 参数检查 */
+    if ((cspace_root == CAP_SLOT_INVALID) || (slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 CSpace */
+    cs = cspace_from_root(cspace_root);
+    if (cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 查找能力 */
+    cap = cspace_lookup(cs, slot);
+    if (cap == NULL)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 验证状态 */
+    if (cap->state != CAP_STATE_VALID)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 检查 GRANT 权限 */
+    if ((cap->rights & CAP_RIGHT_GRANT) == CAP_RIGHT_NONE)
+    {
+        return -(int32_t)EACCES;
+    }
+
+    /* 检查请求权限是否为源权限子集 */
+    if ((request_rights & cap->rights) != request_rights)
+    {
+        return -(int32_t)EACCES;
+    }
+
+    return KERNEL_OK;
 }
