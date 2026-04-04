@@ -56,13 +56,16 @@ extern kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio);
  * @brief 根据 tid 获取线程指针
  *
  * @note 简化实现：直接从 g_scheduler.thread_table 查找
+ *       当前为桩函数，待完整实现后启用
  */
-static struct KThread *__attribute__((unused)) get_thread_by_tid(uint32_t tid)
+#if 0
+struct KThread *get_thread_by_tid(uint32_t tid)
 {
     (void)tid;
     /* 简化实现：在完整版本中从 thread_table 查找 */
     return NULL;
 }
+#endif
 
 /* ========================================================================
  * 互斥锁初始化
