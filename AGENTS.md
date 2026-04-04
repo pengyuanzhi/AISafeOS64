@@ -85,4 +85,4 @@ docs(kernel): 更新 IPC 设计文档
 - 重要变更需要记录到 MEMORY.md
 - 保持代码风格一致性
 - 所有内核代码必须 MISRA C:2012 合规
-- 内核代码量控制在 50KB 以内
+- 内核代码段控制在 **30KB** 以内（text section）

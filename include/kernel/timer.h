@@ -70,6 +70,14 @@ typedef struct SoftwareTimer
 void timer_init(void);
 
 /**
+ * @brief 刷新定时器比较值
+ *
+ * @details 重新读取物理计数器并设置下一次定时器中断比较值。
+ *          应在启用 IRQ 前调用，确保定时器在 IRQ 启用后立即触发。
+ */
+void timer_set_next_compare(void);
+
+/**
  * @brief 获取当前系统 tick 数
  * @return 当前 tick 值
  */

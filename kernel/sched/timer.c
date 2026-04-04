@@ -155,7 +155,7 @@ static uint64_t get_ticks_per_counter_tick(void)
  *
  * @details 根据 CONFIG_TICK_RATE_HZ 计算下一个比较值
  */
-static void timer_set_next_compare(void)
+void timer_set_next_compare(void)
 {
     uint64_t current;
     uint64_t delta;

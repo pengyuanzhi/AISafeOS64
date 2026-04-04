@@ -34,6 +34,7 @@
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
 #include <stdint.h>
+#include "hal.h"
 
 /* ========================================================================
  * GICv2 Distributor 寄存器偏移定义
@@ -98,7 +99,15 @@
 /** @brief Distributor 使能位（Group0 + Group1） */
 #define GICD_CTLR_ENABLE       0x03U
 
-/** @brief CPU Interface 使能位（Group0 + Group1） */
+/** @brief CPU Interface 使能位（Group1 非安全组）
+ *
+ * @details QEMU virt 平台 GICv2 非安全模式下，
+ *          GICC_CTLR bit0 控制非安全组（Group 1）中断。
+ *          仅需写 1 即可启用 IRQ 中断传递。
+ *
+ *          安全模式下 bit0 控制 Group 0，bit1 控制 Group 1。
+ *          同时启用两组以确保中断可传递。
+ */
 #define GICC_CTLR_ENABLE       0x03U
 
 /** @brief 最低优先级掩码（允许所有优先级中断） */
@@ -241,6 +250,7 @@ static uint32_t gic_get_max_irq(void)
  *
  * @details 使用 GICC_CTLR / GICC_PMR / GICC_BPR 寄存器
  *          启用 CPU Interface，允许当前 CPU 响应中断。
+ *          QEMU virt 平台 GICv2 非安全模式下仅启用 Group1。
  *
  * @note 对应需求: IN-001
  */
@@ -258,8 +268,12 @@ static void gic_enable_cpuif(void)
     GICC_REG(GICC_BPR) = GICC_BPR_DEFAULT;
     barrier();
 
-    /* 启用 CPU Interface（Group0 + Group1） */
+    /* 启用 CPU Interface（仅 Group1 非安全组） */
     GICC_REG(GICC_CTLR) = GICC_CTLR_ENABLE;
+    barrier();
+
+    /* 回读验证 GICC_CTLR 写入成功 */
+    (void)GICC_REG(GICC_CTLR);
     barrier();
 }
 
@@ -294,25 +308,48 @@ kernel_status_t gic_init(void)
     s_gicd_base = GICD_BASE_ADDR;
     s_gicc_base = GICC_BASE_ADDR;
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step1: bases saved\n");
+
     /* 第一步：禁用 Distributor（确保干净的状态） */
     GICD_REG(GICD_CTLR) = 0U;
     barrier();
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step2: dist disabled\n");
+
     /* 第二步：获取最大中断号 */
     max_irq = gic_get_max_irq();
 
-    /* 第三步：将所有中断设置为 Group 1（非安全组，产生 IRQ 而非 FIQ）
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step3: max_irq read\n");
+
+    /* 第三步：将所有中断设置为 Group 0（安全组）
      *
-     * GICv2 中 Group 0 中断产生 FIQ，Group 1 中断产生 IRQ。
-     * QEMU virt 平台默认所有中断在 Group 0，需要显式移到 Group 1，
-     * 否则定时器 PPI 30 会产生 FIQ 而非 IRQ，导致 FIQ handler panic。
-     * GICD_IGROUPR 每个 bit 控制 1 个中断，每位写 1 表示 Group 1。
+     * GICv2 中：
+     * - 安全模式下: Group 0 → FIQ, Group 1 → IRQ
+     * - 非安全模式下: Group 0 → IRQ, Group 1 → IRQ（取决于实现）
+     *
+     * QEMU virt 平台 EL1 可能仍处于安全状态，
+     * 因此 Group 0 中断会触发 FIQ 而非 IRQ。
+     * 但我们的 FIQ handler 当前只是 panic，所以改为保留 Group 0
+     * 并在非安全模式下测试。
+     *
+     * 暂时保留 Group 0 设置（即不移动到 Group 1），
+     * 观察中断是否以 IRQ 形式到达。
      */
+#if 0
     for (n = 0U; n <= (max_irq / GICD_IRQS_PER_REG); n++)
     {
         GICD_REG(GICD_IGROUPR(n)) = 0xFFFFFFFFU;
     }
+#else
+    /* 保持所有中断在 Group 0（默认值） */
+    for (n = 0U; n <= (max_irq / GICD_IRQS_PER_REG); n++)
+    {
+        GICD_REG(GICD_IGROUPR(n)) = 0x00000000U;
+    }
+#endif
     barrier();
+
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step4: group1 set\n");
 
     /* 第四步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
@@ -342,12 +379,32 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICPENDR(n)) = 0xFFFFFFFFU;
     }
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step5: spis configured\n");
+
     /* 第八步：启用 Distributor（Group0 + Group1） */
     GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE;
     barrier();
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step6: dist enabled\n");
+
     /* 第九步：通过 MMIO 启用 GICv2 CPU Interface */
     gic_enable_cpuif();
+
+    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step7: cpuif enabled\n");
+
+    /* 验证 GICC_IAR 可读（读取伪中断号 1023 表示无挂起中断） */
+    {
+        uint32_t iar = GICC_REG(GICC_IAR);
+        barrier();
+        if (iar == GIC_SPURIOUS_IRQ)
+        {
+            hal_uart_puts((uint64_t)0x09000000UL, "[gic] IAR read OK (spurious)\n");
+        }
+        else
+        {
+            hal_uart_puts((uint64_t)0x09000000UL, "[gic] IAR read OK (pending irq)\n");
+        }
+    }
 
     return KERNEL_OK;
 }

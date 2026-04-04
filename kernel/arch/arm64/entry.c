@@ -589,15 +589,16 @@ void irq_handler(void)
 {
     uint32_t irq;
 
-    /* 入口诊断 - 篤认 IRQ handler 被调用 */
+    /* 入口诊断 - 确认 IRQ handler 被调用 */
     hal_uart_putc((uint64_t)0x09000000UL, '!');
 
     /* 从 GIC 获取当前最高优先级挂起中断号 */
     irq = gic_get_irq_id();
 
     /* 诊断 GIC 返回值 */
-    hal_uart_putc((uint64_t)0x09000000UL, '0' + (char)('0' + (irq % 10)));
-    hal_uart_putc((uint64_t)0x09000000UL, '\n');
+    hal_uart_putc((uint64_t)0x09000000UL, 'I');
+    hal_uart_putc((uint64_t)0x09000000UL, '0' + (char)(irq % 10U));
+    hal_uart_putc((uint64_t)0x09000000UL, '.');
 
     /* 检查是否为伪中断 */
     if (irq >= GIC_SPURIOUS_IRQ)
@@ -901,7 +902,16 @@ void kernel_main(void)
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All subsystems initialized\n");
 
-    /* ---- 第十步：启用 IRQ 中断 ---- */
+    /* ---- 第十步：刷新定时器比较值并启用 IRQ ----
+     *
+     * @details 在启用 IRQ 前重新设置定时器比较值，
+     *          确保定时器在 IRQ 启用后立即触发首次中断。
+     *          之前的比较值可能在 IRQ 禁用期间已过期，
+     *          导致中断信号被拉低但未被处理。
+     */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Refreshing timer compare...\n");
+    timer_set_next_compare();
+
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling IRQ...\n");
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '@');
     hal_irq_enable();
