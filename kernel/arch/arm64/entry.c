@@ -71,7 +71,6 @@ void kernel_main(void)
 
     /* ---- 第三步：打印内存布局 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Kernel initialized\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Waiting for scheduler...\n");
 
     /* ---- 第四步：初始化定时器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing timer...\n");
@@ -90,7 +89,7 @@ void kernel_main(void)
     }
 
     /* ---- 第六步：启动调度器（永不返回） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Starting scheduler...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "AISafeOS64: scheduler started, entering idle...\n");
     scheduler_start();
 
     /* 永不到达 */

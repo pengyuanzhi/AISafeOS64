@@ -210,7 +210,6 @@ kernel_status_t scheduler_init(void)
     }
 
     /* 创建每 CPU 的 idle 线程 */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[sched] Creating idle threads...\n");
     for (cpu_id = 0U; cpu_id < CONFIG_MAX_CPUS; cpu_id++)
     {
         thread_id_t tid;
@@ -225,7 +224,6 @@ kernel_status_t scheduler_init(void)
                              CONFIG_STACK_SIZE_DEFAULT);
         if (tid == THREAD_ID_INVALID)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[sched] FATAL: idle thread creation failed\n");
             return -ENOMEM;
         }
 
