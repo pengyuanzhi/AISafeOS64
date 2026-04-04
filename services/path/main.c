@@ -51,7 +51,7 @@ typedef enum
     HEALTH_UNKNOWN = 0U,    /**< @brief 未知状态 */
     HEALTH_HEALTHY,         /**< @brief 健康 */
     HEALTH_DEGRADED,        /**< @brief 降级 */
-    HEALTH_UNHEALTHY,       @brief 不健康 */
+    HEALTH_UNHEALTHY,       /**< @brief 不健康 */
     HEALTH_DEAD             /**< @brief 已死亡 */
 } health_state_t;
 
