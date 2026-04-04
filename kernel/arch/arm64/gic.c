@@ -6,8 +6,8 @@
  * @version 3.0
  *
  * @details 本文件实现了 ARM GICv3 中断控制器驱动：
- *          - Distributor 和 Redistributor 初始化
- *          - CPU Interface 通过系统寄存器（ICC_*）访问
+ *          - Distributor 初始化（MMIO）
+ *          - CPU Interface 通过系统寄存器（ICC_*）启用（不需要 Redistributor MMIO）
  *          - 中断使能/禁用/屏蔽
  *          - 中断优先级配置
  *          - 中断亲和性（目标 CPU）配置
@@ -16,8 +16,8 @@
  *          - 中断确认（ACK）和结束（EOI）
  *
  *          QEMU virt 平台地址映射：
- *          - GICD (Distributor): 0x08000000（GICv2）/ 0x50000000（GICv3）
- *          - GICR (Redistributor): 0x500A0000（GICv3，每个核 128KB）
+ *          - GICD (Distributor): 0x50000000（GICv3 MMIO）
+ *          - GICR (Redistributor): 0x500A0000（GICv3，不使用 MMIO，通过系统寄存器访问）
  *          - GICC (CPU Interface): GICv3 通过系统寄存器 ICC_* 访问，无 MMIO
  *
  * @note MISRA-C:2012 合规
@@ -34,9 +34,7 @@
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
-#include "hal.h"
 #include <stdint.h>
-#include <string.h>
 
 /* ========================================================================
  * GICv3 Distributor 寄存器偏移定义
@@ -73,28 +71,6 @@
 #define GICD_SGIR              0x0F00U
 
 /* ========================================================================
- * GICv3 Redistributor 寄存器偏移定义
- * ======================================================================== */
-
-/** @brief Redistributor 控制寄存器 */
-#define GICR_CTLR              0x0000U
-
-/** @brief Redistributor 唤醒寄存器 */
-#define GICR_WAKER             0x0014U
-
-/** @brief Redistributor 类型标识寄存器 */
-#define GICR_TYPER             0x0008U
-
-/** @brief GICR_WAKER 中 ProcessorSleep 位 */
-#define GICR_WAKER_PROCESSOR_SLEEP  0x00000002U
-
-/** @brief GICR_WAKER 中 ChildrenAsleep 位 */
-#define GICR_WAKER_CHILDREN_ASLEEP  0x00000004U
-
-/** @brief 每个 Redistributor 的_stride_（128KB = 0x20000） */
-#define GICR_STRIDE            0x20000U
-
-/* ========================================================================
  * GIC 控制位定义
  * ======================================================================== */
 
@@ -106,9 +82,6 @@
 
 /** @brief GICv3 Distributor 使能位（ARE + Group1） */
 #define GICD_CTLR_ENABLE_V3    (GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE)
-
-/** @brief 最低优先级屏蔽值（允许所有优先级） */
-#define GICC_PMR_LOWEST        0xFFU
 
 /** @brief 伪中断号（无挂起中断时 IAR 返回值） */
 #define GIC_SPURIOUS_IRQ       1023U
@@ -150,18 +123,6 @@
 #define GICD_BASE_ADDR        ((uintptr_t)0x50000000U)  /* QEMU virt GICv3 Distributor */
 #endif
 
-/**
- * @def GICR_BASE_ADDR
- * @brief GICv3 Redistributor 基地址
- *
- * @details QEMU virt 平台 GICv3 Redistributor 基地址。
- *          每个 CPU 核占用 128KB (stride = 0x20000)。
- *          CPU n 的 Redistributor 地址 = GICR_BASE_ADDR + n * GICR_STRIDE
- */
-#ifndef GICR_BASE_ADDR
-#define GICR_BASE_ADDR        ((uintptr_t)0x500A0000U)  /* QEMU virt GICv3 Redistributor */
-#endif
-
 /* ========================================================================
  * 寄存器访问辅助宏
  * ======================================================================== */
@@ -176,17 +137,6 @@
  */
 #define GICD_REG(offset) \
     (*(volatile uint32_t *)((uintptr_t)s_gicd_base + (offset)))
-
-/**
- * @def GICR_REG
- * @brief 读/写 GIC Redistributor 寄存器
- *
- * @param offset 寄存器偏移量
- *
- * @return 寄存器值（volatile uint32_t 左值）
- */
-#define GICR_REG(offset) \
-    (*(volatile uint32_t *)((uintptr_t)s_gicr_base + (offset)))
 
 /**
  * @def GICD_REG_BYTE
@@ -219,11 +169,6 @@
  */
 static uintptr_t s_gicd_base = (uintptr_t)0U;
 
-/**
- * @brief GIC Redistributor 基地址（MMIO，当前 CPU）
- */
-static uintptr_t s_gicr_base = (uintptr_t)0U;
-
 /* ========================================================================
  * 内部辅助函数
  * ======================================================================== */
@@ -254,36 +199,35 @@ static uint32_t gic_get_max_irq(void)
  * ======================================================================== */
 
 /**
- * @brief 初始化 GICv3 Redistributor（当前 CPU）
+ * @brief 通过系统寄存器启用 GICv3 CPU Interface
  *
- * @details 等待 Redistributor 唤醒完成，确保可以接受中断。
- *          GICv3 的 Redistributor 负责管理 PPI/SGI。
+ * @details 使用 ICC_SRE_EL1 / ICC_CTLR_EL1 / ICC_PMR_EL1 / ICC_IGRPEN1_EL1
+ *          系统寄存器启用 CPU Interface，不需要 MMIO 访问 Redistributor。
+ *          这避免了 QEMU virt 平台上 Redistributor 地址映射导致的 Data Abort。
  *
  * @note 对应需求: IN-001
  */
-static void gicr_init(void)
+static void gic_enable_cpuif(void)
 {
-    uint32_t waker;
+    uint64_t val;
 
-    /* 计算 CPU n 的 Redistributor 基地址 */
-    uint32_t cpu_id = hal_get_cpu_id();
-    s_gicr_base = GICR_BASE_ADDR + ((uintptr_t)cpu_id * (uintptr_t)GICR_STRIDE);
+    /* 启用系统寄存器接口（ICC_SRE_EL1） */
+    __asm__ volatile("mrs %0, ICC_SRE_EL1" : "=r"(val));
+    val |= 0x7UL;  /* SRE + Enable */
+    __asm__ volatile("msr ICC_SRE_EL1, %0" :: "r"(val));
+    __asm__ volatile("isb" ::: "memory");
 
-    /* 唤醒 Redistributor：清除 ProcessorSleep 位 */
-    waker = GICR_REG(GICR_WAKER);
-    waker &= ~GICR_WAKER_PROCESSOR_SLEEP;
-    GICR_REG(GICR_WAKER) = waker;
-    barrier();
+    /* 设置优先级掩码（最低优先级 = 允许所有中断） */
+    __asm__ volatile("msr ICC_PMR_EL1, %0" :: "r"((uint64_t)0xFFU) : "memory");
 
-    /* 等待 ChildrenAsleep 清零（表明 LPI 配置完成） */
-    for (;;)
-    {
-        waker = GICR_REG(GICR_WAKER);
-        if ((waker & GICR_WAKER_CHILDREN_ASLEEP) == 0U)
-        {
-            break;
-        }
-    }
+    /* 设置 EOI 模式：EOImode = 0（合并优先级下降和 EOI） */
+    __asm__ volatile("mrs %0, ICC_CTLR_EL1" : "=r"(val));
+    val &= ~0x2UL;
+    __asm__ volatile("msr ICC_CTLR_EL1, %0" :: "r"(val));
+
+    /* 启用 Group 1 中断 */
+    __asm__ volatile("msr ICC_IGRPEN1_EL1, %0" :: "r"((uint64_t)0x1U) : "memory");
+    __asm__ volatile("isb" ::: "memory");
 }
 
 /**
@@ -316,17 +260,14 @@ kernel_status_t gic_init(void)
     /* 保存基地址 */
     s_gicd_base = GICD_BASE_ADDR;
 
-    /* 第一步：初始化 Redistributor（必须在 Distributor 之前） */
-    gicr_init();
-
-    /* 第二步：禁用 Distributor */
+    /* 第一步：禁用 Distributor（确保干净的状态） */
     GICD_REG(GICD_CTLR) = 0U;
     barrier();
 
-    /* 第三步：获取最大中断号 */
+    /* 第二步：获取最大中断号 */
     max_irq = gic_get_max_irq();
 
-    /* 第四步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
+    /* 第三步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -334,20 +275,20 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICENABLER(n)) = 0xFFFFFFFFU;
     }
 
-    /* 第五步：设置所有 SPI 的默认优先级 */
+    /* 第四步：设置所有 SPI 的默认优先级 */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
         GICD_REG_BYTE(GICD_IPRIORITYR(irq)) = (uint8_t)GIC_PRIORITY_DEFAULT;
     }
 
-    /* 第六步：设置所有 SPI 默认路由到 CPU 0（亲和性路由模式） */
+    /* 第五步：设置所有 SPI 默认路由到 CPU 0（亲和性路由模式） */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
         /* GICD_IROUTER: affinity = 0x0000 (CPU 0, MPIDR.Aff0=0) */
         GICD_REG64(GICD_IROUTER(irq)) = 0x0000000000000000ULL;
     }
 
-    /* 第七步：清除所有 SPI 的挂起状态 */
+    /* 第六步：清除所有 SPI 的挂起状态 */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -355,18 +296,12 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICPENDR(n)) = 0xFFFFFFFFU;
     }
 
-    /* 第八步：启用 Distributor（ARE + Group0 + Group1） */
+    /* 第七步：启用 Distributor（ARE + Group0 + Group1） */
     GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE_V3;
     barrier();
 
-    /* 第九步：通过系统寄存器配置 GICv3 CPU Interface */
-    /* ICC_PMR_EL1：设置优先级屏蔽为最低（允许所有优先级） */
-    __asm__ volatile("msr icc_pmr_el1, %0" :: "r"((uint64_t)GICC_PMR_LOWEST) : "memory");
-    barrier();
-
-    /* ICC_IGRPEN1_EL1：启用 Group 1 中断 */
-    __asm__ volatile("msr icc_igrpen1_el1, %0" :: "r"((uint64_t)0x01U) : "memory");
-    barrier();
+    /* 第八步：通过系统寄存器启用 GICv3 CPU Interface（不需要 MMIO 访问 Redistributor） */
+    gic_enable_cpuif();
 
     return KERNEL_OK;
 }
@@ -383,15 +318,8 @@ kernel_status_t gic_init(void)
  */
 kernel_status_t gic_init_secondary(void)
 {
-    /* 初始化当前 CPU 的 Redistributor */
-    gicr_init();
-
-    /* 通过系统寄存器配置 CPU Interface */
-    __asm__ volatile("msr icc_pmr_el1, %0" :: "r"((uint64_t)GICC_PMR_LOWEST) : "memory");
-    barrier();
-
-    __asm__ volatile("msr icc_igrpen1_el1, %0" :: "r"((uint64_t)0x01U) : "memory");
-    barrier();
+    /* 通过系统寄存器启用当前 CPU 的 CPU Interface（不需要 MMIO 访问 Redistributor） */
+    gic_enable_cpuif();
 
     return KERNEL_OK;
 }
