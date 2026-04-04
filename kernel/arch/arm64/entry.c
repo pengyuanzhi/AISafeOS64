@@ -26,6 +26,7 @@
 #include <kernel/timer.h>
 #include <kernel/gic.h>
 #include <kernel/smp.h>
+#include <kernel/ipi.h>
 #include "../../sched/scheduler.h"
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
@@ -601,7 +602,7 @@ void irq_handler(void)
     if (irq <= GIC_SGI_END)
     {
         /* SGI（软件生成中断 0-15）：核间中断 */
-        /* 当前仅消费中断，后续扩展 IPI 处理 */
+        ipi_handler(irq);
     }
     else if (irq == QEMU_TIMER_IRQ)
     {

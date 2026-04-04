@@ -101,6 +101,16 @@ kernel_status_t scheduler_init(void);
 void NORETURN scheduler_start(void);
 
 /**
+ * @brief 从核启动调度器（永不返回）
+ *
+ * @details 从核完成初始化后调用，选择最高优先级就绪线程并切换。
+ *          与 scheduler_start() 类似，但从核的 current_thread 初始为 NULL。
+ *
+ * @warning 此函数不返回
+ */
+void NORETURN scheduler_start_secondary(void);
+
+/**
  * @brief 触发调度
  *
  * @details 保存当前线程上下文，选择最高优先级就绪线程并切换

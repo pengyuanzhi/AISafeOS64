@@ -21,7 +21,7 @@
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
 #include <stdint.h>
-#include <string.h>
+#include "../../sched/scheduler.h"
 
 /* ========================================================================
  * IPI 全局状态
@@ -50,10 +50,20 @@ kernel_status_t ipi_init(void)
 {
     uint32_t i;
 
-    (void)memset(s_ipi_handlers, 0, sizeof(s_ipi_handlers));
-    (void)memset(s_ipi_args, 0, sizeof(s_ipi_args));
-    (void)memset(s_call_func_data, 0, sizeof(s_call_func_data));
-    (void)memset(s_ipi_stats, 0, sizeof(s_ipi_stats));
+    /* 逐字段清零（避免编译器生成 memset 调用） */
+    for (i = 0U; i < IPI_TYPE_COUNT; i++)
+    {
+        s_ipi_handlers[i] = NULL;
+        s_ipi_args[i] = NULL;
+    }
+
+    for (i = 0U; i < CONFIG_MAX_CPUS; i++)
+    {
+        s_call_func_data[i].func = NULL;
+        s_call_func_data[i].arg = NULL;
+        s_call_func_data[i].done = 0U;
+        s_ipi_stats[i] = 0ULL;
+    }
 
     ticket_lock_init(&s_ipi_lock);
 
@@ -75,8 +85,6 @@ kernel_status_t ipi_init(void)
 
 kernel_status_t ipi_send(uint32_t target_cpu, uint32_t ipi_type)
 {
-    uint64_t sgi_val;
-
     if (target_cpu >= CONFIG_MAX_CPUS)
     {
         return -(int32_t)EINVAL;
@@ -92,24 +100,14 @@ kernel_status_t ipi_send(uint32_t target_cpu, uint32_t ipi_type)
         return -(int32_t)EINVAL;
     }
 
-    /* 构造 ICC_SGI1R_EL1 值 */
-    sgi_val = ((uint64_t)ipi_type << 24U) |
-              ((uint64_t)1U << (16U + target_cpu));
-
-    __asm__ volatile(
-        "msr ICC_SGI1R_EL1, %0\n"
-        "dsb ish\n"
-        :: "r"(sgi_val)
-        : "memory"
-    );
-
-    return KERNEL_OK;
+    /* 使用 GICv2 MMIO 接口发送 SGI（QEMU virt 使用 GIC-400） */
+    return gic_send_sgi(ipi_type, (uint8_t)(1U << target_cpu));
 }
 
 kernel_status_t ipi_broadcast(uint32_t ipi_type, bool exclude_self)
 {
     uint32_t cpu_id;
-    uint64_t target_mask = 0U;
+    uint8_t target_mask = 0U;
     uint32_t self = smp_get_cpu_id();
 
     if (ipi_type >= IPI_TYPE_COUNT)
@@ -125,20 +123,13 @@ kernel_status_t ipi_broadcast(uint32_t ipi_type, bool exclude_self)
             {
                 continue;
             }
-            target_mask |= (1U << (16U + cpu_id));
+            target_mask |= (uint8_t)(1U << cpu_id);
         }
     }
 
     if (target_mask != 0U)
     {
-        uint64_t sgi_val = ((uint64_t)ipi_type << 24U) | target_mask;
-
-        __asm__ volatile(
-            "msr ICC_SGI1R_EL1, %0\n"
-            "dsb ish\n"
-            :: "r"(sgi_val)
-            : "memory"
-        );
+        return gic_send_sgi(ipi_type, target_mask);
     }
 
     return KERNEL_OK;
@@ -214,7 +205,7 @@ void ipi_handler(uint32_t ipi_type)
         case IPI_TYPE_RESCHEDULE:
         {
             /* 触发重新调度 */
-            /* 实际实现中设置 need_reschedule 标志 */
+            schedule();
             break;
         }
 

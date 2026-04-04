@@ -29,7 +29,6 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <stdint.h>
-#include <string.h>
 #include "hal.h"
 
 /* 前向声明: ARM64 上下文切换接口（定义在 context.S） */
@@ -479,6 +478,65 @@ void NORETURN scheduler_start(void)
     }
 
     /* 从就绪队列移除（防止同时在队列和运行状态） */
+    if (first_thread->state == KTHREAD_STATE_READY)
+    {
+        scheduler_dequeue(first_thread);
+    }
+
+    /* 设置为当前运行线程 */
+    scheduler_load_current(first_thread);
+
+    /* 切换到第一个任务（永不返回） */
+    cpu_switch_to_first_task(first_thread->context);
+
+    /* 永不到达 */
+    for (;;)
+    {
+        __asm__ volatile("wfe" ::: "memory");
+    }
+}
+
+/* ========================================================================
+ * 从核启动调度（永不返回）
+ * ======================================================================== */
+
+/**
+ * @brief 从核启动调度器
+ *
+ * @details 从核完成初始化后调用此函数进入调度循环。
+ *          与 scheduler_start() 类似，但从核的 current_thread 为 NULL，
+ *          不需要保存旧上下文。
+ *
+ * @warning 此函数不返回
+ */
+void NORETURN scheduler_start_secondary(void)
+{
+    KThread_t *first_thread;
+    uint32_t cpu_id;
+
+    cpu_id = hal_get_cpu_id();
+
+    /* 选择最高优先级就绪线程 */
+    first_thread = scheduler_pick_next();
+
+    if (first_thread == NULL)
+    {
+        /* 没有就绪线程，进入 idle 循环 */
+        PerCPUReadyQueue_t *cpu_q = &g_scheduler.cpu_queues[cpu_id];
+        if (cpu_q->idle_thread != NULL)
+        {
+            first_thread = cpu_q->idle_thread;
+        }
+        else
+        {
+            for (;;)
+            {
+                __asm__ volatile("wfe" ::: "memory");
+            }
+        }
+    }
+
+    /* 从就绪队列移除 */
     if (first_thread->state == KTHREAD_STATE_READY)
     {
         scheduler_dequeue(first_thread);

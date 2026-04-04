@@ -26,6 +26,7 @@
 #include <kernel/config.h>
 #include <hal.h>
 #include <stdint.h>
+#include "../../sched/scheduler.h"
 /* boot.S 中定义的从核汇编入口 */
 extern void secondary_entry(void);
 
@@ -325,7 +326,10 @@ void smp_secondary_entry(uint32_t cpu_id)
     /* 使能中断（IRQ） */
     __asm__ volatile("msr daifclr, #2" ::: "memory");
 
-    /* 从核进入 idle 循环 */
+    /* 从核进入调度循环 */
+    scheduler_start_secondary();
+
+    /* 永不到达 */
     for (;;)
     {
         __asm__ volatile("wfe" ::: "memory");
