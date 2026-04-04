@@ -34,9 +34,6 @@
 /* 前向声明: 调度器接口（定义在 scheduler.c） */
 extern void scheduler_tick(void);
 
-/* 前向声明: 基准测试 IRQ 延迟记录（定义在 benchmark.c） */
-extern void bench_record_irq_latency(uint64_t handler_entry_cycle);
-
 /* 前向声明: HAL 接口 - 已由 static inline 函数提供 */
 
 /* ========================================================================
@@ -274,13 +271,6 @@ uint64_t timer_get_ms(void)
 void timer_interrupt_handler(void)
 {
     uint32_t cpu_id;
-
-    /* 基准测试：记录 IRQ 延迟 */
-    {
-        uint64_t now;
-        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
-        bench_record_irq_latency(now);
-    }
 
     /* 递增系统滴答 */
     s_system_ticks++;

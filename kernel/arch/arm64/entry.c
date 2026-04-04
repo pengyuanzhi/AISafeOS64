@@ -3,16 +3,14 @@
  * @brief 微内核 C 语言入口与异常处理
  * @author AISafe64 Team
  * @date 2026-04-04
- * @version 4.0
+ * @version 5.0
  *
  * @details 微内核 C 语言主入口函数与 ARM64 异常处理
  *          - 初始化 UART 早期输出
  *          - 打印启动横幅与硬件信息
  *          - 初始化 GIC 中断控制器
  *          - 初始化定时器与调度器
- *          - 创建测试线程（A/B/C）
- *          - 启用 UART 接收中断
- *          - 内核 Shell 命令处理
+ *          - 初始化 SMP 多核
  *          - 异常处理函数（同步异常、IRQ、SError）
  *          - 启动调度（永不返回）
  *
@@ -27,7 +25,6 @@
 #include <kernel/gic.h>
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
-#include <kernel/spinlock.h>
 #include "../../sched/scheduler.h"
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
@@ -79,14 +76,8 @@ static const char g_banner[] =
 /** @brief ARM 通用定时器物理定时器 PPI 中断号（30 号 PPI） */
 #define QEMU_TIMER_IRQ     30U
 
-/** @brief QEMU virt PL011 UART0 SPI 中断号 */
-#define QEMU_UART_IRQ      33U
-
 /** @brief GIC 伪中断号（无挂起中断时 IAR 返回值） */
 #define GIC_SPURIOUS_IRQ   1023U
-
-/* ========== IRQ 调试计数器 ========== */
-
 
 /* ========== ESR 异常类别描述 ========== */
 
@@ -131,441 +122,6 @@ static const char *get_ec_desc(uint32_t ec)
     }
 
     return desc;
-}
-
-/* ========================================================================
- * 内核 Shell 实现
- * ======================================================================== */
-
-/** @brief Shell 输入缓冲区大小 */
-#define SHELL_BUF_SIZE 128U
-
-/** @brief Shell 输入缓冲区 */
-static char s_shell_buf[SHELL_BUF_SIZE];
-
-/** @brief Shell 输入缓冲区当前位置 */
-static uint32_t s_shell_pos = 0U;
-
-/** @brief Shell 提示符 */
-static const char s_shell_prompt[] = "aisafe64> ";
-
-/**
- * @brief 字符串比较
- *
- * @param s1 第一个字符串
- * @param s2 第二个字符串
- *
- * @return 0 表示相等
- */
-static int shell_strcmp(const char *s1, const char *s2)
-{
-    while ((*s1 != '\0') && (*s2 != '\0'))
-    {
-        if (*s1 != *s2)
-        {
-            return (int)(*s1) - (int)(*s2);
-        }
-        s1++;
-        s2++;
-    }
-
-    return (int)(*s1) - (int)(*s2);
-}
-
-/**
- * @brief 去除字符串尾部空白字符
- *
- * @param str 字符串
- * @param len 字符串长度
- */
-static void shell_strip_trailing(char *str, uint32_t len)
-{
-    int32_t i;
-
-    for (i = (int32_t)(len - 1U); i >= 0; i--)
-    {
-        if ((str[i] == ' ') || (str[i] == '\r') || (str[i] == '\n') ||
-            (str[i] == '\t'))
-        {
-            str[i] = '\0';
-        }
-        else
-        {
-            break;
-        }
-    }
-}
-
-/**
- * @brief 显示 Shell 帮助信息
- */
-static void shell_cmd_help(void)
-{
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "AISafeOS64 Kernel Shell Commands:\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  help    - 显示命令列表\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  stats   - 显示调度器统计\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  threads - 列出所有线程状态\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  reboot  - 重启系统\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
-}
-
-/**
- * @brief 显示调度器统计信息
- */
-static void shell_cmd_stats(void)
-{
-    tick_t ticks;
-    uint64_t ms;
-    uint32_t thread_count;
-    uint32_t i;
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n=== 系统统计 ===\n");
-
-    /* 系统 tick 数 */
-    ticks = timer_get_ticks();
-    ms = timer_get_ms();
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  Ticks: ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, ticks);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, ms);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ms)\n");
-
-    /* 线程统计 */
-    thread_count = 0U;
-    for (i = 0U; i < CONFIG_MAX_THREADS; i++)
-    {
-        if (g_scheduler.thread_table[i].state != KTHREAD_STATE_DEAD)
-        {
-            thread_count++;
-        }
-    }
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  活跃线程: ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)thread_count);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-    /* 就绪队列统计 */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  就绪线程: ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE,
-                    (uint64_t)g_scheduler.cpu_queues[0U].nr_running);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
-}
-
-/**
- * @brief 列出所有线程状态
- */
-static void shell_cmd_threads(void)
-{
-    uint32_t i;
-    KThread_t *thread;
-    const char *state_str;
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n=== 线程列表 ===\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "  TID  Name        State     Prio Policy\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "  ---  ----------  --------  ---- -------\n");
-
-    for (i = 0U; i < CONFIG_MAX_THREADS; i++)
-    {
-        thread = &g_scheduler.thread_table[i];
-
-        if (thread->state == KTHREAD_STATE_DEAD)
-        {
-            continue;
-        }
-
-        /* 线程 ID */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)i);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "    ");
-
-        /* 线程名称（左对齐10字符） */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, thread->name);
-
-        /* 状态字符串 */
-        switch (thread->state)
-        {
-            case KTHREAD_STATE_READY:
-                state_str = "READY ";
-                break;
-            case KTHREAD_STATE_RUNNING:
-                state_str = "RUNNING";
-                break;
-            case KTHREAD_STATE_BLOCKED:
-                state_str = "BLOCKED";
-                break;
-            case KTHREAD_STATE_SLEEPING:
-                state_str = "SLEEP ";
-                break;
-            case KTHREAD_STATE_SUSPENDED:
-                state_str = "SUSPEN";
-                break;
-            default:
-                state_str = "UNKNOW";
-                break;
-        }
-
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  ");
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, state_str);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  ");
-
-        /* 优先级 */
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)thread->prio);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "   ");
-
-        /* 调度策略 */
-        if (thread->policy == KTHREAD_POLICY_FIFO)
-        {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "FIFO");
-        }
-        else
-        {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "RR  ");
-        }
-
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-    }
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
-}
-
-/**
- * @brief 系统重启
- */
-static void shell_cmd_reboot(void)
-{
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n正在重启系统...\n");
-
-    /* QEMU virt 平台通过 SYS_PWRCTRL 寄存器重启 */
-    *(volatile uint32_t *)0x09010000U = 0x80000000U;
-
-    /* 如果重启失败，死循环 */
-    for (;;)
-    {
-        __asm__ volatile("wfe" ::: "memory");
-    }
-}
-
-/**
- * @brief 处理 Shell 命令
- *
- * @param cmd 命令字符串（以 '\0' 结尾）
- */
-static void shell_process_cmd(const char *cmd)
-{
-    if (cmd[0] == '\0')
-    {
-        /* 空命令，显示提示符 */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
-        return;
-    }
-
-    if (shell_strcmp(cmd, "help") == 0)
-    {
-        shell_cmd_help();
-    }
-    else if (shell_strcmp(cmd, "stats") == 0)
-    {
-        shell_cmd_stats();
-    }
-    else if (shell_strcmp(cmd, "threads") == 0)
-    {
-        shell_cmd_threads();
-    }
-    else if (shell_strcmp(cmd, "reboot") == 0)
-    {
-        shell_cmd_reboot();
-    }
-    else
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "未知命令: ");
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, cmd);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n输入 'help' 查看可用命令\n");
-    }
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
-}
-
-/**
- * @brief Shell 接收一个字符并处理
- *
- * @param ch 接收到的字符
- */
-static void shell_rx_char(char ch)
-{
-    /* 回显 */
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, ch);
-
-    if (ch == '\r')
-    {
-        /* Enter 键：处理命令 */
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-        s_shell_buf[s_shell_pos] = '\0';
-        shell_strip_trailing(s_shell_buf, s_shell_pos);
-        shell_process_cmd(s_shell_buf);
-        s_shell_pos = 0U;
-    }
-    else if (ch == 0x7F)
-    {
-        /* Backspace 键 */
-        if (s_shell_pos > 0U)
-        {
-            s_shell_pos--;
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\b \b");
-        }
-    }
-    else
-    {
-        /* 普通字符：存入缓冲区 */
-        if (s_shell_pos < (SHELL_BUF_SIZE - 1U))
-        {
-            s_shell_buf[s_shell_pos] = ch;
-            s_shell_pos++;
-        }
-    }
-}
-
-/* ========================================================================
- * UART 接收中断处理
- * ======================================================================== */
-
-/**
- * @brief UART 中断处理函数
- *
- * @details 处理 PL011 UART0 接收中断。
- *          从 UART 数据寄存器读取所有可用字符，
- *          并传递给 Shell 进行处理。
- */
-static void uart_irq_handler(void)
-{
-    char ch;
-
-    /* 读取所有可用字符 */
-    while (hal_uart_getc((uint64_t)QEMU_UART0_BASE, &ch) != 0)
-    {
-        shell_rx_char(ch);
-    }
-}
-
-/* ========================================================================
- * UART 自旋锁（多核串行化打印）- 前向声明
- * ======================================================================== */
-
-/** @brief UART 打印自旋锁（多核串行化） */
-static TicketLock_t g_uart_lock;
-
-static void smp_uart_putc(char ch);
-static void smp_uart_puts(const char *s);
-
-/* ========================================================================
- * 测试线程
- * ======================================================================== */
-
-/**
- * @brief 测试线程 A：每 100ms 打印 "A"
- *
- * @param arg 线程参数（未使用）
- */
-static void thread_a_entry(void *arg)
-{
-    (void)arg;
-
-    for (;;)
-    {
-        smp_uart_putc('A');
-        (void)kthread_sleep(100U);
-    }
-}
-
-/**
- * @brief 测试线程 B：每 200ms 打印 "B"
- *
- * @param arg 线程参数（未使用）
- */
-static void thread_b_entry(void *arg)
-{
-    (void)arg;
-
-    for (;;)
-    {
-        smp_uart_putc('B');
-        (void)kthread_sleep(200U);
-    }
-}
-
-/**
- * @brief 测试线程 C：每 500ms 打印系统 tick 数
- *
- * @param arg 线程参数（未使用）
- */
-static void thread_c_entry(void *arg)
-{
-    (void)arg;
-
-    for (;;)
-    {
-        tick_t ticks = timer_get_ticks();
-        smp_uart_puts("\n[tick=");
-        ticket_lock_acquire(&g_uart_lock);
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, ticks);
-        ticket_lock_release(&g_uart_lock);
-        smp_uart_puts("] ");
-        (void)kthread_sleep(500U);
-    }
-}
-
-/* ========================================================================
- * UART 自旋锁（多核串行化打印）- 实现
- * ======================================================================== */
-
-/**
- * @brief 带锁的 UART 单字符输出
- * @param ch 要输出的字符
- */
-static void smp_uart_putc(char ch)
-{
-    ticket_lock_acquire(&g_uart_lock);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, ch);
-    ticket_lock_release(&g_uart_lock);
-}
-
-/**
- * @brief 带锁的 UART 字符串输出
- * @param s 要输出的字符串
- */
-static void smp_uart_puts(const char *s)
-{
-    ticket_lock_acquire(&g_uart_lock);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, s);
-    ticket_lock_release(&g_uart_lock);
-}
-
-/* ========================================================================
- * SMP 工作线程
- * ======================================================================== */
-
-/**
- * @brief SMP 工作线程入口
- *
- * @details 每个工作线程绑定到特定 CPU，周期性打印 CPU ID 数字。
- *          用于验证多核 SMP 调度是否正常工作。
- *
- * @param arg CPU ID（作为线程参数传入）
- */
-static void worker_thread_entry(void *arg)
-{
-    uint32_t my_cpu = (uint32_t)(uintptr_t)arg;
-    (void)my_cpu;
-
-    for (;;)
-    {
-        smp_uart_putc((char)('0' + (int32_t)my_cpu));
-        (void)kthread_sleep(300U);
-    }
 }
 
 /* ========================================================================
@@ -641,8 +197,8 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
  *
  * @details 从 GIC 获取当前最高优先级挂起中断号，
  *          根据中断号分发到对应处理函数：
+ *          - SGI 0-15（核间中断）→ ipi_handler
  *          - PPI 30（ARM 通用定时器）→ timer_interrupt_handler
- *          - SPI 33（PL011 UART0）   → uart_irq_handler
  *          - 其他中断 → 打印中断号
  *          最后调用 GIC EOI 结束中断。
  *
@@ -671,11 +227,6 @@ void irq_handler(void)
     {
         /* ARM 通用定时器物理定时器中断 */
         timer_interrupt_handler();
-    }
-    else if (irq == QEMU_UART_IRQ)
-    {
-        /* PL011 UART0 接收中断 */
-        uart_irq_handler();
     }
     else
     {
@@ -814,14 +365,10 @@ void kernel_main(void)
     uint64_t stack_start;
     uint64_t stack_end;
     kernel_status_t ret;
-    thread_id_t tid;
 
     /* ---- 第一步：初始化 UART 早期输出 ---- */
     hal_uart_init((uint64_t)QEMU_UART0_BASE);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
-
-    /* 初始化 UART 打印自旋锁（多核串行化） */
-    ticket_lock_init(&g_uart_lock);
 
     /* ---- 第二步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
@@ -904,8 +451,7 @@ void kernel_main(void)
         }
     }
 
-    /* ---- 第八步：创建测试线程 ---- */
-    /* ---- 第七步半：初始化 SMP 多核 ---- */
+    /* ---- 第八步：初始化 SMP 多核 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing SMP...\n");
     ret = smp_init();
     if (ret != KERNEL_OK)
@@ -929,90 +475,9 @@ void kernel_main(void)
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_sched_init failed\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating test threads...\n");
-
-    /* 线程 A：优先级 100，RR 策略，每 100ms 打印 'A' */
-    tid = kthread_create("thread_a", thread_a_entry, NULL,
-                         (priority_t)100U, KTHREAD_POLICY_RR,
-                         CONFIG_STACK_SIZE_DEFAULT);
-    if (tid == THREAD_ID_INVALID)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: thread_a create failed\n");
-    }
-
-    /* 线程 B：优先级 80，RR 策略，每 200ms 打印 'B' */
-    tid = kthread_create("thread_b", thread_b_entry, NULL,
-                         (priority_t)80U, KTHREAD_POLICY_RR,
-                         CONFIG_STACK_SIZE_DEFAULT);
-    if (tid == THREAD_ID_INVALID)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: thread_b create failed\n");
-    }
-
-    /* 线程 C：优先级 60，RR 策略，每 500ms 打印 tick 数 */
-    tid = kthread_create("thread_c", thread_c_entry, NULL,
-                         (priority_t)60U, KTHREAD_POLICY_RR,
-                         CONFIG_STACK_SIZE_DEFAULT);
-    if (tid == THREAD_ID_INVALID)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: thread_c create failed\n");
-    }
-
-    (void)tid; /* 避免 unused 警告 */
-
-    /* 基准测试线程：优先级 250，FIFO，运行后自动退出 */
-    {
-        extern void benchmark_run(void *arg);
-        tid = kthread_create("bench", benchmark_run, NULL,
-                             (priority_t)250U, KTHREAD_POLICY_FIFO,
-                             CONFIG_STACK_SIZE_DEFAULT);
-        (void)tid;
-    }
-
-    /* ---- 创建 SMP 多核工作线程 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating SMP test threads...\n");
-
-    /* 每个在线核分配一个工作线程 */
-    {
-        uint32_t cpu;
-        uint32_t online = smp_get_online_count();
-
-        for (cpu = 0U; cpu < online; cpu++)
-        {
-            thread_id_t smp_tid;
-            char name[12];
-            volatile uint32_t ni;
-
-            /* 手动构建名称 "worker_X" */
-            name[0] = 'w'; name[1] = 'o'; name[2] = 'r'; name[3] = 'k';
-            name[4] = 'e'; name[5] = 'r'; name[6] = '_';
-            name[7] = (char)('0' + (int32_t)cpu);
-            name[8] = '\0';
-
-            smp_tid = kthread_create(name, worker_thread_entry,
-                                     (void *)(uintptr_t)cpu,
-                                     (priority_t)(50U + cpu * 10U),
-                                     KTHREAD_POLICY_RR,
-                                     CONFIG_STACK_SIZE_DEFAULT);
-            if (smp_tid != THREAD_ID_INVALID)
-            {
-                (void)smp_set_affinity(smp_tid, (uint32_t)(1U << cpu));
-            }
-
-            (void)smp_tid;
-            (void)ni;
-        }
-    }
-
-    /* ---- 第九步：初始化 UART 接收中断 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling UART RX interrupt...\n");
-    (void)gic_set_priority(QEMU_UART_IRQ, (uint8_t)GIC_PRIORITY_DEFAULT);
-    (void)gic_enable_irq(QEMU_UART_IRQ);
-    hal_uart_enable_rx_irq((uint64_t)QEMU_UART0_BASE);
-
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All subsystems initialized\n");
 
-    /* ---- 第十步：重新武装定时器并启用 IRQ ---- */
+    /* ---- 第九步：重新武装定时器并启用 IRQ ---- */
     {
         /* 禁用物理定时器（清除 ISTATUS） */
         __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)0U));
@@ -1042,7 +507,7 @@ void kernel_main(void)
 
     hal_irq_enable();
 
-    /* ---- 第十一步：启动调度器（永不返回） ---- */
+    /* ---- 第十步：启动调度器（永不返回） ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Starting scheduler...\n");
     scheduler_start();
 
