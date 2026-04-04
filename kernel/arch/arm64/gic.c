@@ -96,19 +96,16 @@
  * GIC 控制位定义
  * ======================================================================== */
 
-/** @brief Distributor 使能位（Group0 + Group1） */
-#define GICD_CTLR_ENABLE       0x03U
+/** @brief Distributor 使能位（Group1 非安全组） */
+#define GICD_CTLR_ENABLE       0x01U
 
 /** @brief CPU Interface 使能位（Group1 非安全组）
  *
  * @details QEMU virt 平台 GICv2 非安全模式下，
  *          GICC_CTLR bit0 控制非安全组（Group 1）中断。
- *          仅需写 1 即可启用 IRQ 中断传递。
- *
- *          安全模式下 bit0 控制 Group 0，bit1 控制 Group 1。
- *          同时启用两组以确保中断可传递。
+ *          仅写 1 即可启用 IRQ 中断传递。
  */
-#define GICC_CTLR_ENABLE       0x03U
+#define GICC_CTLR_ENABLE       0x01U
 
 /** @brief 最低优先级掩码（允许所有优先级中断） */
 #define GICC_PMR_LOWEST        0xFFU
@@ -321,32 +318,17 @@ kernel_status_t gic_init(void)
 
     hal_uart_puts((uint64_t)0x09000000UL, "[gic] step3: max_irq read\n");
 
-    /* 第三步：将所有中断设置为 Group 0（安全组）
+    /* 第三步：将所有中断设置为 Group 1（非安全组，产生 IRQ 而非 FIQ）
      *
-     * GICv2 中：
-     * - 安全模式下: Group 0 → FIQ, Group 1 → IRQ
-     * - 非安全模式下: Group 0 → IRQ, Group 1 → IRQ（取决于实现）
-     *
-     * QEMU virt 平台 EL1 可能仍处于安全状态，
-     * 因此 Group 0 中断会触发 FIQ 而非 IRQ。
-     * 但我们的 FIQ handler 当前只是 panic，所以改为保留 Group 0
-     * 并在非安全模式下测试。
-     *
-     * 暂时保留 Group 0 设置（即不移动到 Group 1），
-     * 观察中断是否以 IRQ 形式到达。
+     * GICv2 中 Group 0 中断产生 FIQ，Group 1 中断产生 IRQ。
+     * QEMU virt 平台默认所有中断在 Group 0，需要显式移到 Group 1，
+     * 否则定时器 PPI 30 会产生 FIQ 而非 IRQ，导致 FIQ handler panic。
+     * GICD_IGROUPR 每个 bit 控制 1 个中断，每位写 1 表示 Group 1。
      */
-#if 0
     for (n = 0U; n <= (max_irq / GICD_IRQS_PER_REG); n++)
     {
         GICD_REG(GICD_IGROUPR(n)) = 0xFFFFFFFFU;
     }
-#else
-    /* 保持所有中断在 Group 0（默认值） */
-    for (n = 0U; n <= (max_irq / GICD_IRQS_PER_REG); n++)
-    {
-        GICD_REG(GICD_IGROUPR(n)) = 0x00000000U;
-    }
-#endif
     barrier();
 
     hal_uart_puts((uint64_t)0x09000000UL, "[gic] step4: group1 set\n");

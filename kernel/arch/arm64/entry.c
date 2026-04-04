@@ -902,25 +902,95 @@ void kernel_main(void)
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All subsystems initialized\n");
 
-    /* ---- 第十步：刷新定时器比较值并启用 IRQ ----
+    /* ---- 第十步：重新武装定时器并启用 IRQ ----
      *
-     * @details 在启用 IRQ 前重新设置定时器比较值，
-     *          确保定时器在 IRQ 启用后立即触发首次中断。
-     *          之前的比较值可能在 IRQ 禁用期间已过期，
-     *          导致中断信号被拉低但未被处理。
+     * @details 修复定时器中断不触发问题。
+     *          timer_init() 设置的比较值在大量 UART 输出期间
+     *          已经过期，定时器 ISTATUS=1。虽然 ARMv8 规定
+     *          ISTATUS=1 时应产生中断，但在 QEMU GICv2 模型中，
+     *          如果中断在 DAIF.I=1 期间触发，GIC 可能不会
+     *          正确锁存该中断。
+     *
+     *          修复方案：禁用→重新武装→使能→启用 IRQ
+     *          确保定时器处于干净状态。
      */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Refreshing timer compare...\n");
-    timer_set_next_compare();
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Rearming timer...\n");
+    {
+        /* 禁用物理定时器（清除 ISTATUS） */
+        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)0U));
+        __asm__ volatile("isb");
+
+        /* 读取当前计数器和频率 */
+        uint64_t current = 0ULL;
+        uint64_t freq = 0ULL;
+        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(current));
+        __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+        __asm__ volatile("isb");
+
+        if (freq == 0ULL)
+        {
+            freq = 24000000ULL; /* QEMU virt 默认 24MHz */
+        }
+
+        /* 设置比较值为当前值 + 10ms (freq/100) */
+        uint64_t delta = freq / 100ULL;
+        __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(current + delta));
+        __asm__ volatile("isb");
+
+        /* 使能定时器（ENABLE=1, IMASK=0） */
+        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)1U));
+        __asm__ volatile("isb");
+
+        /* 验证定时器状态 */
+        uint64_t ctl = 0ULL;
+        __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(ctl));
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[timer] CTL=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, ctl);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " freq=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, freq);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " delta=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, delta);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    }
+
+    /* 验证 GIC ISENABLER0（确认 PPI 30 已使能） */
+    {
+        uint32_t isenable0 = *(volatile uint32_t *)(0x08000000UL + 0x0100U);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[gic] ISENABLER0=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)isenable0);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling IRQ...\n");
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '@');
     hal_irq_enable();
+
+    /* 验证 DAIF 状态 */
+    {
+        uint64_t daif = 0ULL;
+        __asm__ volatile("mrs %0, daif" : "=r"(daif));
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] DAIF=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, daif);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    }
+
+    /* 验证 VBAR_EL1 指向异常向量表 */
+    {
+        uint64_t vbar = 0ULL;
+        __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] VBAR_EL1=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, vbar);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    }
+
+    /* 发送 SGI 0 给自己，测试 GIC 中断传递 */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] Sending SGI 0 to self...\n");
+    gic_send_sgi(0U, 0x01U);
+
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] IRQ enabled OK\n");
 
-    /* ---- 第十一步：打印 Shell 提示符并启动调度器 ---- */
+    /* ---- 第十一步：进入主循环 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Scheduler started\n");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
-    /* 主循环 - 轮询式 tick 监控（跳过 scheduler_start，直到上下文切换完善） */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "AISafeOS64: entering main loop...\n");
     {
         tick_t last_tick = 0ULL;
@@ -931,6 +1001,24 @@ void kernel_main(void)
         {
             tick_t now = timer_get_ticks();
 
+            /*
+             * 轮询定时器 ISTATUS 位作为备份。
+             * 如果 IRQ 未到达但定时器条件已满足，
+             * 说明 GIC 中断传递有问题，手动推进 tick。
+             */
+            {
+                uint64_t ctl = 0ULL;
+                __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(ctl));
+                if ((ctl & 0x4ULL) != 0ULL)
+                {
+                    /* ISTATUS=1：定时器已触发 */
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, 'T');
+
+                    /* 手动调用定时器中断处理 */
+                    timer_interrupt_handler();
+                }
+            }
+
             if (now != last_tick)
             {
                 tick_count++;
@@ -938,23 +1026,20 @@ void kernel_main(void)
                 {
                     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[tick] #");
                     uart_print_uint((uint64_t)QEMU_UART0_BASE, tick_count);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
                 }
                 last_tick = now;
             }
 
             loop_count++;
-            /* 如果没有 tick 变化，至少每 1000000 次循环打印一次存活信号 */
-            if ((loop_count % 1000000ULL) == 0ULL)
+            if ((loop_count % 10000000ULL) == 0ULL)
             {
                 hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[alive] loops=");
                 uart_print_uint((uint64_t)QEMU_UART0_BASE, loop_count);
                 hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ticks=");
                 uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)now);
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+                hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
             }
-
-            __asm__ volatile("wfe" ::: "memory");
         }
     }
 }
