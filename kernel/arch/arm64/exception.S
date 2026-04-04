@@ -3,13 +3,15 @@
  * @brief ARMv8-A 异常向量表
  * @author AISafe64 Team
  * @date 2026-03-31
- * @version 2.0
+ * @version 3.0
  *
  * @details ARMv8-A 异常向量表实现
  *          - 16 个异常向量入口
- *          - SVC 系统调用处理
- *          - IRQ 中断处理
- *          - 其他异常默认处理
+ *          - EL1h 同步异常：SVC 系统调用 + 其他同步异常
+ *          - EL1h IRQ：GIC 中断分发
+ *          - EL1h FIQ：快速中断（预留）
+ *          - EL1h SError：系统错误处理
+ *          - 其他向量：panic
  *
  * @note ARMv8-A 要求向量表 2KB 对齐
  * @note 每个向量占 128 字节（32 条指令）
@@ -41,6 +43,11 @@ exception_vector_table:
 
     /* ================================================================
      * [4]  当前 EL，SPx，同步异常 ← SVC 系统调用入口
+     *
+     * 保存所有 callee-saved + caller-saved 寄存器，
+     * 读取 ESR 判断 EC 类别：
+     *   EC=0x15 (SVC64) → syscall_handler
+     *   其他 → exception_sync_handler(esr, far, elr, spsr)
      * ================================================================ */
     .align 7
 exception_sync_spx:
@@ -75,17 +82,21 @@ exception_sync_spx:
     cmp     x21, #0x15
     b.eq    .Lsvc_handler
 
-    /* EC = 0x00 (0) = 未知原因 */
-    /* 其他同步异常 → panic */
-    mov     x0, x20                  /* ESR 值作为参数 */
+    /* 其他同步异常 → 调用 exception_sync_handler(esr, far, elr, spsr) */
+    mrs     x1, far_el1              /* x1 = FAR */
+    mov     x0, x20                  /* x0 = ESR */
+    ldp     x2, x3, [sp]             /* x2 = ELR, x3 = SPSR（栈顶是 elr/spsr） */
     bl      exception_sync_handler
-    b       .Lexception_panic
+
+    /* 恢复并返回 */
+    b       .Lsync_restore
 
 .Lsvc_handler:
     /* SVC 系统调用处理 */
     /* x8 = 系统调用号，x0-x7 = 参数 */
     bl      syscall_handler
 
+.Lsync_restore:
     /* 恢复 ELR_EL1 和 SPSR_EL1 */
     ldp     x20, x21, [sp], #16
     msr     elr_el1, x20
@@ -113,17 +124,20 @@ exception_sync_spx:
 
     /* ================================================================
      * [5]  当前 EL，SPx，IRQ 异常
+     *
+     * 保存 x0-x3，调用 irq_handler（C 函数），
+     * 恢复 x0-x3，eret 返回。
      * ================================================================ */
     .align 7
 exception_irq_spx:
-    /* 保存上下文 */
+    /* 保存通用寄存器 */
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
 
-    /* 调用 IRQ 处理函数 */
+    /* 调用 IRQ 处理函数（C 语言入口） */
     bl      irq_handler
 
-    /* 恢复上下文 */
+    /* 恢复通用寄存器 */
     ldp     x2, x3, [sp], #16
     ldp     x0, x1, [sp], #16
     eret
@@ -137,9 +151,30 @@ exception_fiq_spx:
 
     /* ================================================================
      * [7]  当前 EL，SPx，SError 异常
+     *
+     * 保存上下文，调用 el1_serror_handler(esr, far, elr)
      * ================================================================ */
     .align 7
 exception_serror_spx:
+    /* 保存通用寄存器 */
+    stp     x0, x1, [sp, #-16]!
+    stp     x2, x3, [sp, #-16]!
+    stp     x4, x5, [sp, #-16]!
+    stp     x6, x7, [sp, #-16]!
+
+    /* 读取异常信息寄存器 */
+    mrs     x0, esr_el1              /* x0 = ESR */
+    mrs     x1, far_el1              /* x1 = FAR */
+    mrs     x2, elr_el1              /* x2 = ELR */
+
+    /* 调用 SError 处理函数 */
+    bl      el1_serror_handler
+
+    /* SError 处理函数不返回（挂起），若返回则 panic */
+    ldp     x6, x7, [sp], #16
+    ldp     x4, x5, [sp], #16
+    ldp     x2, x3, [sp], #16
+    ldp     x0, x1, [sp], #16
     b       .Lexception_panic
 
     /* ================================================================
@@ -172,30 +207,3 @@ exception_serror_spx:
     /* 内核异常 panic：永停 */
     wfe
     b       .Lexception_panic
-
-/* ========== 异常处理 C 函数声明 ========== */
-/* 这些函数在 entry.c 或后续模块中实现 */
-
-/**
- * @brief IRQ 中断处理函数（C 语言入口）
- */
-.weak irq_handler
-irq_handler:
-    ret
-
-/**
- * @brief 同步异常处理函数
- */
-.weak exception_sync_handler
-exception_sync_handler:
-    ret
-
-/**
- * @brief 系统调用处理函数
- * @param x8 系统调用号
- * @param x0-x7 系统调用参数
- * @return 返回值在 x0
- */
-.weak syscall_handler
-syscall_handler:
-    ret

@@ -132,7 +132,7 @@
  *          实际项目应通过设备树或平台配置获取。
  */
 #ifndef GICD_BASE_ADDR
-#define GICD_BASE_ADDR        ((uintptr_t)0x2F000000U)
+#define GICD_BASE_ADDR        ((uintptr_t)0x08000000U)  /* QEMU virt GIC Distributor */
 #endif
 
 /**
@@ -143,7 +143,7 @@
  *          实际项目应通过设备树或平台配置获取。
  */
 #ifndef GICC_BASE_ADDR
-#define GICC_BASE_ADDR        ((uintptr_t)0x2F001000U)
+#define GICC_BASE_ADDR        ((uintptr_t)0x08010000U)  /* QEMU virt GIC CPU Interface */
 #endif
 
 /* ========================================================================
