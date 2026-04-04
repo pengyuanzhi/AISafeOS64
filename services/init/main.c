@@ -1034,6 +1034,7 @@ static void init_get_report(init_system_report_t *report)
  */
 static void init_print_report(void)
 {
+    uint32_t i;
     init_system_report_t report;
 
     init_get_report(&report);
@@ -1046,7 +1047,7 @@ static void init_print_report(void)
     /* 打印各服务状态 */
     init_print("[init] Services:\n");
 
-    for (uint32_t i = 0U; i < INIT_MAX_SERVICES; i++)
+    for (i = 0U; i < INIT_MAX_SERVICES; i++)
     {
         if (!s_services[i].in_use)
         {
