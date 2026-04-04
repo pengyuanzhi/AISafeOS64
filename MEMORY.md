@@ -1,5 +1,51 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-04 P0 多核验证完成 ✅ (19:59)
+
+**commit**: `eb42c40` feat(sched,smp): 多核负载测试+负载均衡+tick心跳验证
+
+### 多核负载测试
+- **worker 线程**: 4 个工作线程绑定到 4 个 CPU（亲和性设置）
+- **QEMU 输出**: A B 0 1 2 3 — 4 核全部独立运行线程 ✅
+- **UART 自旋锁**: TicketLock 保护多核串行化打印，防止乱序
+
+### 负载均衡验证
+- **smp_sched_init()**: 初始化 SMP 调度器（每 CPU 就绪队列）
+- **smp_set_affinity()**: 工作线程绑定到指定 CPU
+- **memset 消除**: smp.c 中所有 memset 改为 volatile 手动清零
+
+### 每 CPU Tick 心跳
+- **timer_interrupt_handler**: 每 1000 tick 打印 [CPU_ID] 心跳
+- 从核独立定时器中断，每核独立调度
+
+### 内核代码量
+- **text**: 26,158 bytes (25.5KB) — 目标 < 30KB ✅
+
+### 当前项目进度: ~85%
+
+#### 已完成 ✅
+- ✅ 调度器 (256 级位图 + EDF + ARINC653)
+- ✅ IPC 子系统 (channel + endpoint + notification + IC2)
+- ✅ 虚拟内存管理
+- ✅ 能力系统 (撤销/降权/移动/复制)
+- ✅ SMP 多核 (4核启动 + 每 CPU 调度 + IPI + 负载均衡 + 亲和性)
+- ✅ 同步原语 (Ticket Lock + 优先级继承互斥锁)
+- ✅ 上下文切换 (ARM64 汇编)
+- ✅ 形式化验证框架 + 认证证据收集
+- ✅ 用户态服务 (FS/Proc/Mem/Net/Security/VMM/Path/Init/Dev)
+- ✅ virtio 驱动框架 + 性能基准测试
+- ✅ **多核负载测试验证（4核并行运行）**
+
+#### 待完成 ⏳
+- [ ] MISRA C:2012 静态分析全量扫描
+- [ ] 安全认证文档 (ISO 26262, IEC 61508)
+- [ ] 驱动完善 (virtio-blk 实际读写、virtio-net 收发包)
+- [ ] MMU 页表映射启用（从物理地址切换到虚拟地址）
+- [ ] 用户态→内核态系统调用接口
+- [ ] 性能基准细化（IPC 延迟、调度延迟、中断延迟精确测量）
+
+---
+
 ## 2026-04-04 每 CPU 调度器 + IPI Reschedule ✅ (19:05)
 
 **commit**: `f1fbf1d` feat(sched,ipi): 每CPU调度器集成+IPI reschedule实现
