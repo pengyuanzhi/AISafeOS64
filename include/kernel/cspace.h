@@ -177,4 +177,32 @@ cspace_t *cspace_from_root(cap_slot_t cspace_root);
  */
 cspace_t *cspace_get_current(void);
 
+/**
+ * @brief 调整 CSpace 容量
+ *
+ * @details 调整 CSpace 能力表的容量。只能增大，不能缩小。
+ *          新容量不能超过 CSPACE_MAX_CAPACITY。
+ *
+ * @param cspace     CSpace 指针
+ * @param new_capacity 新容量
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效或新容量小于等于当前容量
+ * @return -EINVAL 新容量超过最大值
+ */
+kernel_status_t cspace_resize(cspace_t *cspace, uint32_t new_capacity);
+
+/**
+ * @brief 获取 CSpace 使用统计
+ *
+ * @param cspace     CSpace 指针
+ * @param[out] total 输出总容量
+ * @param[out] used  输出已使用数量
+ * @param[out] free  输出空闲数量
+ */
+void cspace_get_stats(const cspace_t *cspace,
+                       uint32_t *total,
+                       uint32_t *used,
+                       uint32_t *free_count);
+
 #endif /* KERNEL_CSPACE_H */

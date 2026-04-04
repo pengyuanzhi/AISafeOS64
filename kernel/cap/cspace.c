@@ -590,6 +590,125 @@ cspace_t *cspace_get_current(void)
 }
 
 /* ========================================================================
+ * CSpace 容量调整
+ * ======================================================================== */
+
+/**
+ * @brief 调整 CSpace 容量
+ *
+ * @details 调整 CSpace 能力表的容量。只能增大，不能缩小。
+ *          新容量不能超过 CSPACE_MAX_CAPACITY。
+ *          扩展区域的 slot 会被初始化为 FREE 并加入空闲链表。
+ *
+ * @param cspace       CSpace 指针
+ * @param new_capacity 新容量
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效或新容量非法
+ */
+kernel_status_t cspace_resize(cspace_t *cspace, uint32_t new_capacity)
+{
+    uint32_t old_capacity;
+    uint32_t i;
+
+    if (cspace == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 新容量必须大于当前容量 */
+    if (new_capacity <= cspace->capacity)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 新容量不能超过最大值 */
+    if (new_capacity > (uint32_t)CSPACE_MAX_CAPACITY)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 不能超过关联的能力表静态存储上限 */
+    {
+        uint32_t pool_idx;
+        pool_idx = (uint32_t)(cspace - &s_cspace_pool[0U]);
+
+        /* 检查静态存储边界 */
+        if (new_capacity > (uint32_t)CSPACE_MAX_CAPACITY)
+        {
+            return -(int32_t)EINVAL;
+        }
+    }
+
+    ticket_lock_acquire(&cspace->lock);
+
+    old_capacity = cspace->capacity;
+
+    /* 初始化扩展区域的 slot 为 FREE */
+    for (i = old_capacity; i < new_capacity; i++)
+    {
+        cap_t *cap = &cspace->cap_table[i];
+        (void)memset(cap, 0, sizeof(cap_t));
+        cap->state = CAP_STATE_FREE;
+        INIT_LIST_HEAD(&cap->children);
+        INIT_LIST_HEAD(&cap->sibling);
+
+        /* 将新 slot 链入空闲链表 */
+        if (cspace->free_head != CAP_SLOT_INVALID)
+        {
+            cap->sibling.next =
+                (struct list_head *)&cspace->cap_table[cspace->free_head];
+        }
+        else
+        {
+            cap->sibling.next = NULL;
+        }
+
+        cspace->free_head = (cap_slot_t)i;
+    }
+
+    /* 更新容量 */
+    cspace->capacity = new_capacity;
+
+    barrier_store();
+
+    ticket_lock_release(&cspace->lock);
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 获取 CSpace 使用统计
+ *
+ * @details 返回 CSpace 的容量、已使用数量和空闲数量。
+ */
+void cspace_get_stats(const cspace_t *cspace,
+                       uint32_t *total,
+                       uint32_t *used,
+                       uint32_t *free_count)
+{
+    if (cspace == NULL)
+    {
+        return;
+    }
+
+    if (total != NULL)
+    {
+        *total = cspace->capacity;
+    }
+
+    if (used != NULL)
+    {
+        *used = cspace->used_count;
+    }
+
+    if (free_count != NULL)
+    {
+        *free_count = cspace->capacity - cspace->used_count;
+    }
+}
+
+/* ========================================================================
  * 内部辅助函数实现
  * ======================================================================== */
 

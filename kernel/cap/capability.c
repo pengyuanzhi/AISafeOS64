@@ -807,3 +807,246 @@ kernel_status_t cap_rights_derive_check(cap_slot_t cspace_root,
 
     return KERNEL_OK;
 }
+
+/* ========================================================================
+ * 能力铸造（Mint）
+ * ======================================================================== */
+
+/**
+ * @brief 铸造新能力
+ *
+ * @details 从内核对象创建一个新的能力，插入到指定 CSpace 的 slot 中。
+ *          这是内核创建能力的唯一入口。需要目标 CSpace 根能力具有
+ *          WRITE+GRANT 权限。
+ *
+ * @param cspace_root 目标 CSpace 的根能力槽
+ * @param slot        目标能力槽索引
+ * @param obj_type    内核对象类型
+ * @param obj_id      内核对象 ID
+ * @param rights      权限位
+ * @param badge       标识值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_mint(cap_slot_t cspace_root,
+                          cap_slot_t slot,
+                          kobj_type_t obj_type,
+                          kobj_id_t obj_id,
+                          uint8_t rights,
+                          uint16_t badge)
+{
+    cspace_t *cs;
+    cap_t *root_cap;
+
+    /* 参数检查 */
+    if (cspace_root == CAP_SLOT_INVALID)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (slot == CAP_SLOT_INVALID)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (obj_type >= KOBJ_TYPE_COUNT)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析目标 CSpace */
+    cs = cspace_from_root(cspace_root);
+    if (cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 检查根能力权限：需要 WRITE + GRANT */
+    root_cap = cspace_lookup(cs, cs->root_slot);
+    if (root_cap == NULL)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    if ((root_cap->rights & (CAP_RIGHT_WRITE | CAP_RIGHT_GRANT)) !=
+        (CAP_RIGHT_WRITE | CAP_RIGHT_GRANT))
+    {
+        return -(int32_t)EACCES;
+    }
+
+    /* 插入能力 */
+    return cspace_insert_cap(cs, slot, obj_type, obj_id,
+                              rights, badge, CAP_SLOT_INVALID);
+}
+
+/* ========================================================================
+ * 能力派生（Derive — 严格降权）
+ * ======================================================================== */
+
+/**
+ * @brief 派生子能力
+ *
+ * @details 比 cap_copy 更严格的降权操作：
+ *          - 子能力权限必须是父能力的严格子集
+ *          - 子能力权限必须严格小于父能力（至少少一个权限位）
+ *          - 父能力必须具有 GRANT 权限
+ *          - 建立父子关系用于级联撤销
+ *
+ * @param src_cspace  源 CSpace 的根能力槽
+ * @param src_slot    源能力槽索引
+ * @param dest_cspace 目标 CSpace 的根能力槽
+ * @param dest_slot   目标能力槽索引
+ * @param new_rights  新权限位（必须严格小于源权限）
+ * @param badge       新标识值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效或权限未严格降权
+ * @return -EACCES 权限不足
+ * @return -ENOENT 源能力不存在
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_derive(cap_slot_t src_cspace,
+                            cap_slot_t src_slot,
+                            cap_slot_t dest_cspace,
+                            cap_slot_t dest_slot,
+                            uint8_t new_rights,
+                            uint16_t badge)
+{
+    kernel_status_t ret;
+    cspace_t *src_cs;
+    cspace_t *dst_cs;
+    cap_t *src_cap;
+
+    /* 参数检查 */
+    if ((src_cspace == CAP_SLOT_INVALID) || (src_slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if ((dest_cspace == CAP_SLOT_INVALID) || (dest_slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 CSpace */
+    src_cs = cspace_from_root(src_cspace);
+    if (src_cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    dst_cs = cspace_from_root(dest_cspace);
+    if (dst_cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 查找源能力 */
+    src_cap = cspace_lookup(src_cs, src_slot);
+    if (src_cap == NULL)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    if (src_cap->state != CAP_STATE_VALID)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 检查 GRANT 权限 */
+    if ((src_cap->rights & CAP_RIGHT_GRANT) == CAP_RIGHT_NONE)
+    {
+        return -(int32_t)EACCES;
+    }
+
+    /* 严格子集检查：新权限必须是源权限的子集 */
+    if ((new_rights & src_cap->rights) != new_rights)
+    {
+        return -(int32_t)EACCES;
+    }
+
+    /* 严格降权检查：新权限必须严格小于源权限 */
+    if (new_rights == src_cap->rights)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 在目标 CSpace 中插入能力，建立父子关系 */
+    ret = cspace_insert_cap(dst_cs,
+                             dest_slot,
+                             src_cap->kobj_type,
+                             src_cap->kobj_id,
+                             new_rights,
+                             badge,
+                             src_slot);
+
+    return ret;
+}
+
+/* ========================================================================
+ * 能力信息查询
+ * ======================================================================== */
+
+/**
+ * @brief 获取能力信息
+ *
+ * @details 查询指定能力的元数据，返回安全信息给调用者。
+ *          不暴露内核内部指针。
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param slot        能力槽索引
+ * @param info        输出信息结构（调用者分配）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ *
+ * @note 对应需求: KR-013
+ */
+kernel_status_t cap_get_info(cap_slot_t cspace_root,
+                              cap_slot_t slot,
+                              cap_info_t *info)
+{
+    cspace_t *cs;
+    cap_t *cap;
+
+    /* 参数检查 */
+    if (info == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if ((cspace_root == CAP_SLOT_INVALID) || (slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 CSpace */
+    cs = cspace_from_root(cspace_root);
+    if (cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 查找能力 */
+    cap = cspace_lookup(cs, slot);
+    if (cap == NULL)
+    {
+        return -(int32_t)ENOENT;
+    }
+
+    /* 填充信息 */
+    info->obj_type = cap->kobj_type;
+    info->rights = cap->rights;
+    info->badge = cap->badge;
+    info->obj_id = cap->kobj_id;
+    info->state = cap->state;
+    info->child_count = list_count_nodes(&cap->children);
+
+    return KERNEL_OK;
+}

@@ -265,4 +265,128 @@ kernel_status_t cap_rights_derive_check(cap_slot_t cspace_root,
                                           cap_slot_t slot,
                                           uint8_t request_rights);
 
+/* ========================================================================
+ * 能力铸造（Mint）与派生（Derive）
+ * ======================================================================== */
+
+/**
+ * @brief 铸造新能力
+ *
+ * @details 从内核对象创建一个新的能力，插入到指定 CSpace 的 slot 中。
+ *          这是内核创建能力的唯一入口。
+ *          需要 CSpace 根能力具有 WRITE+GRANT 权限。
+ *
+ * @param cspace_root 目标 CSpace 的根能力槽
+ * @param slot        目标能力槽索引
+ * @param obj_type    内核对象类型
+ * @param obj_id      内核对象 ID
+ * @param rights      权限位
+ * @param badge       标识值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_mint(cap_slot_t cspace_root,
+                          cap_slot_t slot,
+                          kobj_type_t obj_type,
+                          kobj_id_t obj_id,
+                          uint8_t rights,
+                          uint16_t badge);
+
+/**
+ * @brief 派生子能力（严格降权）
+ *
+ * @details 比 cap_copy 更严格的降权操作：
+ *          - 子能力权限必须是父能力的严格子集
+ *          - 子能力权限必须严格小于父能力
+ *          - 父能力必须具有 GRANT 权限
+ *          - 建立父子关系用于级联撤销
+ *
+ * @param src_cspace  源 CSpace 的根能力槽
+ * @param src_slot    源能力槽索引
+ * @param dest_cspace 目标 CSpace 的根能力槽
+ * @param dest_slot   目标能力槽索引
+ * @param new_rights  新权限位（必须为源权限的严格子集）
+ * @param badge       新标识值
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效或权限未严格降权
+ * @return -EACCES 权限不足
+ * @return -ENOENT 源能力不存在
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_derive(cap_slot_t src_cspace,
+                            cap_slot_t src_slot,
+                            cap_slot_t dest_cspace,
+                            cap_slot_t dest_slot,
+                            uint8_t new_rights,
+                            uint16_t badge);
+
+/* ========================================================================
+ * 能力信息查询
+ * ======================================================================== */
+
+/**
+ * @brief 能力信息结构（用户可见）
+ *
+ * @details 用于 cap_get_info() 返回给用户的能力元数据，
+ *          不暴露内核内部指针。
+ */
+typedef struct
+{
+    kobj_type_t obj_type;       /**< @brief 内核对象类型 */
+    uint8_t     rights;         /**< @brief 权限位 */
+    uint16_t    badge;          /**< @brief 标识值 */
+    kobj_id_t   obj_id;         /**< @brief 内核对象 ID */
+    cap_state_t state;          /**< @brief 能力状态 */
+    uint32_t    child_count;    /**< @brief 子能力数量 */
+} cap_info_t;
+
+/**
+ * @brief 获取能力信息
+ *
+ * @details 查询指定能力的元数据，返回给调用者。
+ *          不暴露内核内部指针，仅返回安全信息。
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param slot        能力槽索引
+ * @param info        输出信息结构（调用者分配）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ *
+ * @note 对应需求: KR-013
+ */
+kernel_status_t cap_get_info(cap_slot_t cspace_root,
+                              cap_slot_t slot,
+                              cap_info_t *info);
+
+/* ========================================================================
+ * 内联权限检查（性能关键路径）
+ * ======================================================================== */
+
+/**
+ * @brief 内联权限检查
+ *
+ * @details 检查能力是否具有所需的全部权限位。
+ *          用于内核热路径（IPC 调用、内存访问等）。
+ *
+ * @param cap      能力指针（必须非 NULL）
+ * @param required 所需权限位
+ *
+ * @return true 具备所需权限
+ * @return false 权限不足
+ *
+ * @note 对应需求: KR-013
+ */
+static inline bool cap_rights_check(const cap_t *cap, uint8_t required)
+{
+    return ((cap->rights & required) == required);
+}
+
 #endif /* KERNEL_CAPABILITY_H */

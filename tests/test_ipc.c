@@ -430,7 +430,7 @@ static int32_t ic2_send(uint32_t channel_id, const void *data,
 /**
  * @brief 测试 IC2 初始化
  */
-void test_ic2_init_succeeds(void)
+static void test_ic2_init_succeeds(void)
 {
     kernel_status_t ret = ic2_init();
     TEST_ASSERT_EQ(ret, KERNEL_OK);
@@ -439,7 +439,7 @@ void test_ic2_init_succeeds(void)
 /**
  * @brief 测试通道创建
  */
-void test_ic2_channel_create_basic(void)
+static void test_ic2_channel_create_basic(void)
 {
     ic2_init();
     int32_t ch = ic2_channel_create("test-ch", 1U, 2U, 1024U);
@@ -456,7 +456,7 @@ void test_ic2_channel_create_basic(void)
 /**
  * @brief 测试通道创建参数校验
  */
-void test_ic2_channel_create_invalid_params(void)
+static void test_ic2_channel_create_invalid_params(void)
 {
     ic2_init();
 
@@ -476,7 +476,7 @@ void test_ic2_channel_create_invalid_params(void)
 /**
  * @brief 测试通道销毁
  */
-void test_ic2_channel_destroy_basic(void)
+static void test_ic2_channel_destroy_basic(void)
 {
     ic2_init();
     int32_t ch = ic2_channel_create("destroy-test", 10U, 20U, 512U);
@@ -493,7 +493,7 @@ void test_ic2_channel_destroy_basic(void)
 /**
  * @brief 测试销毁不存在的通道
  */
-void test_ic2_channel_destroy_nonexistent(void)
+static void test_ic2_channel_destroy_nonexistent(void)
 {
     ic2_init();
     kernel_status_t ret = ic2_channel_destroy(99U);
@@ -503,7 +503,7 @@ void test_ic2_channel_destroy_nonexistent(void)
 /**
  * @brief 测试 SPSC 环形缓冲区写入/读取
  */
-void test_ic2_spsc_ringbuf_write_read(void)
+static void test_ic2_spsc_ringbuf_write_read(void)
 {
     uint8_t storage[128U];
     volatile uint32_t head = 0U;
@@ -540,7 +540,7 @@ void test_ic2_spsc_ringbuf_write_read(void)
 /**
  * @brief 测试环形缓冲区环绕写入
  */
-void test_ic2_ringbuf_wrap_around(void)
+static void test_ic2_ringbuf_wrap_around(void)
 {
     uint8_t storage[32U];
     volatile uint32_t head = 0U;
@@ -588,7 +588,7 @@ void test_ic2_ringbuf_wrap_around(void)
 /**
  * @brief 测试环形缓冲区满时写入
  */
-void test_ic2_ringbuf_full(void)
+static void test_ic2_ringbuf_full(void)
 {
     uint8_t storage[16U];
     volatile uint32_t head = 0U;
@@ -611,7 +611,7 @@ void test_ic2_ringbuf_full(void)
 /**
  * @brief 测试空缓冲区读取
  */
-void test_ic2_ringbuf_empty_read(void)
+static void test_ic2_ringbuf_empty_read(void)
 {
     uint8_t storage[32U];
     volatile uint32_t head = 0U;
@@ -628,7 +628,7 @@ void test_ic2_ringbuf_empty_read(void)
 /**
  * @brief 测试 IC2 端到端发送/接收
  */
-void test_ic2_send_recv_e2e(void)
+static void test_ic2_send_recv_e2e(void)
 {
     int32_t ch;
     const char *test_msg = "Hello IC2!";
@@ -652,7 +652,7 @@ void test_ic2_send_recv_e2e(void)
 /**
  * @brief 测试最大通道数限制
  */
-void test_ic2_max_channels_limit(void)
+static void test_ic2_max_channels_limit(void)
 {
     int32_t channels[IC2_MAX_CHANNELS + 1U];
     uint32_t i;

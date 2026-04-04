@@ -468,4 +468,46 @@ static uint32_t s_failed = 0U;
            s_passed, s_failed, s_total); \
 } while (0)
 
+/* ========================================================================
+ * 内核内存操作 Mock
+ * ======================================================================== */
+
+/* 内核 string.h 可能将 memcpy/memset 重定义为 kernel_memcpy/kernel_memset。
+ * 在宿主机测试中提供实现，并取消重定义以使用标准库版本。 */
+
+/* 提供 kernel_memcpy/kernel_memset 实现， */
+static inline void *kernel_memcpy(void *dst, const void *src, size_t n)
+{
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    size_t i;
+
+    for (i = 0U; i < n; i++)
+    {
+        d[i] = s[i];
+    }
+    return dst;
+}
+
+static inline void *kernel_memset(void *dst, int c, size_t n)
+{
+    uint8_t *d = (uint8_t *)dst;
+    size_t i;
+    for (i = 0U; i < n; i++)
+    {
+        d[i] = (uint8_t)c;
+    }
+    return dst;
+}
+
+/* 取消 string.h 中的宏重定义，防止递归调用。
+ * 上面已提供 kernel_memcpy/kernel_memset 的正确实现。
+ */
+#ifdef memcpy
+#undef memcpy
+#endif
+#ifdef memset
+#undef memset
+#endif
+
 #endif /* MOCK_KERNEL_H */
