@@ -374,10 +374,10 @@ static kernel_status_t channel_subsys_test_init(void)
 {
     uint32_t i;
 
-    /* 初始化通道表 */
+    /* 初始化通道表（栈：索引 0 在底部，最后弹出） */
     for (i = 0U; i < TEST_MAX_CHANNELS; i++)
     {
-        s_free_ch_stack[i] = (TEST_MAX_CHANNELS - 1U) - i;
+        s_free_ch_stack[i] = i;
         s_channels[i].id = KOBJ_ID_INVALID;
         s_channels[i].state = IPC_CH_CLOSED;
         s_channels[i].owner_tid = THREAD_ID_INVALID;
@@ -392,10 +392,10 @@ static kernel_status_t channel_subsys_test_init(void)
     }
     s_free_ch_count = TEST_MAX_CHANNELS;
 
-    /* 初始化连接表 */
+    /* 初始化连接表（栈：索引 0 在底部，最后弹出） */
     for (i = 0U; i < TEST_MAX_CONNECTIONS; i++)
     {
-        s_free_conn_stack[i] = (TEST_MAX_CONNECTIONS - 1U) - i;
+        s_free_conn_stack[i] = i;
         s_connections[i].id = KOBJ_ID_INVALID;
         s_connections[i].state = IPC_CONN_DISCONNECTED;
         s_connections[i].channel_id = KOBJ_ID_INVALID;
@@ -448,13 +448,14 @@ static kernel_status_t channel_create(thread_id_t owner_tid, kobj_id_t *ch_id)
         return -(int32_t)ENOMEM;
     }
 
-    while (idx == 0)
+    if (idx == 0)
     {
         /* 索引 0 不可用，放回并重新分配 */
         free_channel_index((uint32_t)idx);
         idx = alloc_channel_index();
-        if (idx < 0)
+        if (idx <= 0)
         {
+            /* 再次获得 0 或分配失败 */
             return -(int32_t)ENOMEM;
         }
     }
@@ -814,10 +815,10 @@ static void test_subsys_init(void)
     /* 所有连接应为 DISCONNECTED */
     TEST_ASSERT_EQ(s_connections[0U].state, IPC_CONN_DISCONNECTED);
 
-    /* 空闲栈弹出顺序：从大到小，跳过索引 0 不会自动发生，
-     * 但 channel_create 会跳过索引 0（因为 id=0 与 KOBJ_ID_INVALID 冲突）
-     * 初始化时所有索引都入栈 */
-    TEST_ASSERT_EQ(s_free_ch_stack[s_free_ch_count - 1U], 0U);
+    /* 空闲栈：索引 0 在底部（最后弹出），最大索引在栈顶（最先弹出）
+     * channel_create 会跳过索引 0（因为 id=0 与 KOBJ_ID_INVALID 冲突）
+     * 初始化时所有索引按升序入栈 */
+    TEST_ASSERT_EQ(s_free_ch_stack[s_free_ch_count - 1U], TEST_MAX_CHANNELS - 1U);
 }
 
 /**

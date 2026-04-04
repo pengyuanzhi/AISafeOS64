@@ -106,7 +106,7 @@ static evidence_internal_t s_ev;
 
 static void evidence_init(void)
 {
-    uint32_t i, j;
+    uint32_t i;
 
     ticket_lock_init(&s_ev.lock);
 
