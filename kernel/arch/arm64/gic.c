@@ -66,6 +66,9 @@
 /** @brief Distributor 中断配置寄存器（每个中断占 2 位） */
 #define GICD_ICFGR(n)          (0x0C00U + ((uint32_t)(n) * 4U))
 
+/** @brief Distributor 中断分组寄存器（每组 32 个中断） */
+#define GICD_IGROUPR(n)       (0x0080U + ((uint32_t)(n) * 4U))
+
 /** @brief Distributor SGI 寄存器 */
 #define GICD_SGIR              0x0F00U
 
@@ -269,12 +272,13 @@ static void gic_enable_cpuif(void)
  *          1. 保存 Distributor 和 CPU Interface 基地址
  *          2. 禁用 Distributor
  *          3. 获取最大中断号
- *          4. 禁用所有 SPI 中断
- *          5. 设置所有 SPI 的默认优先级
- *          6. 设置所有 SPI 默认路由到 CPU 0（ITARGETSR）
- *          7. 清除所有 SPI 的挂起状态
- *          8. 启用 Distributor（Group0 + Group1）
- *          9. 通过 MMIO 启用 CPU Interface
+ *          4. 将所有中断设置为 Group 1（产生 IRQ 而非 FIQ）
+ *          5. 禁用所有 SPI 中断
+ *          6. 设置所有 SPI 的默认优先级
+ *          7. 设置所有 SPI 默认路由到 CPU 0（ITARGETSR）
+ *          8. 清除所有 SPI 的挂起状态
+ *          9. 启用 Distributor（Group0 + Group1）
+ *          10. 通过 MMIO 启用 CPU Interface
  *
  * @return KERNEL_OK 成功
  *
@@ -297,7 +301,20 @@ kernel_status_t gic_init(void)
     /* 第二步：获取最大中断号 */
     max_irq = gic_get_max_irq();
 
-    /* 第三步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
+    /* 第三步：将所有中断设置为 Group 1（非安全组，产生 IRQ 而非 FIQ）
+     *
+     * GICv2 中 Group 0 中断产生 FIQ，Group 1 中断产生 IRQ。
+     * QEMU virt 平台默认所有中断在 Group 0，需要显式移到 Group 1，
+     * 否则定时器 PPI 30 会产生 FIQ 而非 IRQ，导致 FIQ handler panic。
+     * GICD_IGROUPR 每个 bit 控制 1 个中断，每位写 1 表示 Group 1。
+     */
+    for (n = 0U; n <= (max_irq / GICD_IRQS_PER_REG); n++)
+    {
+        GICD_REG(GICD_IGROUPR(n)) = 0xFFFFFFFFU;
+    }
+    barrier();
+
+    /* 第四步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -305,19 +322,19 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICENABLER(n)) = 0xFFFFFFFFU;
     }
 
-    /* 第四步：设置所有 SPI 的默认优先级 */
+    /* 第五步：设置所有 SPI 的默认优先级 */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
         GICD_REG_BYTE(GICD_IPRIORITYR(irq)) = (uint8_t)GIC_PRIORITY_DEFAULT;
     }
 
-    /* 第五步：设置所有 SPI 默认路由到 CPU 0（ITARGETSR） */
+    /* 第六步：设置所有 SPI 默认路由到 CPU 0（ITARGETSR） */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
         GICD_REG_BYTE(GICD_ITARGETSR(irq)) = GIC_TARGET_CPU0;
     }
 
-    /* 第六步：清除所有 SPI 的挂起状态 */
+    /* 第七步：清除所有 SPI 的挂起状态 */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -325,11 +342,11 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICPENDR(n)) = 0xFFFFFFFFU;
     }
 
-    /* 第七步：启用 Distributor（Group0 + Group1） */
+    /* 第八步：启用 Distributor（Group0 + Group1） */
     GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE;
     barrier();
 
-    /* 第八步：通过 MMIO 启用 GICv2 CPU Interface */
+    /* 第九步：通过 MMIO 启用 GICv2 CPU Interface */
     gic_enable_cpuif();
 
     return KERNEL_OK;

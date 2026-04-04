@@ -380,13 +380,19 @@ void schedule(void)
         return;
     }
 
+    /* 从就绪队列中移除下一个线程（防止同时在队列和运行状态） */
+    if (next->state == KTHREAD_STATE_READY)
+    {
+        scheduler_dequeue(next);
+    }
+
     /* 如果下一个线程与当前线程相同，无需切换 */
     if (prev == next)
     {
         return;
     }
 
-    /* 将当前线程从运行状态改为就绪状态 */
+    /* 将当前线程从运行状态改为就绪状态并重新入队 */
     if ((prev != NULL) && (prev->state == KTHREAD_STATE_RUNNING))
     {
         prev->state = KTHREAD_STATE_READY;
@@ -407,6 +413,7 @@ void schedule(void)
 void scheduler_tick(void)
 {
     KThread_t *current;
+    KThread_t *next;
     uint32_t cpu_id;
 
     cpu_id = hal_get_cpu_id();
@@ -428,8 +435,16 @@ void scheduler_tick(void)
                 /* 时间片耗尽，重载并触发调度 */
                 current->time_slice = current->time_slice_reload;
                 schedule();
+                return;
             }
         }
+    }
+
+    /* 优先级抢占检查：如果就绪队列中有更高优先级线程，立即抢占 */
+    next = scheduler_pick_next();
+    if ((next != NULL) && (next != current) && (next->prio > current->prio))
+    {
+        schedule();
     }
 }
 
