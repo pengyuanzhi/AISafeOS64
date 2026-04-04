@@ -34,6 +34,7 @@
 #include <hal.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* ========================================================================
  * ASID 管理

@@ -10,6 +10,12 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/kernel
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/sched
+    ${CMAKE_CURRENT_SOURCE_DIR}/ipc
+    ${CMAKE_CURRENT_SOURCE_DIR}/cap
+    ${CMAKE_CURRENT_SOURCE_DIR}/mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/irq
+    ${CMAKE_CURRENT_SOURCE_DIR}/verify
     ${KERNEL_ARCH_DIR}
 )
 

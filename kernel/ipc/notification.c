@@ -30,6 +30,7 @@
 #include "thread.h"
 #include "scheduler.h"
 #include <stdint.h>
+#include "hal.h"
 
 /* ========================================================================
  * 全局通知表

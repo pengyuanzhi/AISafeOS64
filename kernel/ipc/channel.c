@@ -32,6 +32,7 @@
 #include "scheduler.h"
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* ========================================================================
  * 全局通道和连接表

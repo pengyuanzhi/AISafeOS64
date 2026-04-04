@@ -145,15 +145,15 @@ SECTIONS
      */
     __kernel_end = .;
     __kernel_size = __kernel_end - __kernel_base;
-}
 
-/**
- * @brief 丢弃段
- */
-/DISCARD/ :
-{
-    *(.comment)
-    *(.ARM.attributes)
-    *(.note.*)
-    *(.eh_frame*)
+    /**
+     * @brief 丢弃段
+     */
+    /DISCARD/ :
+    {
+        *(.comment)
+        *(.ARM.attributes)
+        *(.note.*)
+        *(.eh_frame*)
+    }
 }

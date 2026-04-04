@@ -30,6 +30,7 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* 前向声明: ARM64 上下文切换接口（定义在 context.S） */
 extern void context_switch(uint64_t *prev_ctx, uint64_t *next_ctx);
@@ -42,8 +43,6 @@ extern char __heap_start[];
 extern char __heap_end[];
 
 /* HAL 接口 */
-extern uint32_t hal_get_cpu_id(void);
-extern void hal_irq_enable(void);
 extern void hal_uart_puts(uint64_t base, const char *str);
 
 /* ========================================================================

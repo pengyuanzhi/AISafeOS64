@@ -186,7 +186,7 @@ static inline uint32_t atomic_inc_u32(volatile uint32_t *addr)
 
     do
     {
-        __asm__ volatile("ldxr %w0, [%2]"
+        __asm__ volatile("ldxr %w0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -221,7 +221,7 @@ static inline uint32_t atomic_dec_u32(volatile uint32_t *addr)
 
     do
     {
-        __asm__ volatile("ldxr %w0, [%2]"
+        __asm__ volatile("ldxr %w0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -257,7 +257,7 @@ static inline uint32_t atomic_add_u32(volatile uint32_t *addr, uint32_t value)
 
     do
     {
-        __asm__ volatile("ldxr %w0, [%2]"
+        __asm__ volatile("ldxr %w0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -293,7 +293,7 @@ static inline uint32_t atomic_sub_u32(volatile uint32_t *addr, uint32_t value)
 
     do
     {
-        __asm__ volatile("ldxr %w0, [%2]"
+        __asm__ volatile("ldxr %w0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -328,7 +328,7 @@ static inline uint32_t atomic_xchg_u32(volatile uint32_t *addr, uint32_t value)
 
     do
     {
-        __asm__ volatile("ldxr %w0, [%2]"
+        __asm__ volatile("ldxr %w0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -435,7 +435,7 @@ static inline uint64_t atomic_inc_u64(volatile uint64_t *addr)
 
     do
     {
-        __asm__ volatile("ldxr %0, [%2]"
+        __asm__ volatile("ldxr %0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -470,7 +470,7 @@ static inline uint64_t atomic_dec_u64(volatile uint64_t *addr)
 
     do
     {
-        __asm__ volatile("ldxr %0, [%2]"
+        __asm__ volatile("ldxr %0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -506,7 +506,7 @@ static inline uint64_t atomic_add_u64(volatile uint64_t *addr, uint64_t value)
 
     do
     {
-        __asm__ volatile("ldxr %0, [%2]"
+        __asm__ volatile("ldxr %0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -542,7 +542,7 @@ static inline uint64_t atomic_sub_u64(volatile uint64_t *addr, uint64_t value)
 
     do
     {
-        __asm__ volatile("ldxr %0, [%2]"
+        __asm__ volatile("ldxr %0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");
@@ -577,7 +577,7 @@ static inline uint64_t atomic_xchg_u64(volatile uint64_t *addr, uint64_t value)
 
     do
     {
-        __asm__ volatile("ldxr %0, [%2]"
+        __asm__ volatile("ldxr %0, [%1]"
                          : "=&r"(old_val)
                          : "r"(addr)
                          : "memory");

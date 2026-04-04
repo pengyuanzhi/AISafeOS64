@@ -24,6 +24,7 @@
 #include <kernel/compiler.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* 前向声明: ARM64 上下文初始化（定义在 context.S） */
 extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
@@ -33,8 +34,6 @@ extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
 extern vaddr_t stack_alloc_by_scheduler(uint32_t size);
 
 /* HAL 接口 */
-extern uint32_t hal_get_cpu_id(void);
-
 /* ========================================================================
  * 内部辅助函数
  * ======================================================================== */

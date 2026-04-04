@@ -25,13 +25,9 @@
 #include <kernel/compiler.h>
 #include <kernel/types.h>
 #include <stdint.h>
+#include "hal.h"
 
 /* HAL 接口 */
-extern uint32_t hal_get_cpu_id(void);
-extern uint32_t hal_irq_saved_state(void);
-extern void hal_irq_disable(void);
-extern void hal_irq_restore(uint32_t state);
-
 /* ========================================================================
  * 初始化
  * ======================================================================== */

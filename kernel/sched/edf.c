@@ -27,9 +27,9 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* HAL 接口 */
-extern uint32_t hal_get_cpu_id(void);
 extern tick_t hal_get_tick_count(void);
 
 /* ========================================================================
