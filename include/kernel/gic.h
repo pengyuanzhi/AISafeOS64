@@ -1,16 +1,20 @@
 /**
  * @file    gic.h
- * @brief   ARM GIC（通用中断控制器）驱动接口
+ * @brief   ARM GICv2（通用中断控制器）驱动接口
  * @author  AISafe64 Team
- * @date    2026-04-01
- * @version 2.0
+ * @date    2026-04-04
+ * @version 3.0
  *
- * @details 本文件定义了 ARM GIC-400/500 驱动接口：
+ * @details 本文件定义了 ARM GICv2 (GIC-400) 驱动接口：
  *          - GIC Distributor 和 CPU Interface 初始化
  *          - 中断优先级管理
- *          - 中断亲和性配置
+ *          - 中断亲和性配置（ITARGETSR）
  *          - 中断使能/禁用
  *          - 中断处理（EOI）
+ *
+ *          QEMU virt 平台 GICv2 地址映射：
+ *          - GICD (Distributor):  0x08000000
+ *          - GICC (CPU Interface): 0x08010000
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: IN-001~006

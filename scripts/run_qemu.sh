@@ -40,9 +40,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+KERNEL_ELF="${BUILD_DIR}/kernel/aisafe64.elf.elf"
+
 # 检查内核二进制文件
-if [ ! -f "${BUILD_DIR}/aisafe64.bin" ]; then
-    echo "[run] 内核二进制文件不存在，正在构建..."
+if [ ! -f "${KERNEL_ELF}" ]; then
+    echo "[run] 内核 ELF 不存在，正在构建..."
     cd "${BUILD_DIR}" 2>/dev/null || mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
     cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-arm64.cmake
@@ -55,14 +57,14 @@ echo "  CPU: ${CPU} x${SMP}"
 echo "  内存: ${MEMORY}MB"
 echo "========================================"
 
-# 运行 QEMU
+# 运行 QEMU（使用 ELF 格式以便 QEMU 正确加载到入口地址）
 qemu-system-aarch64 \
     -M "${MACHINE}" \
     -cpu "${CPU}" \
     -smp "${SMP}" \
     -m "${MEMORY}" \
     -nographic \
-    -kernel "${BUILD_DIR}/aisafe64.bin"
+    -kernel "${KERNEL_ELF}"
 
 echo ""
 echo "[run] QEMU 已退出"
