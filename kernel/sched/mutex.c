@@ -57,32 +57,11 @@ extern kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio);
  *
  * @note 简化实现：直接从 g_scheduler.thread_table 查找
  */
-static struct KThread *get_thread_by_tid(uint32_t tid)
+static struct KThread *__attribute__((unused)) get_thread_by_tid(uint32_t tid)
 {
-    extern struct KThread *kthread_get_current(void);
-
-    /* 在完整实现中，需要从 thread_table 查找。
-     * 此处提供框架，具体实现在 thread.c 中 */
     (void)tid;
+    /* 简化实现：在完整版本中从 thread_table 查找 */
     return NULL;
-}
-
-/**
- * @brief 获取线程的优先级
- */
-static priority_t get_thread_priority(struct KThread *thread)
-{
-    if (thread == NULL)
-    {
-        return PRIORITY_MIN;
-    }
-
-    /* 直接访问 KThread_t 结构的 prio 字段 */
-    /* 由于 KThread_t 定义在 thread.h 中，这里通过偏移访问 */
-    extern struct KThread *kthread_get_current(void);
-    (void)thread;
-
-    return PRIORITY_MIN;
 }
 
 /* ========================================================================

@@ -289,6 +289,11 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
                               void *recv_buf,
                               uint32_t recv_size)
 {
+    /* 标记未使用参数（完整 IPC 实现中使用） */
+    (void)tag;
+    (void)recv_buf;
+    (void)recv_size;
+
     ipc_endpoint_t *ep;
     KThread_t *current;
     uint32_t irq_state;
@@ -368,6 +373,10 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
                                  void *recv_buf,
                                  uint32_t recv_size)
 {
+    /* 标记未使用参数（完整 IPC 实现中使用） */
+    (void)recv_buf;
+    (void)recv_size;
+
     ipc_endpoint_t *ep;
     KThread_t *current;
     uint32_t irq_state;

@@ -54,12 +54,9 @@ extern void hal_uart_puts(uint64_t base, const char *str);
  */
 Scheduler_t g_scheduler =
 {
-    .cpu_queues =
-    {
-        /* 编译器自动零初始化所有 CPU 队列 */
-    },
+    .cpu_queues = { { { { 0 } } } },
     .initialized = false,
-    .thread_table = { { { 0 } } } /* 全部初始化为零 */
+    .thread_table = { { { 0 } } }
 };
 
 /* ========================================================================

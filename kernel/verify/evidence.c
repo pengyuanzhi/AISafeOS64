@@ -20,8 +20,8 @@
 #include <kernel/types.h>
 #include <kernel/spinlock.h>
 
-/* snprintf 需要 */
-extern int snprintf(char *str, uint32_t size, const char *format, ...);
+/* snprintf 需要（内核环境下手动声明） */
+extern int snprintf(char *str, unsigned long size, const char *format, ...);
 
 /* ========================================================================
  * 内部常量与宏

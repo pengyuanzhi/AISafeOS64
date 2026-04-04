@@ -132,11 +132,6 @@ thread_id_t kthread_create(const char *name,
         return THREAD_ID_INVALID;
     }
 
-    if ((uint32_t)prio >= CONFIG_PRIORITY_LEVELS)
-    {
-        return THREAD_ID_INVALID;
-    }
-
     if (stack_size < CONFIG_STACK_SIZE_MIN)
     {
         stack_size = CONFIG_STACK_SIZE_MIN;
@@ -299,10 +294,8 @@ kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio)
 {
     KThread_t *thread;
 
-    if ((uint32_t)prio >= CONFIG_PRIORITY_LEVELS)
-    {
-        return -(int32_t)EINVAL;
-    }
+    /* priority_t 为 uint8_t，范围 [0, 255]，始终 < CONFIG_PRIORITY_LEVELS(256) */
+    (void)prio;
 
     thread = get_thread_by_id(tid);
     if (thread == NULL)

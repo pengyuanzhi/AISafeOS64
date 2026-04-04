@@ -41,6 +41,13 @@ extern uint64_t sysreg_read_cntfrq_el0(void);
  * ARM64 系统寄存器直接访问宏
  * ======================================================================== */
 
+/*
+ * ARM64 系统寄存器读取需要 GCC 语句表达式，
+ * 这是架构必需的编译器扩展，此处禁用 -Wpedantic 警告。
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+
 /** @brief 读取物理计数器（CNTPCT_EL0） */
 #define read_cntpct_el0() ({                               \
     uint64_t _val;                                         \
@@ -55,6 +62,15 @@ extern uint64_t sysreg_read_cntfrq_el0(void);
     _val;                                                  \
 })
 
+/** @brief 读取定时器控制寄存器（CNTP_CTL_EL0） */
+#define read_cntp_ctl_el0() ({                             \
+    uint64_t _val;                                         \
+    __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(_val)); \
+    _val;                                                  \
+})
+
+#pragma GCC diagnostic pop
+
 /** @brief 写入定时器比较值（CNTP_CVAL_EL0） */
 #define write_cntp_cval_el0(val)                           \
     do {                                                   \
@@ -68,13 +84,6 @@ extern uint64_t sysreg_read_cntfrq_el0(void);
         __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"(val)); \
         __asm__ volatile("isb");                           \
     } while (0)
-
-/** @brief 读取定时器控制寄存器（CNTP_CTL_EL0） */
-#define read_cntp_ctl_el0() ({                             \
-    uint64_t _val;                                         \
-    __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(_val)); \
-    _val;                                                  \
-})
 
 /* ========================================================================
  * 定时器控制位定义

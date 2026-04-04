@@ -56,7 +56,7 @@
  *
  * @return true 对齐正确，false 对齐错误
  */
-static bool is_aligned_index(const object_pool_t *pool, const void *obj)
+static bool __attribute__((unused)) is_aligned_index(const object_pool_t *pool, const void *obj)
 {
     uintptr_t obj_addr = (uintptr_t)obj;
     uintptr_t buf_addr = (uintptr_t)pool->buffer;

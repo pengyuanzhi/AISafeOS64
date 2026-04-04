@@ -141,7 +141,7 @@ static uint32_t
  *
  * @note 多核安全
  */
-static kobj_id_t kobj_alloc_id(void)
+static kobj_id_t __attribute__((unused)) kobj_alloc_id(void)
 {
     uint32_t old_id;
 

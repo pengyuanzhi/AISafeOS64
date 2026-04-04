@@ -26,8 +26,11 @@
 
 /**
  * @brief 读取系统寄存器
- * @param reg 系统寄存器名称
+ * @param reg 系统寄存器名称（如 CurrentEL）
  * @return 寄存器值（uint64_t）
+ *
+ * @note 使用 GCC 语句表达式，将寄存器名字符串化为汇编操作数
+ * @note 这在标准 C 中无法实现，是 ARM64 内核必需的编译器扩展
  */
 #define sysreg_read(reg) ({                            \
     uint64_t _val;                                     \
@@ -51,26 +54,28 @@
 /**
  * @brief 获取当前异常级别
  * @return 异常级别（0-3）
- *
- * @details EL0=用户态, EL1=内核态, EL2=虚拟机监控, EL3=安全监控
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 static inline uint32_t hal_get_current_el(void)
 {
     uint64_t currentel = sysreg_read(CurrentEL);
     return (uint32_t)((currentel >> 2U) & 0x3U);
 }
+#pragma GCC diagnostic pop
 
 /**
  * @brief 获取当前 CPU ID
  * @return CPU ID（0 ~ CONFIG_MAX_CPUS-1）
- *
- * @details 读取 MPIDR_EL1 寄存器的 Aff0 字段
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 static inline uint32_t hal_get_cpu_id(void)
 {
     uint64_t mpidr = sysreg_read(mpidr_el1);
     return (uint32_t)(mpidr & 0xFFU);
 }
+#pragma GCC diagnostic pop
 
 /* ========== 中断控制 ========== */
 
@@ -102,16 +107,21 @@ static inline void hal_irq_disable(void)
  * @brief 获取当前中断状态
  * @return 非零表示中断已禁用
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 static inline uint32_t hal_irq_saved_state(void)
 {
     uint64_t daif = sysreg_read(DAIF);
     return (uint32_t)((daif >> 9U) & 0xFU);
 }
+#pragma GCC diagnostic pop
 
 /**
  * @brief 恢复中断状态
  * @param state 之前保存的中断状态
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 static inline void hal_irq_restore(uint32_t state)
 {
     uint64_t daif = sysreg_read(DAIF);
@@ -119,18 +129,22 @@ static inline void hal_irq_restore(uint32_t state)
     daif |= ((uint64_t)state << 9U);
     sysreg_write(daif, daif);
 }
+#pragma GCC diagnostic pop
 
 /* ========== 栈对齐检查 ========== */
 
 /**
  * @brief 启用栈对齐检查
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 static inline void hal_enable_stack_alignment_check(void)
 {
     uint64_t sctlr = sysreg_read(sctlr_el1);
     sctlr |= (1ULL << 3U);  /* SA 位 */
     sysreg_write(sctlr_el1, sctlr);
 }
+#pragma GCC diagnostic pop
 
 /* ========== UART 早期输出接口 ========== */
 
