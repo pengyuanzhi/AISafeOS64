@@ -16,10 +16,9 @@ set(PROJECT_VERSION_MINOR 1)
 set(PROJECT_VERSION_PATCH 0)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
-# 微内核公共头文件搜索路径
+# 微内核公共头文件搜索路径（不包含 include/kernel 避免污染测试）
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include/kernel
 )
 
 # ==============================================================================
