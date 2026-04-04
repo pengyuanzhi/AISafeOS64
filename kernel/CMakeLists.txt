@@ -28,8 +28,10 @@ set(KERNEL_ARCH_SOURCES
     arch/arm64/context.S
     arch/arm64/hal.c
     arch/arm64/entry.c
+    arch/arm64/mmu.c
     arch/arm64/gic.c
     arch/arm64/ipi.c
+    arch/arm64/mmu.c
     arch/arm64/secure_boot.c
     arch/arm64/smp_boot.c
 )

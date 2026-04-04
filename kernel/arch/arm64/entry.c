@@ -27,6 +27,11 @@
 #include <kernel/ipi.h>
 #include "../../sched/scheduler.h"
 
+/* ========== 外部函数声明 ========== */
+
+/** @brief MMU 早期初始化（恒等映射） */
+extern void mmu_early_init(void);
+
 /* ========== 外部全局变量（boot.S 定义） ========== */
 
 /** @brief 设备树指针（boot.S 中保存） */
@@ -370,7 +375,12 @@ void kernel_main(void)
     hal_uart_init((uint64_t)QEMU_UART0_BASE);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
 
-    /* ---- 第二步：打印编译信息 ---- */
+    /* ---- 第二步：启用 MMU（恒等映射） ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (identity mapping)...\n");
+    mmu_early_init();
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (1GB identity map)\n");
+
+    /* ---- 第三步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __VERSION__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
