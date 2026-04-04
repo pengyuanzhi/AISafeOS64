@@ -441,10 +441,22 @@ static kernel_status_t channel_create(thread_id_t owner_tid, kobj_id_t *ch_id)
 
     (void)owner_tid;
 
+    /* 跳过索引 0（id=0 与 KOBJ_ID_INVALID 冲突） */
     idx = alloc_channel_index();
     if (idx < 0)
     {
         return -(int32_t)ENOMEM;
+    }
+
+    while (idx == 0)
+    {
+        /* 索引 0 不可用，放回并重新分配 */
+        free_channel_index((uint32_t)idx);
+        idx = alloc_channel_index();
+        if (idx < 0)
+        {
+            return -(int32_t)ENOMEM;
+        }
     }
 
     ch = &s_channels[(uint32_t)idx];
@@ -886,25 +898,27 @@ static void test_channel_create_reuse(void)
  */
 static void test_channel_exhaust(void)
 {
+    /* 索引 0 被保留，因此最多可分配 TEST_MAX_CHANNELS - 1 个通道 */
     kobj_id_t ids[TEST_MAX_CHANNELS];
     kobj_id_t extra;
     kernel_status_t ret;
     uint32_t i;
+    uint32_t usable = TEST_MAX_CHANNELS - 1U;
 
     channel_subsys_test_init();
 
-    for (i = 0U; i < TEST_MAX_CHANNELS; i++)
+    for (i = 0U; i < usable; i++)
     {
         ret = channel_create(i + 1U, &ids[i]);
         TEST_ASSERT_EQ(ret, KERNEL_OK);
     }
 
-    /* 再次分配应失败 */
+    /* 再次分配应失败（索引 0 被跳过，所有可用索引已用完） */
     ret = channel_create(99U, &extra);
     TEST_ASSERT_EQ(ret, -(int32_t)ENOMEM);
 
     /* 清理 */
-    for (i = 0U; i < TEST_MAX_CHANNELS; i++)
+    for (i = 0U; i < usable; i++)
     {
         channel_destroy(ids[i]);
     }

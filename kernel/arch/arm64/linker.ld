@@ -1,6 +1,6 @@
 /**
- * @file kernel.ld
- * @brief AISafeOS64 微内核 ARMv8-A 链接脚本
+ * @file linker.ld
+ * @brief AISafeOS64 微内核 ARMv8-A 链接脚本（kernel/arch/arm64/ 副本）
  * @author AISafe64 Team
  * @date 2026-04-04
  * @version 2.1
