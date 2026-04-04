@@ -38,6 +38,18 @@
 /** @brief 设备管理器服务协议号 */
 #define SERVICE_DEV_MANAGER        0x0004U
 
+/** @brief 文件系统服务协议号 */
+#define SERVICE_FS_MANAGER         0x0005U
+
+/** @brief 网络服务协议号 */
+#define SERVICE_NET_MANAGER        0x0006U
+
+/** @brief 安全服务协议号 */
+#define SERVICE_SECURITY_MANAGER   0x0007U
+
+/** @brief VMM 服务协议号 */
+#define SERVICE_VMM_MANAGER        0x0008U
+
 /* ========================================================================
  * 进程管理器消息类型
  * ======================================================================== */

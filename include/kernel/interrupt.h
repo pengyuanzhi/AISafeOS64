@@ -50,11 +50,11 @@ typedef void (*irq_handler_t)(uint32_t irq, void *arg);
 typedef struct
 {
     uint32_t        irq;            /**< @brief 中断号 */
-    uint32_t        cpu_id;         /**< @brief 绌定的 CPU */
-    uint8_t        trigger_mode;  /**< @brief 触发模式 */
-    uint8_t        priority;      /**< @brief 优先级 */
-    irq_handler_t  handler;      /**< @brief 夌定处理函数 */
-    void           *handler_arg;  /**< @brief 夌定参数 */
+    uint32_t        cpu_id;         /**< @brief 绑定的 CPU */
+    uint8_t         trigger_mode;   /**< @brief 触发模式 */
+    uint8_t         priority;       /**< @brief 优先级 */
+    irq_handler_t   handler;        /**< @brief 绑定的处理函数 */
+    void            *handler_arg;   /**< @brief 绑定的参数 */
     kobj_id_t       notification_id; /**< @brief 关联的通知对象 ID */
     bool            in_use;       /**< @brief 是否已注册 */
 } irq_desc_t;
