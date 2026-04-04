@@ -82,10 +82,11 @@ exception_sync_spx:
     cmp     x21, #0x15
     b.eq    .Lsvc_handler
 
-    /* 其他同步异常 → 调用 exception_sync_handler(esr, far, elr, spsr) */
+    /* 其他同步异常 → 调用 exception_sync_handler(esr, far, &elr, spsr) */
     mrs     x1, far_el1              /* x1 = FAR */
     mov     x0, x20                  /* x0 = ESR */
-    ldp     x2, x3, [sp]             /* x2 = ELR, x3 = SPSR（栈顶是 elr/spsr） */
+    mov     x2, sp                   /* x2 = 指向栈上 ELR 的指针 */
+    ldr     x3, [sp, #8]             /* x3 = SPSR（栈顶是 elr/spsr，+8 是 spsr） */
     bl      exception_sync_handler
 
     /* 恢复并返回 */

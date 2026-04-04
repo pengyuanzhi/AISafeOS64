@@ -1,12 +1,13 @@
 /**
  * @file    gic.c
- * @brief   ARM GIC-400 中断控制器驱动实现
+ * @brief   ARM GICv3 中断控制器驱动实现
  * @author  AISafe64 Team
- * @date    2026-04-01
- * @version 2.0
+ * @date    2026-04-04
+ * @version 3.0
  *
- * @details 本文件实现了 ARM GIC-400 中断控制器驱动：
- *          - Distributor 和 CPU Interface 初始化
+ * @details 本文件实现了 ARM GICv3 中断控制器驱动：
+ *          - Distributor 和 Redistributor 初始化
+ *          - CPU Interface 通过系统寄存器（ICC_*）访问
  *          - 中断使能/禁用/屏蔽
  *          - 中断优先级配置
  *          - 中断亲和性（目标 CPU）配置
@@ -14,7 +15,10 @@
  *          - SGI 软件中断发送
  *          - 中断确认（ACK）和结束（EOI）
  *
- *          GIC-400 寄存器通过 MMIO 方式访问，基地址由平台定义。
+ *          QEMU virt 平台地址映射：
+ *          - GICD (Distributor): 0x08000000（GICv2）/ 0x50000000（GICv3）
+ *          - GICR (Redistributor): 0x500A0000（GICv3，每个核 128KB）
+ *          - GICC (CPU Interface): GICv3 通过系统寄存器 ICC_* 访问，无 MMIO
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: IN-001~006
@@ -30,11 +34,12 @@
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
+#include "hal.h"
 #include <stdint.h>
 #include <string.h>
 
 /* ========================================================================
- * GIC-400 Distributor 寄存器偏移定义
+ * GICv3 Distributor 寄存器偏移定义
  * ======================================================================== */
 
 /** @brief Distributor 控制寄存器 */
@@ -58,40 +63,49 @@
 /** @brief Distributor 中断优先级寄存器（每个中断占 1 字节） */
 #define GICD_IPRIORITYR(n)     (0x0400U + (uint32_t)(n))
 
-/** @brief Distributor 中断目标 CPU 寄存器（每个中断占 1 字节） */
-#define GICD_ITARGETSR(n)      (0x0800U + (uint32_t)(n))
+/** @brief Distributor 中断路由寄存器（GICv3，每个中断占 8 字节，亲和性路由） */
+#define GICD_IROUTER(n)        (0x6000U + ((uint32_t)(n) * 8U))
 
 /** @brief Distributor 中断配置寄存器（每个中断占 2 位） */
 #define GICD_ICFGR(n)          (0x0C00U + ((uint32_t)(n) * 4U))
 
-/** @brief Distributor SGI 寄存器 */
+/** @brief Distributor SGI 寄存器（GICv3 使用 GICD_SGIR 仍可兼容） */
 #define GICD_SGIR              0x0F00U
 
 /* ========================================================================
- * GIC-400 CPU Interface 寄存器偏移定义
+ * GICv3 Redistributor 寄存器偏移定义
  * ======================================================================== */
 
-/** @brief CPU Interface 控制寄存器 */
-#define GICC_CTLR              0x0000U
+/** @brief Redistributor 控制寄存器 */
+#define GICR_CTLR              0x0000U
 
-/** @brief CPU Interface 优先级屏蔽寄存器 */
-#define GICC_PMR               0x0004U
+/** @brief Redistributor 唤醒寄存器 */
+#define GICR_WAKER             0x0014U
 
-/** @brief CPU Interface 中断确认寄存器 */
-#define GICC_IAR               0x000CU
+/** @brief Redistributor 类型标识寄存器 */
+#define GICR_TYPER             0x0008U
 
-/** @brief CPU Interface 中断结束寄存器 */
-#define GICC_EOIR              0x0010U
+/** @brief GICR_WAKER 中 ProcessorSleep 位 */
+#define GICR_WAKER_PROCESSOR_SLEEP  0x00000002U
+
+/** @brief GICR_WAKER 中 ChildrenAsleep 位 */
+#define GICR_WAKER_CHILDREN_ASLEEP  0x00000004U
+
+/** @brief 每个 Redistributor 的_stride_（128KB = 0x20000） */
+#define GICR_STRIDE            0x20000U
 
 /* ========================================================================
  * GIC 控制位定义
  * ======================================================================== */
 
-/** @brief Distributor 使能位 */
-#define GICD_CTLR_ENABLE       0x01U
+/** @brief Distributor 使能位（GICv3: EnableGrp0 | EnableGrp1NS | EnableGrp1S = bit0|bit1|bit2，简化为 ARE + Group1） */
+#define GICD_CTLR_ENABLE       0x07U
 
-/** @brief CPU Interface 使能位 */
-#define GICC_CTLR_ENABLE       0x01U
+/** @brief GICv3 Distributor ARE（亲和性路由使能）位 */
+#define GICD_CTLR_ARE_NS       0x10U
+
+/** @brief GICv3 Distributor 使能位（ARE + Group1） */
+#define GICD_CTLR_ENABLE_V3    (GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE)
 
 /** @brief 最低优先级屏蔽值（允许所有优先级） */
 #define GICC_PMR_LOWEST        0xFFU
@@ -126,24 +140,26 @@
 
 /**
  * @def GICD_BASE_ADDR
- * @brief GIC Distributor 基地址
+ * @brief GICv3 Distributor 基地址
  *
- * @details 默认使用 BCM2837 (Raspberry Pi 3/4) 典型地址。
+ * @details QEMU virt 平台 GICv3 使用 0x50000000。
+ *          GICv2 使用 0x08000000（本驱动已切换为 GICv3）。
  *          实际项目应通过设备树或平台配置获取。
  */
 #ifndef GICD_BASE_ADDR
-#define GICD_BASE_ADDR        ((uintptr_t)0x08000000U)  /* QEMU virt GIC Distributor */
+#define GICD_BASE_ADDR        ((uintptr_t)0x50000000U)  /* QEMU virt GICv3 Distributor */
 #endif
 
 /**
- * @def GICC_BASE_ADDR
- * @brief GIC CPU Interface 基地址
+ * @def GICR_BASE_ADDR
+ * @brief GICv3 Redistributor 基地址
  *
- * @details 默认使用 BCM2837 (Raspberry Pi 3/4) 典型地址。
- *          实际项目应通过设备树或平台配置获取。
+ * @details QEMU virt 平台 GICv3 Redistributor 基地址。
+ *          每个 CPU 核占用 128KB (stride = 0x20000)。
+ *          CPU n 的 Redistributor 地址 = GICR_BASE_ADDR + n * GICR_STRIDE
  */
-#ifndef GICC_BASE_ADDR
-#define GICC_BASE_ADDR        ((uintptr_t)0x08010000U)  /* QEMU virt GIC CPU Interface */
+#ifndef GICR_BASE_ADDR
+#define GICR_BASE_ADDR        ((uintptr_t)0x500A0000U)  /* QEMU virt GICv3 Redistributor */
 #endif
 
 /* ========================================================================
@@ -162,15 +178,15 @@
     (*(volatile uint32_t *)((uintptr_t)s_gicd_base + (offset)))
 
 /**
- * @def GICC_REG
- * @brief 读/写 GIC CPU Interface 寄存器
+ * @def GICR_REG
+ * @brief 读/写 GIC Redistributor 寄存器
  *
  * @param offset 寄存器偏移量
  *
  * @return 寄存器值（volatile uint32_t 左值）
  */
-#define GICC_REG(offset) \
-    (*(volatile uint32_t *)((uintptr_t)s_gicc_base + (offset)))
+#define GICR_REG(offset) \
+    (*(volatile uint32_t *)((uintptr_t)s_gicr_base + (offset)))
 
 /**
  * @def GICD_REG_BYTE
@@ -183,6 +199,17 @@
 #define GICD_REG_BYTE(offset) \
     (*(volatile uint8_t *)((uintptr_t)s_gicd_base + (offset)))
 
+/**
+ * @def GICD_REG64
+ * @brief 读/写 GIC Distributor 64 位寄存器
+ *
+ * @param offset 寄存器偏移量
+ *
+ * @return 寄存器值（volatile uint64_t 左值）
+ */
+#define GICD_REG64(offset) \
+    (*(volatile uint64_t *)((uintptr_t)s_gicd_base + (offset)))
+
 /* ========================================================================
  * 全局状态
  * ======================================================================== */
@@ -193,9 +220,9 @@
 static uintptr_t s_gicd_base = (uintptr_t)0U;
 
 /**
- * @brief GIC CPU Interface 基地址（MMIO）
+ * @brief GIC Redistributor 基地址（MMIO，当前 CPU）
  */
-static uintptr_t s_gicc_base = (uintptr_t)0U;
+static uintptr_t s_gicr_base = (uintptr_t)0U;
 
 /* ========================================================================
  * 内部辅助函数
@@ -227,17 +254,54 @@ static uint32_t gic_get_max_irq(void)
  * ======================================================================== */
 
 /**
- * @brief 初始化 GIC
+ * @brief 初始化 GICv3 Redistributor（当前 CPU）
  *
- * @details 初始化 GIC Distributor 和当前 CPU 的 CPU Interface。
- *          - 保存基地址
- *          - 禁用 Distributor
- *          - 禁用所有 SPI 中断
- *          - 设置默认优先级（0xA0）
- *          - 设置目标 CPU 为 CPU 0
- *          - 清除所有 SPI 的挂起状态
- *          - 启用 Distributor
- *          - 配置并启用 CPU Interface（优先级屏蔽设为最低）
+ * @details 等待 Redistributor 唤醒完成，确保可以接受中断。
+ *          GICv3 的 Redistributor 负责管理 PPI/SGI。
+ *
+ * @note 对应需求: IN-001
+ */
+static void gicr_init(void)
+{
+    uint32_t waker;
+
+    /* 计算 CPU n 的 Redistributor 基地址 */
+    uint32_t cpu_id = hal_get_cpu_id();
+    s_gicr_base = GICR_BASE_ADDR + ((uintptr_t)cpu_id * (uintptr_t)GICR_STRIDE);
+
+    /* 唤醒 Redistributor：清除 ProcessorSleep 位 */
+    waker = GICR_REG(GICR_WAKER);
+    waker &= ~GICR_WAKER_PROCESSOR_SLEEP;
+    GICR_REG(GICR_WAKER) = waker;
+    barrier();
+
+    /* 等待 ChildrenAsleep 清零（表明 LPI 配置完成） */
+    for (;;)
+    {
+        waker = GICR_REG(GICR_WAKER);
+        if ((waker & GICR_WAKER_CHILDREN_ASLEEP) == 0U)
+        {
+            break;
+        }
+    }
+}
+
+/**
+ * @brief 初始化 GICv3
+ *
+ * @details 初始化 GICv3 Distributor 和当前 CPU 的 Redistributor，
+ *          然后通过系统寄存器启用 CPU Interface。
+ *
+ *          步骤：
+ *          1. 保存 Distributor 和 Redistributor 基地址
+ *          2. 初始化 Redistributor（唤醒）
+ *          3. 禁用 Distributor
+ *          4. 禁用所有 SPI 中断
+ *          5. 设置默认优先级
+ *          6. 设置 SPI 默认路由到 CPU 0（亲和性路由模式）
+ *          7. 清除所有 SPI 的挂起状态
+ *          8. 启用 Distributor（ARE 模式）
+ *          9. 通过系统寄存器启用 CPU Interface
  *
  * @return KERNEL_OK 成功
  *
@@ -251,16 +315,18 @@ kernel_status_t gic_init(void)
 
     /* 保存基地址 */
     s_gicd_base = GICD_BASE_ADDR;
-    s_gicc_base = GICC_BASE_ADDR;
 
-    /* 禁用 Distributor */
+    /* 第一步：初始化 Redistributor（必须在 Distributor 之前） */
+    gicr_init();
+
+    /* 第二步：禁用 Distributor */
     GICD_REG(GICD_CTLR) = 0U;
     barrier();
 
-    /* 获取最大中断号 */
+    /* 第三步：获取最大中断号 */
     max_irq = gic_get_max_irq();
 
-    /* 禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
+    /* 第四步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -268,19 +334,20 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICENABLER(n)) = 0xFFFFFFFFU;
     }
 
-    /* 设置所有 SPI 的默认优先级为 0xA0（中等偏低） */
+    /* 第五步：设置所有 SPI 的默认优先级 */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
         GICD_REG_BYTE(GICD_IPRIORITYR(irq)) = (uint8_t)GIC_PRIORITY_DEFAULT;
     }
 
-    /* 设置所有 SPI 的目标 CPU 为 CPU 0 */
+    /* 第六步：设置所有 SPI 默认路由到 CPU 0（亲和性路由模式） */
     for (irq = GIC_SPI_BASE; irq <= max_irq; irq++)
     {
-        GICD_REG_BYTE(GICD_ITARGETSR(irq)) = 0x01U;
+        /* GICD_IROUTER: affinity = 0x0000 (CPU 0, MPIDR.Aff0=0) */
+        GICD_REG64(GICD_IROUTER(irq)) = 0x0000000000000000ULL;
     }
 
-    /* 清除所有 SPI 的挂起状态 */
+    /* 第七步：清除所有 SPI 的挂起状态 */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
          n <= (max_irq / GICD_IRQS_PER_REG);
          n++)
@@ -288,37 +355,42 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICPENDR(n)) = 0xFFFFFFFFU;
     }
 
-    /* 启用 Distributor（Group 0 + Group 1） */
-    GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE;
+    /* 第八步：启用 Distributor（ARE + Group0 + Group1） */
+    GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE_V3;
     barrier();
 
-    /* 配置 CPU Interface */
-    /* 设置优先级屏蔽为最低（允许所有优先级中断） */
-    GICC_REG(GICC_PMR) = GICC_PMR_LOWEST;
+    /* 第九步：通过系统寄存器配置 GICv3 CPU Interface */
+    /* ICC_PMR_EL1：设置优先级屏蔽为最低（允许所有优先级） */
+    __asm__ volatile("msr icc_pmr_el1, %0" :: "r"((uint64_t)GICC_PMR_LOWEST) : "memory");
     barrier();
 
-    /* 启用 CPU Interface */
-    GICC_REG(GICC_CTLR) = GICC_CTLR_ENABLE;
+    /* ICC_IGRPEN1_EL1：启用 Group 1 中断 */
+    __asm__ volatile("msr icc_igrpen1_el1, %0" :: "r"((uint64_t)0x01U) : "memory");
     barrier();
 
     return KERNEL_OK;
 }
 
 /**
- * @brief 初始化从核的 GIC CPU Interface
+ * @brief 初始化从核的 GICv3 Redistributor 和 CPU Interface
  *
- * @details 从核启动后调用，仅初始化 CPU Interface。
+ * @details 从核启动后调用：
+ *          1. 初始化当前 CPU 的 Redistributor
+ *          2. 通过系统寄存器启用 CPU Interface
  *          不再重新初始化 Distributor（由主核完成）。
  *
  * @return KERNEL_OK 成功
  */
 kernel_status_t gic_init_secondary(void)
 {
-    /* 配置 CPU Interface */
-    GICC_REG(GICC_PMR) = GICC_PMR_LOWEST;
+    /* 初始化当前 CPU 的 Redistributor */
+    gicr_init();
+
+    /* 通过系统寄存器配置 CPU Interface */
+    __asm__ volatile("msr icc_pmr_el1, %0" :: "r"((uint64_t)GICC_PMR_LOWEST) : "memory");
     barrier();
 
-    GICC_REG(GICC_CTLR) = GICC_CTLR_ENABLE;
+    __asm__ volatile("msr icc_igrpen1_el1, %0" :: "r"((uint64_t)0x01U) : "memory");
     barrier();
 
     return KERNEL_OK;
@@ -448,8 +520,9 @@ uint8_t gic_get_priority(uint32_t irq)
 /**
  * @brief 设置中断亲和性（目标 CPU）
  *
- * @details 写入 ITARGETSR 寄存器的对应字节，指定中断应发送到哪些 CPU。
+ * @details GICv3 通过 GICD_IROUTER 寄存器设置亲和性路由。
  *          仅对 SPI（中断号 >= 32）有效。
+ *          cpu_mask 的 bit n 表示路由到 CPU n（仅支持单核路由）。
  *
  * @param irq      中断号
  * @param cpu_mask CPU 位掩码（bit 0 = CPU0，bit 1 = CPU1，...）
@@ -461,6 +534,9 @@ uint8_t gic_get_priority(uint32_t irq)
  */
 kernel_status_t gic_set_affinity(uint32_t irq, uint8_t cpu_mask)
 {
+    uint32_t target_cpu;
+    uint64_t affinity;
+
     /* 参数验证 */
     if ((irq < GIC_SPI_BASE) || (irq > GIC_MAX_SPI))
     {
@@ -472,8 +548,17 @@ kernel_status_t gic_set_affinity(uint32_t irq, uint8_t cpu_mask)
         return -(int32_t)EINVAL;
     }
 
-    /* 写入目标 CPU 寄存器（每中断占 1 字节） */
-    GICD_REG_BYTE(GICD_ITARGETSR(irq)) = cpu_mask;
+    /* 找到第一个置位的 CPU 位 */
+    target_cpu = 0U;
+    while ((cpu_mask & (1U << target_cpu)) == 0U)
+    {
+        target_cpu++;
+    }
+
+    /* 构造亲和性值：Aff0 = target_cpu, Aff1/Aff2/Aff3 = 0 */
+    affinity = (uint64_t)target_cpu & 0xFFULL;
+
+    GICD_REG64(GICD_IROUTER(irq)) = affinity;
     barrier();
 
     return KERNEL_OK;
@@ -482,25 +567,26 @@ kernel_status_t gic_set_affinity(uint32_t irq, uint8_t cpu_mask)
 /**
  * @brief 获取当前最高优先级挂起中断号
  *
- * @details 读取 GICC_IAR 寄存器，确认中断并获取中断号。
+ * @details GICv3 通过系统寄存器 ICC_IAR1_EL1 读取中断号。
  *          读取后中断状态从 "挂起" 转为 "活跃"。
  *
  * @return 中断号，无挂起中断返回 1023（伪中断）
  */
 uint32_t gic_acknowledge_irq(void)
 {
-    uint32_t irq;
+    uint64_t irq;
 
-    irq = GICC_REG(GICC_IAR);
+    __asm__ volatile("mrs %0, icc_iar1_el1" : "=r"(irq));
     barrier();
 
-    return irq;
+    return (uint32_t)irq;
 }
 
 /**
  * @brief 通知中断处理完成（EOI）
  *
- * @details 写入 GICC_EOIR 寄存器，通知 GIC 中断处理已完成。
+ * @details GICv3 通过系统寄存器 ICC_EOIR1_EL1 写入中断号，
+ *          通知 GIC 中断处理已完成。
  *          必须在中断处理函数末尾调用。
  *
  * @param irq 中断号（必须与 gic_acknowledge_irq 返回值一致）
@@ -513,7 +599,7 @@ void gic_end_of_interrupt(uint32_t irq)
         return;
     }
 
-    GICC_REG(GICC_EOIR) = irq;
+    __asm__ volatile("msr icc_eoir1_el1, %0" :: "r"((uint64_t)irq) : "memory");
     barrier();
 }
 

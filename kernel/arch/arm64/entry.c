@@ -132,19 +132,25 @@ static const char *get_ec_desc(uint32_t ec)
  *          打印异常诊断信息。对于 SVC 系统调用由 exception.S
  *          单独分发处理，此处仅处理非 SVC 的同步异常。
  *
- * @param esr  ESR_EL1 寄存器值（异常症状寄存器）
- * @param far  FAR_EL1 寄存器值（错误地址寄存器）
- * @param elr  ELR_EL1 寄存器值（异常返回地址）
- * @param spsr SPSR_EL1 寄存器值（保存的程序状态）
+ *          对于不可恢复的同步异常（如 Data Abort），
+ *          跳过出错指令（ELR += 4）以防止无限循环。
+ *
+ * @param esr      ESR_EL1 寄存器值（异常症状寄存器）
+ * @param far      FAR_EL1 寄存器值（错误地址寄存器）
+ * @param elr_ptr  指向栈上保存的 ELR_EL1 的指针（用于修改返回地址）
+ * @param spsr     SPSR_EL1 寄存器值（保存的程序状态）
  *
  * @note 对应需求: KR-003（异常向量表管理）
  */
 void exception_sync_handler(uint64_t esr, uint64_t far,
-                            uint64_t elr, uint64_t spsr)
+                            uint64_t *elr_ptr, uint64_t spsr)
 {
     uint32_t ec;
     uint32_t iss;
     const char *desc;
+    uint64_t elr;
+
+    elr = *elr_ptr;
 
     /* 提取 EC（异常类别）和 ISS（指令特定症状） */
     ec = (uint32_t)((esr >> 26U) & 0x3FU);
@@ -178,6 +184,9 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
     (void)spsr; /* 避免 unused 警告（实际已通过 UART 输出使用） */
+
+    /* 跳过出错指令，防止无限循环 */
+    *elr_ptr = elr + 4U;
 }
 
 /**
