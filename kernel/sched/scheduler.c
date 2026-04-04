@@ -28,6 +28,7 @@
 #include <kernel/compiler.h>
 #include <kernel/errno.h>
 #include <kernel/config.h>
+#include <kernel/smp.h>
 #include <stdint.h>
 #include "hal.h"
 
@@ -445,6 +446,9 @@ void scheduler_tick(void)
     {
         schedule();
     }
+
+    /* SMP 负载均衡检查 */
+    smp_tick_check_balance(cpu_id);
 }
 
 /* ========================================================================

@@ -27,6 +27,7 @@
 #include <kernel/compiler.h>
 #include "thread.h"
 #include "scheduler.h"
+#include "hal.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -272,6 +273,8 @@ uint64_t timer_get_ms(void)
 
 void timer_interrupt_handler(void)
 {
+    uint32_t cpu_id;
+
     /* 基准测试：记录 IRQ 延迟 */
     {
         uint64_t now;
@@ -282,6 +285,16 @@ void timer_interrupt_handler(void)
     /* 递增系统滴答 */
     s_system_ticks++;
     barrier();
+
+    cpu_id = hal_get_cpu_id();
+
+    /* 每 1000 个 tick（约 1 秒）打印一次 CPU 心跳 */
+    if ((s_system_ticks % (uint64_t)CONFIG_TICK_RATE_HZ) == 0ULL)
+    {
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '[');
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, (char)('0' + (int32_t)cpu_id));
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, ']');
+    }
 
     /* 设置下一次比较值 */
     timer_set_next_compare();

@@ -24,7 +24,6 @@
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
 #include <stdint.h>
-#include <string.h>
 
 /* ========================================================================
  * 内部常量定义
@@ -98,10 +97,28 @@ kernel_status_t smp_sched_init(void)
 {
     uint32_t cpu;
     uint32_t i;
+    volatile uint8_t *dst;
 
-    (void)memset(s_cpu_queues, 0, sizeof(s_cpu_queues));
-    (void)memset(s_schedule_count, 0, sizeof(s_schedule_count));
-    (void)memset(s_thread_affinity, 0, sizeof(s_thread_affinity));
+    /* 手动清零 s_cpu_queues（MISRA 合规，避免 memset） */
+    dst = (volatile uint8_t *)s_cpu_queues;
+    for (i = 0U; i < sizeof(s_cpu_queues); i++)
+    {
+        dst[i] = 0U;
+    }
+
+    /* 手动清零 s_schedule_count */
+    dst = (volatile uint8_t *)s_schedule_count;
+    for (i = 0U; i < sizeof(s_schedule_count); i++)
+    {
+        dst[i] = 0U;
+    }
+
+    /* 手动清零 s_thread_affinity */
+    dst = (volatile uint8_t *)s_thread_affinity;
+    for (i = 0U; i < sizeof(s_thread_affinity); i++)
+    {
+        dst[i] = 0U;
+    }
 
     for (cpu = 0U; cpu < CONFIG_MAX_CPUS; cpu++)
     {

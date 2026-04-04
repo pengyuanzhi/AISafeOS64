@@ -27,6 +27,7 @@
 #include <kernel/gic.h>
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
+#include <kernel/spinlock.h>
 #include "../../sched/scheduler.h"
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
@@ -451,6 +452,16 @@ static void uart_irq_handler(void)
 }
 
 /* ========================================================================
+ * UART 自旋锁（多核串行化打印）- 前向声明
+ * ======================================================================== */
+
+/** @brief UART 打印自旋锁（多核串行化） */
+static TicketLock_t g_uart_lock;
+
+static void smp_uart_putc(char ch);
+static void smp_uart_puts(const char *s);
+
+/* ========================================================================
  * 测试线程
  * ======================================================================== */
 
@@ -465,7 +476,7 @@ static void thread_a_entry(void *arg)
 
     for (;;)
     {
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, 'A');
+        smp_uart_putc('A');
         (void)kthread_sleep(100U);
     }
 }
@@ -481,7 +492,7 @@ static void thread_b_entry(void *arg)
 
     for (;;)
     {
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, 'B');
+        smp_uart_putc('B');
         (void)kthread_sleep(200U);
     }
 }
@@ -498,10 +509,62 @@ static void thread_c_entry(void *arg)
     for (;;)
     {
         tick_t ticks = timer_get_ticks();
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[tick=");
+        smp_uart_puts("\n[tick=");
+        ticket_lock_acquire(&g_uart_lock);
         uart_print_uint((uint64_t)QEMU_UART0_BASE, ticks);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "] ");
+        ticket_lock_release(&g_uart_lock);
+        smp_uart_puts("] ");
         (void)kthread_sleep(500U);
+    }
+}
+
+/* ========================================================================
+ * UART 自旋锁（多核串行化打印）- 实现
+ * ======================================================================== */
+
+/**
+ * @brief 带锁的 UART 单字符输出
+ * @param ch 要输出的字符
+ */
+static void smp_uart_putc(char ch)
+{
+    ticket_lock_acquire(&g_uart_lock);
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, ch);
+    ticket_lock_release(&g_uart_lock);
+}
+
+/**
+ * @brief 带锁的 UART 字符串输出
+ * @param s 要输出的字符串
+ */
+static void smp_uart_puts(const char *s)
+{
+    ticket_lock_acquire(&g_uart_lock);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, s);
+    ticket_lock_release(&g_uart_lock);
+}
+
+/* ========================================================================
+ * SMP 工作线程
+ * ======================================================================== */
+
+/**
+ * @brief SMP 工作线程入口
+ *
+ * @details 每个工作线程绑定到特定 CPU，周期性打印 CPU ID 数字。
+ *          用于验证多核 SMP 调度是否正常工作。
+ *
+ * @param arg CPU ID（作为线程参数传入）
+ */
+static void worker_thread_entry(void *arg)
+{
+    uint32_t my_cpu = (uint32_t)(uintptr_t)arg;
+    (void)my_cpu;
+
+    for (;;)
+    {
+        smp_uart_putc((char)('0' + (int32_t)my_cpu));
+        (void)kthread_sleep(300U);
     }
 }
 
@@ -757,6 +820,9 @@ void kernel_main(void)
     hal_uart_init((uint64_t)QEMU_UART0_BASE);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
 
+    /* 初始化 UART 打印自旋锁（多核串行化） */
+    ticket_lock_init(&g_uart_lock);
+
     /* ---- 第二步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __VERSION__);
@@ -856,6 +922,13 @@ void kernel_main(void)
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
     }
 
+    /* 初始化 SMP 调度器（负载均衡） */
+    ret = smp_sched_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_sched_init failed\n");
+    }
+
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating test threads...\n");
 
     /* 线程 A：优先级 100，RR 策略，每 100ms 打印 'A' */
@@ -894,6 +967,41 @@ void kernel_main(void)
                              (priority_t)250U, KTHREAD_POLICY_FIFO,
                              CONFIG_STACK_SIZE_DEFAULT);
         (void)tid;
+    }
+
+    /* ---- 创建 SMP 多核工作线程 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating SMP test threads...\n");
+
+    /* 每个在线核分配一个工作线程 */
+    {
+        uint32_t cpu;
+        uint32_t online = smp_get_online_count();
+
+        for (cpu = 0U; cpu < online; cpu++)
+        {
+            thread_id_t smp_tid;
+            char name[12];
+            volatile uint32_t ni;
+
+            /* 手动构建名称 "worker_X" */
+            name[0] = 'w'; name[1] = 'o'; name[2] = 'r'; name[3] = 'k';
+            name[4] = 'e'; name[5] = 'r'; name[6] = '_';
+            name[7] = (char)('0' + (int32_t)cpu);
+            name[8] = '\0';
+
+            smp_tid = kthread_create(name, worker_thread_entry,
+                                     (void *)(uintptr_t)cpu,
+                                     (priority_t)(50U + cpu * 10U),
+                                     KTHREAD_POLICY_RR,
+                                     CONFIG_STACK_SIZE_DEFAULT);
+            if (smp_tid != THREAD_ID_INVALID)
+            {
+                (void)smp_set_affinity(smp_tid, (uint32_t)(1U << cpu));
+            }
+
+            (void)smp_tid;
+            (void)ni;
+        }
     }
 
     /* ---- 第九步：初始化 UART 接收中断 ---- */
