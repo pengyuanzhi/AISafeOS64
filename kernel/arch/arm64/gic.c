@@ -305,18 +305,12 @@ kernel_status_t gic_init(void)
     s_gicd_base = GICD_BASE_ADDR;
     s_gicc_base = GICC_BASE_ADDR;
 
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step1: bases saved\n");
-
     /* 第一步：禁用 Distributor（确保干净的状态） */
     GICD_REG(GICD_CTLR) = 0U;
     barrier();
 
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step2: dist disabled\n");
-
     /* 第二步：获取最大中断号 */
     max_irq = gic_get_max_irq();
-
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step3: max_irq read\n");
 
     /* 第三步：将所有中断设置为 Group 1（非安全组，产生 IRQ 而非 FIQ）
      *
@@ -330,8 +324,6 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_IGROUPR(n)) = 0xFFFFFFFFU;
     }
     barrier();
-
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step4: group1 set\n");
 
     /* 第四步：禁用所有 SPI 中断（IRQ 32 ~ max_irq） */
     for (n = (GIC_SPI_BASE / GICD_IRQS_PER_REG);
@@ -361,32 +353,16 @@ kernel_status_t gic_init(void)
         GICD_REG(GICD_ICPENDR(n)) = 0xFFFFFFFFU;
     }
 
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step5: spis configured\n");
-
     /* 第八步：启用 Distributor（Group0 + Group1） */
     GICD_REG(GICD_CTLR) = GICD_CTLR_ENABLE;
     barrier();
 
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step6: dist enabled\n");
-
     /* 第九步：通过 MMIO 启用 GICv2 CPU Interface */
     gic_enable_cpuif();
 
-    hal_uart_puts((uint64_t)0x09000000UL, "[gic] step7: cpuif enabled\n");
-
-    /* 验证 GICC_IAR 可读（读取伪中断号 1023 表示无挂起中断） */
-    {
-        uint32_t iar = GICC_REG(GICC_IAR);
-        barrier();
-        if (iar == GIC_SPURIOUS_IRQ)
-        {
-            hal_uart_puts((uint64_t)0x09000000UL, "[gic] IAR read OK (spurious)\n");
-        }
-        else
-        {
-            hal_uart_puts((uint64_t)0x09000000UL, "[gic] IAR read OK (pending irq)\n");
-        }
-    }
+    /* 消费可能存在的伪中断 */
+    (void)GICC_REG(GICC_IAR);
+    barrier();
 
     return KERNEL_OK;
 }

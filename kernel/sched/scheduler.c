@@ -466,8 +466,6 @@ void NORETURN scheduler_start(void)
     cpu_id = hal_get_cpu_id();
 
     /* 进入 idle 线程的主循环（调度器启动后永不返回） */
-    hal_uart_puts((uint64_t)0x09000000UL, "AISafeOS64: scheduler started, entering idle...\n");
-
     for (;;)
     {
         __asm__ volatile("wfe" ::: "memory");

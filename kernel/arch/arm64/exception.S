@@ -2,19 +2,17 @@
  * @file exception.S
  * @brief ARMv8-A 异常向量表
  * @author AISafe64 Team
- * @date 2026-03-31
- * @version 3.0
+ * @date 2026-04-04
+ * @version 4.0
  *
  * @details ARMv8-A 异常向量表实现
  *          - 16 个异常向量入口
- *          - EL1h 同步异常：SVC 系统调用 + 其他同步异常
- *          - EL1h IRQ：GIC 中断分发
- *          - EL1h FIQ：快速中断（预留）
- *          - EL1h SError：系统错误处理
- *          - 其他向量：panic
+ *          - 每个向量仅含跳转指令（确保不超出 128 字节 slot）
+ *          - 实际处理逻辑在独立的处理函数中
  *
  * @note ARMv8-A 要求向量表 2KB 对齐
- * @note 每个向量占 128 字节（32 条指令）
+ * @note 每个向量 slot 最多 128 字节（32 条指令）
+ * @note 向量表内只放跳转指令，处理逻辑放在外部
  * @note 对应需求: KR-003（异常向量表管理）
  */
 
@@ -43,14 +41,58 @@ exception_vector_table:
 
     /* ================================================================
      * [4]  当前 EL，SPx，同步异常 ← SVC 系统调用入口
-     *
-     * 保存所有 callee-saved + caller-saved 寄存器，
-     * 读取 ESR 判断 EC 类别：
-     *   EC=0x15 (SVC64) → syscall_handler
-     *   其他 → exception_sync_handler(esr, far, elr, spsr)
      * ================================================================ */
     .align 7
-exception_sync_spx:
+    b       .Lsync_handler_spx
+
+    /* [5]  当前 EL，SPx，IRQ */
+    .align 7
+    b       .Lirq_handler_spx
+
+    /* [6]  当前 EL，SPx，FIQ */
+    .align 7
+    b       .Lexception_panic
+
+    /* [7]  当前 EL，SPx，SError */
+    .align 7
+    b       .Lserror_handler_spx
+
+    /* ================================================================
+     * [8-11]  低 EL（AArch64）异常
+     * ================================================================ */
+    .align 7
+    b       .Lexception_panic         /* [8]  同步 */
+    .align 7
+    b       .Lexception_panic         /* [9]  IRQ */
+    .align 7
+    b       .Lexception_panic         /* [10] FIQ */
+    .align 7
+    b       .Lexception_panic         /* [11] SError */
+
+    /* ================================================================
+     * [12-15] 低 EL（AArch32）异常
+     * ================================================================ */
+    .align 7
+    b       .Lexception_panic         /* [12] 同步 */
+    .align 7
+    b       .Lexception_panic         /* [13] IRQ */
+    .align 7
+    b       .Lexception_panic         /* [14] FIQ */
+    .align 7
+    b       .Lexception_panic         /* [15] SError */
+
+/* ========================================================================
+ * 异常处理函数（位于向量表外部，无大小限制）
+ * ======================================================================== */
+
+/**
+ * @brief EL1h 同步异常处理
+ *
+ * @details 保存所有通用寄存器，读取 ESR 判断异常类型：
+ *          EC=0x15 (SVC64) → syscall_handler
+ *          其他 → exception_sync_handler(esr, far, &elr, spsr)
+ */
+.Lsync_handler_spx:
     /* 保存所有通用寄存器 */
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
@@ -82,11 +124,11 @@ exception_sync_spx:
     cmp     x21, #0x15
     b.eq    .Lsvc_handler
 
-    /* 其他同步异常 → 调用 exception_sync_handler(esr, far, &elr, spsr) */
+    /* 其他同步异常 → exception_sync_handler(esr, far, &elr, spsr) */
     mrs     x1, far_el1              /* x1 = FAR */
     mov     x0, x20                  /* x0 = ESR */
     mov     x2, sp                   /* x2 = 指向栈上 ELR 的指针 */
-    ldr     x3, [sp, #8]             /* x3 = SPSR（栈顶是 elr/spsr，+8 是 spsr） */
+    ldr     x3, [sp, #8]             /* x3 = SPSR */
     bl      exception_sync_handler
 
     /* 恢复并返回 */
@@ -123,14 +165,13 @@ exception_sync_spx:
 
     eret
 
-    /* ================================================================
-     * [5]  当前 EL，SPx，IRQ 异常
-     *
-     * 保存 x0-x3，调用 irq_handler（C 函数），
-     * 恢复 x0-x3，eret 返回。
-     * ================================================================ */
-    .align 7
-exception_irq_spx:
+/**
+ * @brief EL1h IRQ 异常处理
+ *
+ * @details 保存 x0-x3，调用 irq_handler（C 函数），
+ *          恢复 x0-x3，eret 返回。
+ */
+.Lirq_handler_spx:
     /* 保存通用寄存器 */
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
@@ -143,20 +184,10 @@ exception_irq_spx:
     ldp     x0, x1, [sp], #16
     eret
 
-    /* ================================================================
-     * [6]  当前 EL，SPx，FIQ 异常
-     * ================================================================ */
-    .align 7
-exception_fiq_spx:
-    b       .Lexception_panic
-
-    /* ================================================================
-     * [7]  当前 EL，SPx，SError 异常
-     *
-     * 保存上下文，调用 el1_serror_handler(esr, far, elr)
-     * ================================================================ */
-    .align 7
-exception_serror_spx:
+/**
+ * @brief EL1h SError 异常处理
+ */
+.Lserror_handler_spx:
     /* 保存通用寄存器 */
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
@@ -177,30 +208,6 @@ exception_serror_spx:
     ldp     x2, x3, [sp], #16
     ldp     x0, x1, [sp], #16
     b       .Lexception_panic
-
-    /* ================================================================
-     * [8-11]  低 EL（AArch64）异常
-     * ================================================================ */
-    .align 7
-    b       .Lexception_panic         /* [8]  同步 */
-    .align 7
-    b       .Lexception_panic         /* [9]  IRQ */
-    .align 7
-    b       .Lexception_panic         /* [10] FIQ */
-    .align 7
-    b       .Lexception_panic         /* [11] SError */
-
-    /* ================================================================
-     * [12-15] 低 EL（AArch32）异常
-     * ================================================================ */
-    .align 7
-    b       .Lexception_panic         /* [12] 同步 */
-    .align 7
-    b       .Lexception_panic         /* [13] IRQ */
-    .align 7
-    b       .Lexception_panic         /* [14] FIQ */
-    .align 7
-    b       .Lexception_panic         /* [15] SError */
 
 /* ========== 异常默认处理 ========== */
 
