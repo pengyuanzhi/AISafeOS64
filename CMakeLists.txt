@@ -44,6 +44,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -fdata-sections         # 分离数据段
         -ffunction-sections     # 分离代码段
         -fno-strict-aliasing    # 禁止严格别名
+        -fno-stack-protector    # 裸机环境无栈保护器运行时
         # MISRA C 额外警告选项
         -Wundef                 # 未定义宏警告
         -Wcast-align            # 对齐转换警告

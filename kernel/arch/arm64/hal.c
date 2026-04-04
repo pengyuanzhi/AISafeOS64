@@ -48,6 +48,15 @@
 /** @brief UART FIFO 使能位 */
 #define UART_LCR_FEN_BIT     (1U << 4U)
 
+/** @brief UART 中断屏蔽寄存器偏移 */
+#define UART_IMSC_OFFSET   0x38U
+
+/** @brief UART 接收中断使能位 */
+#define UART_IMSC_RXIM_BIT (1U << 4U)
+
+/** @brief UART 标志寄存器：接收 FIFO 空 */
+#define UART_FR_RXFE_BIT   (1U << 4U)
+
 /* ========== PL011 UART 寄存器访问宏 ========== */
 
 /**
@@ -207,4 +216,53 @@ void hal_dcache_clean_and_invalidate(uint64_t start, uint64_t size)
         __asm__ volatile("dc civac, %0" :: "r"(addr) : "memory");
         addr += (uint64_t)CACHE_LINE_SIZE;
     }
+}
+
+/* ========== UART 接收接口实现 ========== */
+
+/**
+ * @brief UART 接收单个字符（非阻塞）
+ *
+ * @param base UART 基地址
+ * @param ch   输出字符指针
+ *
+ * @return 非0表示成功读取，0表示无数据
+ */
+int hal_uart_getc(uint64_t base, char *ch)
+{
+    uint32_t fr;
+
+    if (ch == NULL)
+    {
+        return 0;
+    }
+
+    /* 检查接收 FIFO 是否为空 */
+    fr = uart_read(base, UART_FR_OFFSET);
+    if ((fr & UART_FR_RXFE_BIT) != 0U)
+    {
+        return 0;
+    }
+
+    /* 读取数据寄存器 */
+    *ch = (char)(uart_read(base, UART_DR_OFFSET) & 0xFFU);
+
+    return 1;
+}
+
+/**
+ * @brief 使能 UART 接收中断
+ *
+ * @param base UART 基地址
+ */
+void hal_uart_enable_rx_irq(uint64_t base)
+{
+    uint32_t imsc;
+
+    /* 读取当前中断屏蔽寄存器 */
+    imsc = uart_read(base, UART_IMSC_OFFSET);
+
+    /* 使能接收中断（RXIM） */
+    imsc |= UART_IMSC_RXIM_BIT;
+    uart_write(base, UART_IMSC_OFFSET, imsc);
 }

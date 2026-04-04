@@ -168,6 +168,20 @@ void hal_uart_putc(uint64_t base, char ch);
  */
 void hal_uart_puts(uint64_t base, const char *str);
 
+/**
+ * @brief 使能 UART 接收中断
+ * @param base UART 基地址
+ */
+void hal_uart_enable_rx_irq(uint64_t base);
+
+/**
+ * @brief UART 接收单个字符（非阻塞）
+ * @param base UART 基地址
+ * @param ch   输出字符指针
+ * @return 非0表示成功读取，0表示无数据
+ */
+int hal_uart_getc(uint64_t base, char *ch);
+
 /* ========== 缓存维护操作 ========== */
 
 /**

@@ -526,6 +526,22 @@ uint32_t gic_acknowledge_irq(void)
 }
 
 /**
+ * @brief 读取当前挂起的最高优先级中断号
+ *
+ * @details gic_acknowledge_irq() 的别名，语义更清晰。
+ *          GICv2 通过 MMIO 读取 GICC_IAR 寄存器获取中断号。
+ *          读取后中断状态从 "挂起" 转为 "活跃"。
+ *
+ * @return 中断号，无挂起中断返回 1023（伪中断）
+ *
+ * @note 对应需求: IN-001
+ */
+uint32_t gic_get_irq_id(void)
+{
+    return gic_acknowledge_irq();
+}
+
+/**
  * @brief 通知中断处理完成（EOI）
  *
  * @details GICv2 通过 MMIO 写入 GICC_EOIR 寄存器，
@@ -627,6 +643,23 @@ kernel_status_t gic_register_handler(uint32_t irq,
     (void)arg; /* 避免未使用参数警告 */
 
     return KERNEL_OK;
+}
+
+/**
+ * @brief 设置中断路由到目标 CPU
+ *
+ * @details gic_set_affinity() 的别名。
+ *          通过 GICD_ITARGETSR 寄存器设置中断目标。
+ *
+ * @param irq      中断号
+ * @param cpu_mask CPU 位掩码
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ */
+kernel_status_t gic_set_target(uint32_t irq, uint8_t cpu_mask)
+{
+    return gic_set_affinity(irq, cpu_mask);
 }
 
 /**
