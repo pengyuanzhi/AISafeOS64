@@ -1,5 +1,47 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-04 SMP 多核支持完成 ✅ (18:40)
+
+**commit**: `dca900f` feat(smp): SMP多核支持 - 4核启动+从核初始化+PSCI+SGI处理
+
+### 从核启动机制
+- **PSCI 调用**: 使用 `hvc #0`（非 `smc`）从 EL1 调用 EL2 PSCI 服务
+- **从核入口**: boot.S 中 `secondary_entry` 汇编（设置向量表+每CPU栈）
+- **从核初始化**: FP/SIMD 使能 → GIC CPU interface → 独立定时器 → IRQ 使能
+- **QEMU 验证**: `-smp 4` 下 4 核全部在线（Online CPUs: 0x4）
+
+### 关键技术决策
+1. **HVC 而非 SMC**: QEMU virt EL1 下 SMC 触发同步异常，改用 HVC 调用 EL2 PSCI
+2. **volatile 清零**: 裸机无 libc，GCC -Os 会把循环优化为 memset 调用，需 volatile 阻止
+3. **每 CPU 独立定时器**: 从核各自初始化 CNTP_CTL/CVAL，产生独立 tick 中断
+4. **SGI 中断处理**: irq_handler 添加 SGI 0-15 分支，预留 IPI 扩展
+
+### 内核代码量
+- **text**: 22,470 bytes (21.9KB) — 目标 < 30KB ✅
+- **bss**: 93,680 bytes（percpu + 调度器数据结构）
+
+### 当前项目进度: ~80%
+
+#### 已完成 ✅
+- ✅ 调度器 (256 级位图 + EDF + ARINC653)
+- ✅ IPC 子系统 (channel + endpoint + notification + IC2)
+- ✅ 虚拟内存管理
+- ✅ 能力系统 (撤销/降权/移动/复制)
+- ✅ **SMP 多核 (4核启动 + 从核初始化 + PSCI + SGI)**
+- ✅ 同步原语 (Ticket Lock + 优先级继承互斥锁)
+- ✅ 上下文切换 (ARM64 汇编)
+- ✅ 形式化验证框架 + 认证证据收集
+- ✅ 用户态服务 (FS/Proc/Mem/Net/Security/VMM/Path/Init/Dev)
+- ✅ virtio 驱动框架 + 性能基准测试
+
+#### 待完成 ⏳
+- [ ] 每 CPU 调度器集成（从核进入调度循环而非 WFE idle）
+- [ ] IPI reschedule 实现（SGI 驱动线程迁移）
+- [ ] MISRA C:2012 静态分析全量扫描
+- [ ] 安全认证文档 (ISO 26262, IEC 61508)
+
+---
+
 ## 2026-04-04 三阶段开发完成 ✅ (07:10-08:11)
 
 ### Phase 1: 能力系统完善 + SMP 负载均衡 ✅ (07:42)
