@@ -2,17 +2,19 @@
  * @file    vmm.h
  * @brief   虚拟机管理器（VMM）接口
  * @author  AISafe64 Team
- * @date    2026-04-01
- * @version 2.0
+ * @date    2026-04-04
+ * @version 3.0
  *
  * @details 本文件定义了 ARMv8-A 虚拟机管理器接口：
  *          - vCPU 管理（创建/销毁/运行/暂停）
  *          - 二阶段地址翻译（嵌套页表 NPT）
  *          - 虚拟中断注入
- *          - 虚拟设备寄存器模拟
+ *          - 虚拟设备模拟框架
+ *          - VM 退出处理分发
+ *          - hypercall 处理
  *
  * @note MISRA-C:2012 合规
- * @note 对应需求: VZ-001~005
+ * @note 对应需求: VZ-001~010
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
@@ -66,9 +68,9 @@ typedef enum
 typedef enum
 {
     VCPU_STATE_OFF = 0U,       /**< @brief 未激活 */
+    VCPU_STATE_STOPPED,        /**< @brief 已停止 */
     VCPU_STATE_RUNNING,        /**< @brief 运行中 */
-    VCPU_STATE_BLOCKED,        /**< @brief 阻塞（等待中断） */
-    VCPU_STATE_STOPPED         /**< @brief 已停止 */
+    VCPU_STATE_BLOCKED         /**< @brief 阻塞（等待中断） */
 } vcpu_state_t;
 
 /* ========================================================================
@@ -174,7 +176,7 @@ typedef struct
 /**
  * @brief 虚拟机描述符
  */
-typedef struct
+typedef struct vm_desc
 {
     uint32_t              vm_id;              /**< @brief VM ID */
     vm_state_t            state;              /**< @brief VM 状态 */
@@ -192,7 +194,7 @@ typedef struct
  * ======================================================================== */
 
 /**
- * @brief 初始化 VMM
+ * @brief 初始化 VMM 子系统
  *
  * @return KERNEL_OK 成功
  */
@@ -226,6 +228,16 @@ kernel_status_t vmm_destroy_vm(uint32_t vm_id);
  * @return 成功返回 vCPU ID，失败返回负错误码
  */
 int32_t vmm_create_vcpu(uint32_t vm_id, paddr_t entry_point);
+
+/**
+ * @brief 暂停 vCPU
+ *
+ * @param vm_id   VM ID
+ * @param vcpu_id vCPU ID
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t vmm_vcpu_pause(uint32_t vm_id, uint32_t vcpu_id);
 
 /**
  * @brief 运行 vCPU
@@ -279,5 +291,46 @@ vm_desc_t *vmm_get_vm(uint32_t vm_id);
  */
 kernel_status_t vmm_map_guest_page(uint32_t vm_id, paddr_t guest_paddr,
                                     paddr_t host_paddr, uint64_t flags);
+
+/**
+ * @brief 获取 VMM 统计信息
+ *
+ * @param vm_count   活跃 VM 数输出
+ * @param vcpu_count 活跃 vCPU 数输出
+ * @param vdev_count 活跃虚拟设备数输出
+ */
+void vmm_get_stats(uint32_t *vm_count, uint32_t *vcpu_count,
+                     uint32_t *vdev_count);
+
+/**
+ * @brief 注册虚拟设备
+ *
+ * @param vm_id    VM ID
+ * @param type     设备类型
+ * @param name     设备名称
+ * @param mmio_base MMIO 基址
+ * @param mmio_size MMIO 大小
+ *
+ * @return 成功返回设备 ID，负数表示错误
+ */
+int32_t vmm_register_vdevice(uint32_t vm_id, uint32_t type,
+                               const char *name,
+                               uint64_t mmio_base, uint64_t mmio_size);
+
+/**
+ * @brief 处理 MMIO 访问
+ *
+ * @param vm_id     VM ID
+ * @param vcpu_id   vCPU ID
+ * @param fault_addr 故障地址
+ * @param is_write  是否为写操作
+ * @param value     读/写值
+ * @param size      访问宽度
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t vmm_handle_mmio(uint32_t vm_id, uint32_t vcpu_id,
+                                  uint64_t fault_addr, bool is_write,
+                                  uint64_t *value, uint32_t size);
 
 #endif /* SERVICES_VMM_VMM_H */
