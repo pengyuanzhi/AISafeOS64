@@ -455,7 +455,7 @@ void scheduler_tick(void)
 /**
  * @brief 启动调度器并切换到第一个任务
  *
- * @details 此函数初始化完成后将控制流切换到 idle 线程，
+ * @details 此函数初始化完成后将控制流切换到最高优先级就绪线程，
  *          不返回到调用者。
  */
 void NORETURN scheduler_start(void)
@@ -473,7 +473,13 @@ void NORETURN scheduler_start(void)
         }
     }
 
-    first_thread = g_scheduler.cpu_queues[cpu_id].idle_thread;
+    first_thread = scheduler_pick_next();
+
+    /* 如果没有就绪线程（不应该发生），回退到 idle */
+    if (first_thread == NULL)
+    {
+        first_thread = g_scheduler.cpu_queues[cpu_id].idle_thread;
+    }
 
     if (first_thread == NULL)
     {
@@ -481,6 +487,12 @@ void NORETURN scheduler_start(void)
         {
             __asm__ volatile("wfe" ::: "memory");
         }
+    }
+
+    /* 从就绪队列中移除（防止运行线程同时在就绪队列中） */
+    if (first_thread->state == KTHREAD_STATE_READY)
+    {
+        scheduler_dequeue(first_thread);
     }
 
     /* 设置第一个线程为当前线程 */

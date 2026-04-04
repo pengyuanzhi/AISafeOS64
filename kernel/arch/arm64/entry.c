@@ -82,6 +82,11 @@ static const char g_banner[] =
 /** @brief GIC 伪中断号（无挂起中断时 IAR 返回值） */
 #define GIC_SPURIOUS_IRQ   1023U
 
+/* ========== IRQ 调试计数器 ========== */
+
+/** @brief IRQ 调试计数器（前几次 IRQ 打印诊断信息） */
+static volatile uint32_t s_irq_debug_count = 0U;
+
 /* ========== ESR 异常类别描述 ========== */
 
 /**
@@ -593,6 +598,17 @@ void irq_handler(void)
         return;
     }
 
+    /* 前 5 次 IRQ 打印调试信息，确认中断分发正常 */
+    if (s_irq_debug_count < 5U)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[irq] #");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)s_irq_debug_count);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " irq=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)irq);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        s_irq_debug_count++;
+    }
+
     /* 根据中断号分发处理 */
     if (irq == QEMU_TIMER_IRQ)
     {
@@ -810,8 +826,21 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing timer...\n");
     timer_init();
 
+    /* 打印定时器调试信息 */
+    {
+        uint64_t timer_ns = timer_get_ns();
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[timer] initial_ns=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, timer_ns);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    }
+
+    /* 配置定时器 PPI 中断（IRQ 30）的优先级和路由 */
+    (void)gic_set_priority(QEMU_TIMER_IRQ, (uint8_t)0xA0U);
+    /* 注意：PPI 路由为当前 CPU，不需要设置 ITARGETSR */
     /* 使能定时器 PPI 中断（IRQ 30） */
     (void)gic_enable_irq(QEMU_TIMER_IRQ);
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[timer] IRQ 30 enabled\n");
 
     /* ---- 第七步：初始化调度器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing scheduler...\n");
@@ -868,15 +897,47 @@ void kernel_main(void)
     /* ---- 第十步：启用 IRQ 中断 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling IRQ...\n");
     hal_irq_enable();
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] IRQ enabled OK\n");
 
     /* ---- 第十一步：打印 Shell 提示符并启动调度器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Scheduler started\n");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
     scheduler_start();
 
-    /* 永不到达 */
-    for (;;)
+    /* 主循环 - 轮询式 tick 监控（直到上下文切换完善） */
     {
-        __asm__ volatile("wfe" ::: "memory");
+        tick_t last_tick = 0ULL;
+        uint64_t loop_count = 0ULL;
+        uint64_t tick_count = 0ULL;
+
+        for (;;)
+        {
+            tick_t now = timer_get_ticks();
+
+            if (now != last_tick)
+            {
+                tick_count++;
+                if ((tick_count % 1000ULL) == 0ULL)
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[tick] #");
+                    uart_print_uint((uint64_t)QEMU_UART0_BASE, tick_count);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+                }
+                last_tick = now;
+            }
+
+            loop_count++;
+            /* 如果没有 tick 变化，至少每 1000000 次循环打印一次存活信号 */
+            if ((loop_count % 1000000ULL) == 0ULL)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[alive] loops=");
+                uart_print_uint((uint64_t)QEMU_UART0_BASE, loop_count);
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ticks=");
+                uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)now);
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+            }
+
+            __asm__ volatile("wfe" ::: "memory");
+        }
     }
 }
