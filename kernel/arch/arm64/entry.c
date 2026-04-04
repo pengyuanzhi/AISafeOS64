@@ -587,16 +587,6 @@ void irq_handler(void)
 {
     uint32_t irq;
 
-    /* IRQ 入口诊断（仅前 3 次） */
-    {
-        static volatile uint32_t s_irq_count = 0U;
-        if (s_irq_count < 3U)
-        {
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '!');
-            s_irq_count++;
-        }
-    }
-
     /* 从 GIC 获取当前最高优先级挂起中断号 */
     irq = gic_get_irq_id();
 
@@ -896,11 +886,11 @@ void kernel_main(void)
 
         if (freq == 0ULL)
         {
-            freq = 24000000ULL; /* QEMU virt 默认 24MHz */
+            freq = 24000000ULL;
         }
 
-        /* 设置比较值为当前值 + 10ms (freq/100) */
-        uint64_t delta = freq / 100ULL;
+        /* 设置比较值为当前值 + delta */
+        uint64_t delta = freq / (uint64_t)CONFIG_TICK_RATE_HZ;
         __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(current + delta));
         __asm__ volatile("isb");
 
@@ -909,74 +899,14 @@ void kernel_main(void)
         __asm__ volatile("isb");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling IRQ...\n");
     hal_irq_enable();
-
-    /* ---- IRQ 使能后诊断 ---- */
-    {
-        uint64_t daif = 0ULL;
-        __asm__ volatile("mrs %0, daif" : "=r"(daif));
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] DAIF=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, daif);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-        /* 读取定时器控制寄存器检查 ISTATUS */
-        uint64_t ctl = 0ULL;
-        __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(ctl));
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] CNTP_CTL=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, ctl);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-        /* 读取 GIC 状态 */
-        uint32_t isenabler0 = *(volatile uint32_t *)(0x08000000UL + 0x0100UL);
-        uint32_t ispendr0 = *(volatile uint32_t *)(0x08000000UL + 0x0200UL);
-        uint32_t isactiver0 = *(volatile uint32_t *)(0x08000000UL + 0x0300UL);
-        uint32_t gicd_ctlr = *(volatile uint32_t *)(0x08000000UL + 0x0000UL);
-        uint32_t gicc_ctlr = *(volatile uint32_t *)(0x08010000UL + 0x0000UL);
-        uint32_t gicc_pmr = *(volatile uint32_t *)(0x08010000UL + 0x0004UL);
-
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] GICD_CTLR=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)gicd_ctlr);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " GICC_CTLR=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)gicc_ctlr);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[diag] PMR=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)gicc_pmr);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] ISENABLER0=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)isenabler0);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ISPENDR0=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)ispendr0);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ISACTIVER0=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)isactiver0);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-
-        /* 短暂忙等后再次检查（等待定时器触发） */
-        for (volatile int32_t i = 0; i < 1000000; i++)
-        {
-            __asm__ volatile("" ::: "memory");
-        }
-
-        ctl = 0ULL;
-        __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(ctl));
-        ispendr0 = *(volatile uint32_t *)(0x08000000UL + 0x0200UL);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[diag] after wait: CNTP_CTL=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, ctl);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ISPENDR0=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)ispendr0);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-    }
 
     /* ---- 第十一步：进入主循环 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
     {
         for (;;)
         {
-            /*
-             * 空闲循环，WFE 等待中断唤醒。
-             * 定时器中断由 IRQ handler 自动处理。
-             */
-            __asm__ volatile("wfe" ::: "memory");
+            __asm__ volatile("yield" ::: "memory");
         }
     }
 }

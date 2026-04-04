@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include "mock_kernel.h"
 
 /* ========================================================================
  * 简易测试框架（宿主机版）

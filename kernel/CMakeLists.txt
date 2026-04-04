@@ -111,6 +111,7 @@ set(KERNEL_SOURCES
 # ARM64 内核编译选项
 # ==============================================================================
 set(KERNEL_COMPILE_OPTIONS
+    -Os                      # 最小体积优化（text < 30KB）
     -mgeneral-regs-only      # 不使用浮点寄存器
     -mstrict-align           # 严格对齐
     -fno-pic                 # 不使用位置无关代码
