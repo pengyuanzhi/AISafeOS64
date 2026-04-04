@@ -85,8 +85,8 @@ typedef uint32_t kobj_id_t;
  */
 typedef uint32_t thread_id_t;
 
-/** @brief 无效的线程 ID */
-#define THREAD_ID_INVALID ((thread_id_t)0U)
+/** @brief 无效的线程 ID（超出有效范围 [0, CONFIG_MAX_THREADS)） */
+#define THREAD_ID_INVALID ((thread_id_t)0xFFFFFFFFU)
 
 /* ========================================================================
  * CPU 标识符类型

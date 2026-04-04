@@ -49,14 +49,18 @@ static thread_id_t alloc_thread_id(void)
 {
     uint32_t i;
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[thread] alloc_thread_id: scanning...\n");
+
     for (i = 0U; i < CONFIG_MAX_THREADS; i++)
     {
         if (g_scheduler.thread_table[i].state == KTHREAD_STATE_DEAD)
         {
+            hal_uart_puts((uint64_t)0x09000000UL, "[thread] alloc_thread_id: found free tid\n");
             return (thread_id_t)i;
         }
     }
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[thread] alloc_thread_id: no free tid found!\n");
     return THREAD_ID_INVALID;
 }
 
@@ -124,16 +128,19 @@ thread_id_t kthread_create(const char *name,
     /* 参数校验 */
     if (name == NULL)
     {
+        hal_uart_puts((uint64_t)0x09000000UL, "[thread] kthread_create: name is NULL\n");
         return THREAD_ID_INVALID;
     }
 
     if (entry == NULL)
     {
+        hal_uart_puts((uint64_t)0x09000000UL, "[thread] kthread_create: entry is NULL\n");
         return THREAD_ID_INVALID;
     }
 
     if ((uint32_t)prio >= CONFIG_PRIORITY_LEVELS)
     {
+        hal_uart_puts((uint64_t)0x09000000UL, "[thread] kthread_create: prio out of range\n");
         return THREAD_ID_INVALID;
     }
 
@@ -154,6 +161,7 @@ thread_id_t kthread_create(const char *name,
     tid = alloc_thread_id();
     if (tid == THREAD_ID_INVALID)
     {
+        hal_uart_puts((uint64_t)0x09000000UL, "[thread] no free tid\n");
         return THREAD_ID_INVALID;
     }
 
@@ -163,6 +171,7 @@ thread_id_t kthread_create(const char *name,
     stack_top = stack_alloc_by_scheduler(stack_size);
     if (stack_top == 0U)
     {
+        hal_uart_puts((uint64_t)0x09000000UL, "[thread] stack alloc failed\n");
         return THREAD_ID_INVALID;
     }
 
@@ -198,6 +207,7 @@ thread_id_t kthread_create(const char *name,
     /* 将线程加入就绪队列 */
     scheduler_enqueue(thread);
 
+    hal_uart_puts((uint64_t)0x09000000UL, "[thread] kthread_create done\n");
     return tid;
 }
 
