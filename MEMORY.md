@@ -1,5 +1,25 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-04 每 CPU 调度器 + IPI Reschedule ✅ (19:05)
+
+**commit**: `f1fbf1d` feat(sched,ipi): 每CPU调度器集成+IPI reschedule实现
+
+### 每 CPU 调度器
+- **scheduler_start_secondary()**: 从核进入完整调度循环（非 WFE idle）
+- 从核初始化链: FP/SIMD → GIC → 定时器 → IRQ → 调度器 → 第一个线程
+- 每 CPU 独立就绪队列 + 独立定时器中断 → 真正并行调度
+
+### IPI Reschedule
+- **ipi_send()**: 改用 `gic_send_sgi()` (GICv2 MMIO)，替换 ICC_SGI1R_EL1 (GICv3)
+- **ipi_handler(RESCHEDULE)**: 调用 `schedule()` 触发跨核调度
+- **irq_handler**: SGI 0-15 分发给 `ipi_handler()` 处理
+- **ipi_broadcast()**: 支持 exclude_self 的广播 reschedule
+
+### 内核代码量
+- **text**: 23,294 bytes (22.7KB) — 目标 < 30KB ✅
+
+---
+
 ## 2026-04-04 SMP 多核支持完成 ✅ (18:40)
 
 **commit**: `dca900f` feat(smp): SMP多核支持 - 4核启动+从核初始化+PSCI+SGI处理
