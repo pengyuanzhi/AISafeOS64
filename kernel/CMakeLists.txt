@@ -119,6 +119,8 @@ set(KERNEL_COMPILE_OPTIONS
     -fno-pie                 # 不使用位置无关可执行
     -mcmodel=large           # 大内存模型（64位地址空间）
     -fno-stack-protector     # 裸机环境无栈保护器运行时
+    -ffreestanding           # 自由standing环境
+    -fno-builtin             # 禁用内置函数替换
 )
 
 # ==============================================================================

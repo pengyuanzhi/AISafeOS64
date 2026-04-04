@@ -25,6 +25,7 @@
 #include <kernel/config.h>
 #include <kernel/timer.h>
 #include <kernel/gic.h>
+#include <kernel/smp.h>
 #include "../../sched/scheduler.h"
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
@@ -597,7 +598,12 @@ void irq_handler(void)
     }
 
     /* 根据中断号分发处理 */
-    if (irq == QEMU_TIMER_IRQ)
+    if (irq <= GIC_SGI_END)
+    {
+        /* SGI（软件生成中断 0-15）：核间中断 */
+        /* 当前仅消费中断，后续扩展 IPI 处理 */
+    }
+    else if (irq == QEMU_TIMER_IRQ)
     {
         /* ARM 通用定时器物理定时器中断 */
         timer_interrupt_handler();
@@ -832,6 +838,23 @@ void kernel_main(void)
     }
 
     /* ---- 第八步：创建测试线程 ---- */
+    /* ---- 第七步半：初始化 SMP 多核 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing SMP...\n");
+    ret = smp_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_init failed\n");
+    }
+
+    ret = smp_boot_secondary();
+
+    {
+        uint32_t online = smp_get_online_count();
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Online CPUs: 0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)online);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+    }
+
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating test threads...\n");
 
     /* 线程 A：优先级 100，RR 策略，每 100ms 打印 'A' */

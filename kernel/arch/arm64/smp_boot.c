@@ -22,9 +22,12 @@
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
+#include <kernel/gic.h>
+#include <kernel/config.h>
 #include <hal.h>
 #include <stdint.h>
-#include <string.h>
+/* boot.S 中定义的从核汇编入口 */
+extern void secondary_entry(void);
 
 /* ========================================================================
  * 每 CPU 数据区
@@ -54,7 +57,7 @@ static int32_t psci_cpu_on(uint64_t cpu_id, uint64_t entry_point,
         "mov x1, %[cpuid]\n"
         "mov x2, %[entry]\n"
         "mov x3, %[ctx]\n"
-        "smc #0\n"
+        "hvc #0\n"
         "mov %[ret], x0\n"
         : [ret] "=r"(ret)
         : [fid] "r"((uint64_t)PSCI_FN_CPU_ON),
@@ -77,7 +80,16 @@ kernel_status_t smp_init(void)
 {
     uint32_t i;
 
-    (void)memset(s_percpu_data, 0, sizeof(s_percpu_data));
+    /* 逐字段清零（避免编译器生成 memset 调用） */
+    for (i = 0U; i < (uint32_t)CONFIG_MAX_CPUS; i++)
+    {
+        volatile uint64_t *ptr = (volatile uint64_t *)&s_percpu_data[i];
+        uint32_t j;
+        for (j = 0U; j < sizeof(percpu_t) / sizeof(uint64_t); j++)
+        {
+            ptr[j] = 0ULL;
+        }
+    }
 
     s_percpu_data[0U].cpu_id = 0U;
     s_percpu_data[0U].state = CPU_STATE_RUNNING;
@@ -127,7 +139,7 @@ kernel_status_t smp_boot_secondary(void)
 
         psci_ret = psci_cpu_on(
             (uint64_t)cpu_id,
-            (uint64_t)(uintptr_t)&smp_secondary_entry,
+            (uint64_t)(uintptr_t)&secondary_entry,
             (uint64_t)cpu_id
         );
 
@@ -260,6 +272,44 @@ void smp_secondary_entry(uint32_t cpu_id)
         return;
     }
 
+    /* 使能 FP/SIMD（CPACR_EL1_EL1FPEN = 0b11） */
+    __asm__ volatile(
+        "mrs x0, cpacr_el1\n"
+        "orr x0, x0, #0x300000\n"
+        "msr cpacr_el1, x0\n"
+        "isb\n"
+        ::: "x0", "memory"
+    );
+
+    /* 初始化 GIC CPU interface */
+    (void)gic_init_secondary();
+
+    /* 初始化从核定时器 */
+    {
+        uint64_t current_val = 0ULL;
+        uint64_t freq = 0ULL;
+        uint64_t delta = 0ULL;
+
+        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)0U));
+        __asm__ volatile("isb" ::: "memory");
+
+        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(current_val));
+        __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+        __asm__ volatile("isb" ::: "memory");
+
+        if (freq == 0ULL)
+        {
+            freq = 24000000ULL;
+        }
+
+        delta = freq / (uint64_t)CONFIG_TICK_RATE_HZ;
+        __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(current_val + delta));
+        __asm__ volatile("isb" ::: "memory");
+        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)1U));
+        __asm__ volatile("isb" ::: "memory");
+    }
+
+    /* 初始化 percpu 数据 */
     percpu = &s_percpu_data[cpu_id];
     percpu->cpu_id = cpu_id;
     percpu->state = CPU_STATE_RUNNING;
@@ -268,11 +318,16 @@ void smp_secondary_entry(uint32_t cpu_id)
     percpu->current_thread = NULL;
     percpu->idle_thread = NULL;
 
+    /* 标记就绪 */
     s_secondary_ready[cpu_id] = 1U;
     barrier();
 
+    /* 使能中断（IRQ） */
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+
+    /* 从核进入 idle 循环 */
     for (;;)
     {
-        __asm__ volatile("wfe");
+        __asm__ volatile("wfe" ::: "memory");
     }
 }

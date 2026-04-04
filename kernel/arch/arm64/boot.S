@@ -122,6 +122,46 @@ kernel_entry:
     wfe
     b       .Lhang
 
+/* ========================================================================
+ * 从核入口点
+ * ======================================================================== */
+
+/**
+ * @brief 从核入口点
+ *
+ * @details QEMU virt 使用 PSCI CPU_ON 启动从核
+ *          从核需要：禁用中断、设置异常向量表、设置自己的栈、跳转到 C 入口
+ *
+ * @note x0 由 PSCI 传入的 context_id（即 cpu_id）
+ */
+.section .text.boot
+.global secondary_entry
+secondary_entry:
+    /* 禁用所有中断 */
+    msr     daifset, #0xF
+
+    /* 从 MPIDR_EL1 获取 CPU ID */
+    mrs     x0, mpidr_el1
+    and     x0, x0, #0xFF
+
+    /* 设置异常向量表（与主核相同） */
+    adr     x1, exception_vector_table
+    msr     vbar_el1, x1
+    isb
+
+    /* 计算当前 CPU 的栈顶：__stacks_start + (cpu_id + 1) * 8192 */
+    ldr     x1, =__stacks_start
+    add     x1, x1, x0, lsl #13     /* x1 += cpu_id * 8192 */
+    add     x1, x1, #8192           /* 栈顶 = base + (cpu_id+1)*8192 */
+    mov     sp, x1
+
+    /* 跳转到 C 入口，x0 = cpu_id */
+    b       smp_secondary_entry
+
+    /* 不应返回 */
+1:  wfe
+    b       1b
+
 /* 全局符号（由链接器脚本定义） */
 .global __bss_start
 .global __bss_end
