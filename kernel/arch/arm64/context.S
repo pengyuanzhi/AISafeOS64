@@ -14,7 +14,7 @@
  *          [0]  x19    [1]  x20    [2]  x21    [3]  x22
  *          [4]  x23    [5]  x24    [6]  x25    [7]  x26
  *          [8]  x27    [9]  x28    [10] x29/FP [11] x30/LR
- *          [12] SP_el1 [13] SPSR_EL1 [14] ELR_EL1
+ *          [12] SP_el1 [13] reserved [14] reserved
  *
  * @note MISRA-C:2012 合规（汇编文件遵循 ARM64 ABI）
  * @note 对应需求: SC-002（上下文切换 < 5us）
@@ -50,12 +50,6 @@ context_switch:
     mov     x9, sp
     str     x9, [x0, #96]
 
-    /* 保存 SPSR_EL1 和 ELR_EL1 */
-    mrs     x9, spsr_el1
-    str     x9, [x0, #104]
-    mrs     x9, elr_el1
-    str     x9, [x0, #112]
-
     /* ---- 恢复 next 上下文从 next->context[] ---- */
     /* x1 仍然指向 next->context */
 
@@ -73,13 +67,7 @@ context_switch:
     ldr     x9, [x1, #96]
     mov     sp, x9
 
-    /* 恢复 SPSR_EL1 和 ELR_EL1 */
-    ldr     x9, [x1, #104]
-    msr     spsr_el1, x9
-    ldr     x9, [x1, #112]
-    msr     elr_el1, x9
-
-    /* 返回到 ELR_EL1 处继续执行 */
+    /* 返回到 next 线程的 LR（不修改 SPSR/ELR，IRQ 上下文安全） */
     ret
 
 
@@ -174,16 +162,17 @@ cpu_switch_to_first_task:
     ldr     x9, [x0, #96]
     mov     sp, x9
 
-    /* 恢复 SPSR_EL1 和 ELR_EL1 */
-    ldr     x9, [x0, #104]
+    /* 设置 SPSR_EL1 = EL1h, IRQ 使能（DAIF=0） */
+    mov     x9, #0x5
     msr     spsr_el1, x9
-    ldr     x9, [x0, #112]
-    msr     elr_el1, x9
+
+    /* ELR_EL1 = LR（由 arch_setup_thread_context 设置为 trampoline） */
+    msr     elr_el1, x30
 
     /* 确保所有系统寄存器写入完成 */
     isb
 
-    /* 跳转到 ELR_EL1 处执行 */
+    /* 通过 eret 进入第一个任务 */
     eret
 
 

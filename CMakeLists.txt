@@ -78,11 +78,10 @@ add_subdirectory(kernel)
 if(NOT CMAKE_CROSSCOMPILING)
     enable_testing()
 
-    # 测试公共头文件搜索路径
+    # 测试公共头文件搜索路径（不包含 include/kernel，避免内核 string.h 宏污染）
     set(TEST_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tests
         ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/include/kernel
     )
 
     # 测试源文件列表
@@ -117,6 +116,11 @@ if(NOT CMAKE_CROSSCOMPILING)
             -Wextra
             -Wno-unused-function
             -Wno-sign-comparison
+            -Wno-missing-prototypes
+            -Wno-missing-declarations
+            -Wno-old-style-definition
+            -Wno-nested-externs
+            -Wno-implicit-function-declaration
         )
         # 部分测试需要链接数学库
         target_link_libraries(${test_name} PRIVATE m)

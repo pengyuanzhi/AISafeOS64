@@ -37,9 +37,11 @@
  *          - x29 (FP)  : 帧指针
  *          - x30 (LR)  : 链接寄存器
  *          - SP_el1     : 栈指针
- *          - SPSR_EL1   : 保存的程序状态寄存器
- *          - ELR_EL1    : 异常链接寄存器
+ *          - reserved   : 2 个保留位（对齐）
  *          总计：15 个 uint64_t
+ *
+ * @note context_switch 仅保存/恢复前 13 项（x19-x28, FP, LR, SP）。
+ *       cpu_switch_to_first_task 通过 eret 使用 LR 作为入口。
  */
 #define KTHREAD_CONTEXT_REGS 15U
 

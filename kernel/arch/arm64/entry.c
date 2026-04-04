@@ -863,6 +863,15 @@ void kernel_main(void)
 
     (void)tid; /* 避免 unused 警告 */
 
+    /* 基准测试线程：优先级 250，FIFO，运行后自动退出 */
+    {
+        extern void benchmark_run(void *arg);
+        tid = kthread_create("bench", benchmark_run, NULL,
+                             (priority_t)250U, KTHREAD_POLICY_FIFO,
+                             CONFIG_STACK_SIZE_DEFAULT);
+        (void)tid;
+    }
+
     /* ---- 第九步：初始化 UART 接收中断 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling UART RX interrupt...\n");
     (void)gic_set_priority(QEMU_UART_IRQ, (uint8_t)GIC_PRIORITY_DEFAULT);
@@ -901,12 +910,13 @@ void kernel_main(void)
 
     hal_irq_enable();
 
-    /* ---- 第十一步：进入主循环 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
+    /* ---- 第十一步：启动调度器（永不返回） ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Starting scheduler...\n");
+    scheduler_start();
+
+    /* 永不到达 */
+    for (;;)
     {
-        for (;;)
-        {
-            __asm__ volatile("yield" ::: "memory");
-        }
+        __asm__ volatile("wfe" ::: "memory");
     }
 }

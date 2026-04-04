@@ -47,6 +47,7 @@ set(KERNEL_SCHED_SOURCES
     sched/arinc653.c
     sched/smp.c
     sched/stack_guard.c
+    sched/benchmark.c
 )
 
 # ==============================================================================

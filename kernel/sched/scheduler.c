@@ -455,8 +455,10 @@ void scheduler_tick(void)
 /**
  * @brief 启动调度器并切换到第一个任务
  *
- * @details 此函数初始化完成后将控制流切换到最高优先级就绪线程，
- *          不返回到调用者。
+ * @details 此函数选择最高优先级就绪线程，将其设置为当前线程，
+ *          并通过 cpu_switch_to_first_task 切换到该线程执行。
+ *          如果没有就绪线程，切换到 idle 线程。
+ *          此函数不返回。
  */
 void NORETURN scheduler_start(void)
 {
@@ -465,7 +467,30 @@ void NORETURN scheduler_start(void)
 
     cpu_id = hal_get_cpu_id();
 
-    /* 进入 idle 线程的主循环（调度器启动后永不返回） */
+    /* 选择最高优先级就绪线程 */
+    first_thread = scheduler_pick_next();
+    if (first_thread == NULL)
+    {
+        /* 没有任何线程，挂起 */
+        for (;;)
+        {
+            __asm__ volatile("wfe" ::: "memory");
+        }
+    }
+
+    /* 从就绪队列移除（防止同时在队列和运行状态） */
+    if (first_thread->state == KTHREAD_STATE_READY)
+    {
+        scheduler_dequeue(first_thread);
+    }
+
+    /* 设置为当前运行线程 */
+    scheduler_load_current(first_thread);
+
+    /* 切换到第一个任务（永不返回） */
+    cpu_switch_to_first_task(first_thread->context);
+
+    /* 永不到达 */
     for (;;)
     {
         __asm__ volatile("wfe" ::: "memory");

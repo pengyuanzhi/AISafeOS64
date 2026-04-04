@@ -17,9 +17,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <string.h>
 #include <stdio.h>
-#include "mock_kernel.h"
+
+/* 手动声明标准库函数，避免内核 string.h 的宏重定义干扰 */
+extern void *memcpy(void *dest, const void *src, unsigned long n);
+extern void *memset(void *s, int c, unsigned long n);
 
 /* ========================================================================
  * 简易测试框架（宿主机版）
