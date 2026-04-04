@@ -465,48 +465,12 @@ void NORETURN scheduler_start(void)
 
     cpu_id = hal_get_cpu_id();
 
-    if (!g_scheduler.initialized)
-    {
-        for (;;)
-        {
-            __asm__ volatile("wfe" ::: "memory");
-        }
-    }
+    /* 进入 idle 线程的主循环（调度器启动后永不返回） */
+    hal_uart_puts((uint64_t)0x09000000UL, "AISafeOS64: scheduler started, entering idle...\n");
 
-    first_thread = scheduler_pick_next();
-
-    /* 如果没有就绪线程（不应该发生），回退到 idle */
-    if (first_thread == NULL)
-    {
-        first_thread = g_scheduler.cpu_queues[cpu_id].idle_thread;
-    }
-
-    if (first_thread == NULL)
-    {
-        for (;;)
-        {
-            __asm__ volatile("wfe" ::: "memory");
-        }
-    }
-
-    /* 从就绪队列中移除（防止运行线程同时在就绪队列中） */
-    if (first_thread->state == KTHREAD_STATE_READY)
-    {
-        scheduler_dequeue(first_thread);
-    }
-
-    /* 设置第一个线程为当前线程 */
-    scheduler_load_current(first_thread);
-
-    /* 启用中断 */
-    hal_irq_enable();
-
-    /* 切换到第一个任务 - 不需要保存 prev */
-    cpu_switch_to_first_task(first_thread->context);
-
-    /* 永不到达这里 */
     for (;;)
     {
         __asm__ volatile("wfe" ::: "memory");
     }
 }
+

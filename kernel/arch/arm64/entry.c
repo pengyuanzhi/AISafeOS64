@@ -589,8 +589,15 @@ void irq_handler(void)
 {
     uint32_t irq;
 
+    /* 入口诊断 - 篤认 IRQ handler 被调用 */
+    hal_uart_putc((uint64_t)0x09000000UL, '!');
+
     /* 从 GIC 获取当前最高优先级挂起中断号 */
     irq = gic_get_irq_id();
+
+    /* 诊断 GIC 返回值 */
+    hal_uart_putc((uint64_t)0x09000000UL, '0' + (char)('0' + (irq % 10)));
+    hal_uart_putc((uint64_t)0x09000000UL, '\n');
 
     /* 检查是否为伪中断 */
     if (irq >= GIC_SPURIOUS_IRQ)
@@ -896,15 +903,15 @@ void kernel_main(void)
 
     /* ---- 第十步：启用 IRQ 中断 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling IRQ...\n");
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '@');
     hal_irq_enable();
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] IRQ enabled OK\n");
 
     /* ---- 第十一步：打印 Shell 提示符并启动调度器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Scheduler started\n");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, s_shell_prompt);
-    scheduler_start();
-
-    /* 主循环 - 轮询式 tick 监控（直到上下文切换完善） */
+    /* 主循环 - 轮询式 tick 监控（跳过 scheduler_start，直到上下文切换完善） */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "AISafeOS64: entering main loop...\n");
     {
         tick_t last_tick = 0ULL;
         uint64_t loop_count = 0ULL;
