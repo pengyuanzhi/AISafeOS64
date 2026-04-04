@@ -233,3 +233,15 @@
 - ARM64 链接脚本 (MMU 4KB 页对齐)
 - 静态分析脚本 (check_misra.sh, check_format.sh, code_stats.sh)
 - 架构文档 docs/design/ARCHITECTURE.md (351行)
+
+### 定时器+中断调试完成 ✅ (13:58)
+- GIC GICv2 初始化完全成功 (7步诊断通过)
+- Physical Timer IRQ 30 使能确认 (ISENABLER0=0x4000FFFF)
+- 定时器轮询模式工作正常 (tick #1000+)
+- freq=62.5MHz, delta=625000 (~10ms per tick)
+- IRQ 中断分发待完善 (轮询模式已可用)
+- text=30.4KB, 需精简诊断打印到30KB以内
+
+### 内核代码目标更新
+- **从 50KB 更新为 30KB** (更严格的微内核目标)
+- 当前 text=30.4KB, 需优化
