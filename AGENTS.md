@@ -29,9 +29,49 @@
 
 ## 开发工具
 
-- **主要工具**: Claude Code / Codex / Pi (通过 OpenClaw ACP Harness)
+- **主要工具**: Claude Code (通过 `sessions_spawn` + `runtime: "acp"`) 或 `exec` 调用 `claude` CLI
 - **构建系统**: CMake + ARM64 工具链
 - **模拟环境**: QEMU (ARM Cortex-A57)
+
+## 强制开发规则：必须使用 Claude Code 编码
+
+**所有编码任务必须通过 Claude Code 的 Superpowers 技术完成，禁止手动逐行编写代码。**
+
+### 为什么必须使用 Claude Code
+- Claude Code 拥有文件读写、搜索、构建、测试的完整工具链
+- 可以并行处理多个文件的修改
+- 自动处理编译错误和依赖关系
+- 效率远高于手动逐行编辑
+
+### 执行方式
+
+#### 方式 1: 通过 `sessions_spawn` (推荐)
+```
+sessions_spawn(
+    runtime: "acp",
+    agentId: "claude-code",
+    task: "详细的开发任务描述",
+    mode: "run",
+    cwd: "/home/kerfs/AISafeOS64/AISafeOS64"
+)
+```
+
+#### 方式 2: 通过 `exec` 调用 Claude CLI
+```bash
+cd /home/kerfs/AISafeOS64/AISafeOS64 && claude --permission-mode bypassPermissions --print '任务描述'
+```
+
+### 任务描述模板
+- 必须包含：背景、需要修改的文件、代码规范、验收标准
+- 必须说明：项目架构、现有 API、MISRA C:2012 要求
+- 必须指定：text < 30KB 约束、中文注释、Allman 括号
+
+### 禁止事项
+- ❌ 禁止手动逐行编辑内核代码（效率低、易出错）
+- ❌ 禁止使用 `edit` 工具修改超过 20 行的代码
+- ❌ 禁止在飞书对话中直接粘贴大段代码
+- ✅ 大于 20 行的代码修改必须通过 Claude Code 完成
+- ✅ 仅允许手动修复单行 bug、添加 include、修改注释等小改动
 
 ## 核心技术栈
 
@@ -110,7 +150,7 @@
 
 1. 接收任务请求（通过 OpenClaw 或其他渠道）
 2. 分析需求，理解任务目标
-3. 使用 ACP Harness 调用 Claude Code 进行 **TDD 开发**（RED → GREEN → REFACTOR）
+3. 使用 Claude Code (sessions_spawn runtime:acp 或 exec claude CLI) 进行 **TDD 开发**（RED → GREEN → REFACTOR）
 4. 确保每个提交都有对应测试且测试通过
 5. 记录重要决策和进度到 memory 文件
 6. 返回结果给用户

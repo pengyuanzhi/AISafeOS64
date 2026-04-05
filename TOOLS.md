@@ -23,6 +23,29 @@ make -j$(nproc)
 make clean
 ```
 
+### ⚠️ 强制编码规则：必须使用 Claude Code
+
+**所有代码编写任务必须通过 Claude Code 完成，禁止手动逐行编辑大段代码。**
+
+#### Claude Code CLI (推荐)
+```bash
+cd /home/kerfs/AISafeOS64/AISafeOS64
+claude --permission-mode bypassPermissions --print '任务描述'
+```
+
+#### OpenClaw ACP Harness
+```
+sessions_spawn(
+    runtime: "acp",
+    task: "任务描述",
+    cwd: "/home/kerfs/AISafeOS64/AISafeOS64"
+)
+```
+
+#### 何时允许手动编辑
+- 仅限单行 bug 修复、添加 #include、修改注释
+- 超过 20 行的代码修改必须通过 Claude Code
+
 ### QEMU 模拟
 ```bash
 # 运行内核
