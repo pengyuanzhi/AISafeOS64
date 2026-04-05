@@ -39,6 +39,7 @@
 #include <kernel/cspace.h>
 #include <kernel/page_table.h>
 #include <kernel/interrupt.h>
+#include "thread.h"
 
 /* HAL 用于 debug print */
 extern void hal_uart_puts(uint64_t base, const char *str);
@@ -113,8 +114,16 @@ static void dispatch_thread(syscall_frame_t *frame)
 
         case SYS_THREAD_GET_ID:
         {
-            /* TODO: 从当前 TCB 获取线程 ID */
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            /* 从当前 TCB 获取线程 ID */
+            thread_id_t tid = kthread_get_current_tid();
+            if (tid != THREAD_ID_INVALID)
+            {
+                frame->x0 = (uint64_t)tid;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            }
             break;
         }
 

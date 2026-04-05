@@ -202,4 +202,14 @@ kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio);
  */
 KThread_t *kthread_get_current(void);
 
+/**
+ * @brief 获取当前运行线程的 ID
+ *
+ * @details 便捷函数，等价于 kthread_get_current()->tid，
+ *          但无需暴露 KThread_t 结构体定义。
+ *
+ * @return 当前线程 ID，无当前线程时返回 THREAD_ID_INVALID
+ */
+thread_id_t kthread_get_current_tid(void);
+
 #endif /* KERNEL_SCHED_THREAD_H */

@@ -30,7 +30,7 @@
 
 /* ========== 外部函数声明 ========== */
 
-/** @brief MMU 早期初始化（恒等映射） */
+/** @brief MMU 早期初始化（双地址空间 TTBR0/TTBR1） */
 extern void mmu_early_init(void);
 
 /* ========== 外部全局变量（boot.S 定义） ========== */
@@ -366,10 +366,10 @@ void kernel_main(void)
     hal_uart_init((uint64_t)QEMU_UART0_BASE);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
 
-    /* ---- 第二步：启用 MMU（恒等映射） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (identity mapping)...\n");
+    /* ---- 第二步：启用 MMU（双地址空间 TTBR0/TTBR1） ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (TTBR0/TTBR1 dual address space)...\n");
     mmu_early_init();
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (1GB identity map)\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (TTBR0=idmap, TTBR1=high addr)\n");
 
     /* ---- 第三步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");

@@ -337,3 +337,24 @@ KThread_t *kthread_get_current(void)
 
     return NULL;
 }
+
+/**
+ * @brief 获取当前运行线程的 ID
+ *
+ * @details 通过 kthread_get_current() 获取当前线程指针，
+ *          返回其 tid 字段。用于系统调用 SYS_THREAD_GET_ID。
+ *
+ * @return 当前线程 ID，无当前线程时返回 THREAD_ID_INVALID
+ */
+thread_id_t kthread_get_current_tid(void)
+{
+    KThread_t *current = kthread_get_current();
+
+    if (current != NULL)
+    {
+        return current->tid;
+    }
+
+    return THREAD_ID_INVALID;
+}
+
