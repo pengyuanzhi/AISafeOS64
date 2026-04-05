@@ -34,6 +34,7 @@
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
+#include <kernel/ipc_notification.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -318,11 +319,8 @@ void interrupt_dispatch(uint32_t irq)
      */
     if (desc->notification_id != KOBJ_ID_INVALID)
     {
-        /*
-         * TODO: 调用 ipc_notification_signal(desc->notification_id)
-         * 将中断事件投递到用户态等待线程
-         */
-        (void)desc->notification_id; /* 占位 */
+        /* 触发 IPC 通知，将中断事件投递到用户态等待线程 */
+        (void)ipc_notification_signal(desc->notification_id, (uint64_t)1U << (irq & 63U));
     }
 
     /* 如果有注册的内核处理函数，调用它 */
