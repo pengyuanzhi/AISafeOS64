@@ -59,6 +59,8 @@ typedef int32_t kernel_status_t;
 #define EPERM           1U
 #define EAGAIN         11U
 #define ETIMEDOUT     116U
+#define ENOSYS         38U
+#define EEXIST         17U
 
 /* 地址类型 */
 typedef uint64_t paddr_t;
