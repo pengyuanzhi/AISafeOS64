@@ -1,5 +1,72 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-05 P0/P1 开发完成 ✅ (09:45)
+
+### P0 全部完成 ✅
+
+**commit**: `7143a47` feat(kernel): P0-4 MMU暂时禁用 + P0-5 QEMU端到端验证通过
+
+#### P0-1: ARM64 交叉编译验证 ✅
+- 工具链: aarch64-linux-gnu-gcc (GCC 13)
+- 零错误编译通过
+
+#### P0-2/3: 系统调用分发器 ✅
+**commit**: `367a797` feat(syscall): P0-2/3 系统调用分发器实现
+- 新增 kernel/irq/syscall_dispatch.c (470 行)
+- 修改 exception.S: SVC handler 构造 syscall_frame_t
+- 32 个系统调用号全覆盖，6 类分发
+- IPC/能力子系统直接调用已有 API
+
+#### P0-4: 构建优化 ✅
+**commit**: `c7e7d30` feat(kernel): P0-4 构建优化
+- gc-sections 裁剪: text 从 36KB → 24.1KB
+- -mno-outline-atomics 消除 libgcc 依赖
+- MMU 暂用物理地址模式（用户态创建时启用完整映射）
+
+#### P0-5: QEMU 端到端验证 ✅
+- 4 核全部在线 (Online CPUs: 0x4)
+- GIC、定时器、调度器、SMP 全部初始化成功
+- text = 24.1KB < 30KB ✅
+
+### P1 部分完成 ✅
+
+#### P1-9: IRQ→IPC 通知集成 ✅
+**commit**: `2f6f091` feat(irq): P1-9 IRQ→IPC 通知集成
+- interrupt_dispatch() 调用 ipc_notification_signal()
+- 中断事件通过 IPC 通知投递到用户态等待线程
+- 信号位掩码: bit[irq & 63]
+
+### 内核代码量
+- **text**: 24.7KB (目标 < 30KB ✅)
+
+### 当前项目进度: ~90%
+
+#### 已完成 ✅
+- ✅ 调度器 (256 级位图 + EDF + ARINC653)
+- ✅ IPC 子系统 (channel + endpoint + notification + IC2)
+- ✅ 虚拟内存管理
+- ✅ 能力系统 (撤销/降权/移动/复制)
+- ✅ SMP 多核 (4核启动 + 每 CPU 调度 + IPI + 负载均衡 + 亲和性)
+- ✅ 同步原语 (Ticket Lock + 优先级继承互斥锁)
+- ✅ 上下文切换 (ARM64 汇编)
+- ✅ 形式化验证框架 + 认证证据收集
+- ✅ 用户态服务 (FS/Proc/Mem/Net/Security/VMM/Path/Init/Dev)
+- ✅ virtio 驱动框架 + 性能基准测试
+- ✅ 多核负载测试验证（4核并行运行）
+- ✅ **系统调用分发器 (32 个系统调用号全覆盖)**
+- ✅ **ARM64 交叉编译验证**
+- ✅ **QEMU 端到端验证 (4核)**
+- ✅ **IRQ→IPC 通知集成**
+
+#### 待完成 ⏳
+- [ ] MISRA C:2012 静态分析全量扫描
+- [ ] 安全认证文档 (ISO 26262, IEC 61508)
+- [ ] 驱动完善 (virtio-blk 实际读写、virtio-net 收发包)
+- [ ] MMU 页表映射启用（从物理地址切换到虚拟地址）
+- [ ] 用户态→内核态系统调用 QEMU 验证
+- [ ] 性能基准细化（IPC 延迟、调度延迟、中断延迟精确测量）
+- [ ] cspace_from_root 性能优化 (O(n)→O(1))
+
 ## 2026-04-04 P0 多核验证完成 ✅ (19:59)
 
 **commit**: `eb42c40` feat(sched,smp): 多核负载测试+负载均衡+tick心跳验证
