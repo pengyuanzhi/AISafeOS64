@@ -1,0 +1,26 @@
+/* kernel.exports - 链接器版本脚本
+ *
+ * 将所有未直接引用的全局符号降为 local，
+ * 配合 -ffunction-sections + --gc-sections 消除死代码。
+ */
+
+{
+    local:
+        kernel_memmove;
+        kernel_memcmp;
+        kernel_memchr;
+        kernel_memzero;
+        kernel_strlen;
+        kernel_strnlen;
+        kernel_strcpy;
+        kernel_strncpy;
+        kernel_strcat;
+        kernel_strncat;
+        kernel_strcmp;
+        kernel_strncmp;
+        kernel_strchr;
+        kernel_strrchr;
+        kernel_strstr;
+        kernel_strtol;
+        kernel_strtoul;
+};

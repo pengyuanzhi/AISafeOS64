@@ -123,6 +123,9 @@ set(KERNEL_COMPILE_OPTIONS
     -fno-stack-protector     # 裸机环境无栈保护器运行时
     -ffreestanding           # 自由standing环境
     -mno-outline-atomics     # 禁止 outline atomic helpers（避免 libgcc 依赖）
+    -ffunction-sections      # 分离代码段（配合 --gc-sections）
+    -fdata-sections          # 分离数据段（配合 --gc-sections）
+    -mno-outline-atomics     # 禁止 outline atomic helpers（避免 libgcc 依赖）
     -fno-builtin             # 禁用内置函数替换
 )
 
@@ -150,6 +153,7 @@ target_link_options(aisafe64.elf PRIVATE
     -static
     -T ${CMAKE_SOURCE_DIR}/lds/kernel.ld
     -Wl,--gc-sections
+    -Wl,--version-script=${CMAKE_SOURCE_DIR}/lds/kernel.exports
     -Wl,-Map=${CMAKE_BINARY_DIR}/aisafe64.map
     -Wl,--no-warn-rwx-segments
     -Wl,--no-warn-mismatch
