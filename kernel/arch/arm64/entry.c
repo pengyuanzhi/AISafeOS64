@@ -25,6 +25,7 @@
 #include <kernel/gic.h>
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
+#include <kernel/syscall.h>
 #include "../../sched/scheduler.h"
 
 /* ========== 外部函数声明 ========== */
@@ -277,17 +278,7 @@ void el1_serror_handler(uint64_t esr, uint64_t far, uint64_t elr)
     }
 }
 
-/**
- * @brief 系统调用处理函数（SVC）
- *
- * @details SVC 系统调用的 C 语言入口。
- *          x8 = 系统调用号，x0-x7 = 参数。
- *          当前为桩实现。
- */
-void syscall_handler(void)
-{
-    /* TODO: 实现系统调用分发 */
-}
+/* syscall_handler() 实现在 irq/syscall_dispatch.c 中 */
 
 /* ========================================================================
  * 辅助函数实现

@@ -85,6 +85,7 @@ set(KERNEL_MM_SOURCES
 # ==============================================================================
 set(KERNEL_IRQ_SOURCES
     irq/interrupt.c
+    irq/syscall_dispatch.c
 )
 
 # ==============================================================================
@@ -106,6 +107,7 @@ set(KERNEL_SOURCES
     ${KERNEL_MM_SOURCES}
     ${KERNEL_IRQ_SOURCES}
     ${KERNEL_VERIFY_SOURCES}
+    ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
 )
 
 # ==============================================================================
@@ -120,6 +122,7 @@ set(KERNEL_COMPILE_OPTIONS
     -mcmodel=large           # 大内存模型（64位地址空间）
     -fno-stack-protector     # 裸机环境无栈保护器运行时
     -ffreestanding           # 自由standing环境
+    -mno-outline-atomics     # 禁止 outline atomic helpers（避免 libgcc 依赖）
     -fno-builtin             # 禁用内置函数替换
 )
 

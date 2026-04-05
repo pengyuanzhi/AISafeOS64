@@ -137,7 +137,50 @@ exception_vector_table:
 .Lsvc_handler:
     /* SVC 系统调用处理 */
     /* x8 = 系统调用号，x0-x7 = 参数 */
+    /*
+     * 在栈上分配 syscall_frame_t (9 个 uint64_t = 72 字节)
+     * 从已保存的寄存器区域复制 x0-x8 到 frame
+     *
+     * syscall_frame_t layout:
+     *   offset 0:  x0 (arg0 / return value)
+     *   offset 8:  x1
+     *   offset 16: x2
+     *   offset 24: x3
+     *   offset 32: x4
+     *   offset 40: x5
+     *   offset 48: x6
+     *   offset 56: x7
+     *   offset 64: x8 (syscall number)
+     */
+    sub     sp, sp, #72        /* 分配 72 字节给 syscall_frame_t */
+
+    /* 从已保存区域加载寄存器并存储到 frame */
+    /* 已保存的寄存器位于 sp+72 (原始 sp) 偏移处 */
+    ldp     x9, x10, [sp, #72+0xF8]  /* x0,x1 at orig_sp+0xF8 */
+    stp     x9, x10, [sp, #0]        /* frame->x0, frame->x1 */
+
+    ldp     x9, x10, [sp, #72+0xE8]  /* x2,x3 at orig_sp+0xE8 */
+    stp     x9, x10, [sp, #16]       /* frame->x2, frame->x3 */
+
+    ldp     x9, x10, [sp, #72+0xD8]  /* x4,x5 at orig_sp+0xD8 */
+    stp     x9, x10, [sp, #32]       /* frame->x4, frame->x5 */
+
+    ldp     x9, x10, [sp, #72+0xC8]  /* x6,x7 at orig_sp+0xC8 */
+    stp     x9, x10, [sp, #48]       /* frame->x6, frame->x7 */
+
+    ldr     x9, [sp, #72+0xB8]       /* x8 at orig_sp+0xB8 */
+    str     x9, [sp, #64]            /* frame->x8 */
+
+    /* 将 frame 指针传给 syscall_handler(frame) */
+    mov     x0, sp
     bl      syscall_handler
+
+    /* 从 frame->x0 取返回值，写回已保存区域 */
+    ldr     x9, [sp, #0]             /* frame->x0 = return value */
+    str     x9, [sp, #72+0xF8]       /* 写回 saved x0 位置 */
+
+    /* 释放 frame */
+    add     sp, sp, #72
 
 .Lsync_restore:
     /* 恢复 ELR_EL1 和 SPSR_EL1 */
