@@ -84,6 +84,120 @@ static TicketLock_t s_subsys_lock;
 static kobj_id_t s_cspace_id_counter;
 
 /* ========================================================================
+ * CSpace 哈希索引（O(1) 查找优化）
+ * ======================================================================== */
+
+/** @brief 哈希表桶数量（2 的幂次方，便于位运算取模） */
+#define CSPACE_HASH_BUCKETS     32U
+
+/** @brief 哈希掩码（桶数 - 1） */
+#define CSPACE_HASH_MASK        (CSPACE_HASH_BUCKETS - 1U)
+
+/**
+ * @brief 哈希链表节点
+ *
+ * @details 将 CSpace 注册到哈希桶的链表节点，
+ *          静态池预分配，无动态内存。
+ */
+typedef struct cspace_hash_node
+{
+    kobj_id_t                   key;    /**< @brief CSpace 对象 ID（哈希键） */
+    cspace_t                   *value;  /**< @brief CSpace 指针（哈希值） */
+    struct cspace_hash_node    *next;   /**< @brief 开链法：下一节点 */
+} cspace_hash_node_t;
+
+/** @brief 哈希桶数组（每个桶指向链表头） */
+static cspace_hash_node_t *s_cspace_hash[CSPACE_HASH_BUCKETS];
+
+/** @brief 链表节点静态池（与 CSpace 池一一对应） */
+static cspace_hash_node_t s_hash_nodes[CONFIG_MAX_CSPACES];
+
+/**
+ * @brief 计算 CSpace ID 的哈希桶索引
+ *
+ * @param id CSpace 对象 ID
+ *
+ * @return 桶索引 [0, CSPACE_HASH_BUCKETS)
+ */
+static inline uint32_t cspace_hash_index(kobj_id_t id)
+{
+    return (uint32_t)(id & (kobj_id_t)CSPACE_HASH_MASK);
+}
+
+/**
+ * @brief 将 CSpace 注册到哈希表
+ *
+ * @details 在创建 CSpace 后调用，将 kobj_id -> cspace 映射
+ *          插入对应桶的链表头部。
+ *
+ * @param id     CSpace 对象 ID
+ * @param cspace CSpace 指针
+ */
+static void cspace_hash_register(kobj_id_t id, cspace_t *cspace)
+{
+    uint32_t bucket = cspace_hash_index(id);
+    uint32_t idx = (uint32_t)(cspace - &s_cspace_pool[0U]);
+    cspace_hash_node_t *node;
+
+    /* 索引越界保护 */
+    if (idx >= (uint32_t)CONFIG_MAX_CSPACES)
+    {
+        return;
+    }
+
+    node = &s_hash_nodes[idx];
+
+    /* 填充节点 */
+    node->key   = id;
+    node->value = cspace;
+
+    /* 头插入桶链表 */
+    node->next = s_cspace_hash[bucket];
+    s_cspace_hash[bucket] = node;
+}
+
+/**
+ * @brief 将 CSpace 从哈希表移除
+ *
+ * @details 在销毁 CSpace 时调用，从哈希桶链表中
+ *          移除指定 kobj_id 对应的节点。
+ *
+ * @param id CSpace 对象 ID
+ */
+static void cspace_hash_unregister(kobj_id_t id)
+{
+    uint32_t bucket = cspace_hash_index(id);
+    cspace_hash_node_t *prev = NULL;
+    cspace_hash_node_t *curr = s_cspace_hash[bucket];
+
+    /* 遍历桶链表查找目标节点 */
+    while (curr != NULL)
+    {
+        if (curr->key == id)
+        {
+            /* 从链表中摘除 */
+            if (prev == NULL)
+            {
+                s_cspace_hash[bucket] = curr->next;
+            }
+            else
+            {
+                prev->next = curr->next;
+            }
+
+            /* 清空节点 */
+            curr->key   = KOBJ_ID_INVALID;
+            curr->value = NULL;
+            curr->next  = NULL;
+            return;
+        }
+
+        prev = curr;
+        curr = curr->next;
+    }
+}
+
+/* ========================================================================
  * 内部辅助函数声明
  * ======================================================================== */
 
@@ -156,7 +270,11 @@ kernel_status_t cspace_subsys_init(void)
     }
 
     /* 清零 CSpace 池 */
-    (void)memset(s_cspace_pool, 0, sizeof(s_cspace_pool));
+    (void)memset(s_cspace_pool, 0U, sizeof(s_cspace_pool));
+
+    /* 初始化哈希索引表和节点池 */
+    (void)memset(s_cspace_hash, 0U, sizeof(s_cspace_hash));
+    (void)memset(s_hash_nodes, 0U, sizeof(s_hash_nodes));
 
     return KERNEL_OK;
 }
@@ -241,6 +359,9 @@ kernel_status_t cspace_create(uint32_t capacity, cspace_t **out_cspace)
         return ret;
     }
 
+    /* 注册到哈希索引表（O(1) 查找优化） */
+    cspace_hash_register(new_id, cspace);
+
     /* 内存屏障确保初始化完成 */
     barrier_store();
 
@@ -300,6 +421,9 @@ void cspace_destroy(cspace_t *cspace)
 
     /* 释放 CSpace 锁 */
     ticket_lock_release(&cspace->lock);
+
+    /* 从哈希索引表中移除 */
+    cspace_hash_unregister(cspace->header.id);
 
     /* 释放回静态池 */
     ticket_lock_acquire(&s_subsys_lock);
@@ -550,22 +674,42 @@ cap_t *cspace_lookup(cspace_t *cspace, cap_slot_t slot)
 }
 
 /**
- * @brief 从槽索引解析 CSpace
+ * @brief 从 CSpace 根能力槽解析 CSpace
  *
- * @details 遍历 s_cspace_pool 查找 header.id 匹配的 CSpace。
- *          此为简化实现，生产环境应使用更高效的映射。
+ * @details 使用静态哈希表实现 O(1) 查找。
+ *          以 header.id（kobj_id_t）为哈希键，
+ *          开链法处理冲突。
+ *          当哈希未命中时，回退到线性遍历（防御性兼容）。
+ *
+ * @param cspace_root CSpace 根能力槽索引
+ *
+ * @return CSpace 指针，未找到返回 NULL
  */
 cspace_t *cspace_from_root(cap_slot_t cspace_root)
 {
-    uint32_t i;
+    uint32_t bucket;
+    cspace_hash_node_t *node;
     cspace_t *cspace;
+    uint32_t i;
 
-    /* 遍历 CSpace 池查找匹配的根能力 */
+    /* 快速路径：哈希查找 */
+    bucket = cspace_hash_index((kobj_id_t)cspace_root);
+    node = s_cspace_hash[bucket];
+
+    while (node != NULL)
+    {
+        if (node->key == (kobj_id_t)cspace_root)
+        {
+            return node->value;
+        }
+        node = node->next;
+    }
+
+    /* 慢速路径：线性遍历（防御性回退，处理哈希未注册情况） */
     for (i = 0U; i < (uint32_t)CONFIG_MAX_CSPACES; i++)
     {
         cspace = &s_cspace_pool[i];
 
-        /* 检查 CSpace 是否已初始化（类型为 KOBJ_CSPACE 且有有效 ID） */
         if ((cspace->header.type == KOBJ_CSPACE) &&
             (cspace->header.id != KOBJ_ID_INVALID) &&
             (cspace->root_slot == cspace_root))
