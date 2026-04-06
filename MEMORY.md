@@ -1,5 +1,57 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-06 P2 MMU 细粒度映射完成 ✅ (08:50)
+
+**commit**: `5f1cb48` feat(mmu): P2 MMU 细粒度映射 - Device nGnRnE + 从核 MMU 初始化
+
+### MMU 映射架构
+- **TTBR0 恒等映射** (物理地址 = 虚拟地址)
+  - PUD[0]: 1GB Device nGnRnE @ 0x00000000 (MMIO: UART 0x09000000, GIC)
+  - PUD[1]: 1GB Normal WB @ 0x40000000 (内核代码 + 数据 + RAM)
+- **TTBR1 高地址映射** (0xFFFF_0000_0000_0000 起始)
+  - 镜像 TTBR0 的物理映射
+- **从核 MMU**: mmu_init_secondary() 加载与主核相同的页表
+
+### 关键技术决策
+1. **PXN/UXN 修复**: 内核代码区域不能设置 PXN（否则启用 MMU 后立即崩溃）
+2. **2MB 粒度不可行**: text+rodata+data+bss 全在同一个 2MB 块内(0x40000000-0x401FFFFF)，无法用 2MB block 分离权限
+3. **Device nGnRnE**: MMIO 区域使用 Device 属性是安全关键系统的必要要求
+4. **后续 4KB page**: 需要引入 PMD→PTE 4KB 页映射才能实现 text(RX)/rodata(R--)/data(RW-) 精细权限
+
+### 内核代码量
+- **text**: 25,286 bytes (24.7KB) — 目标 < 30KB ✅
+
+### 当前项目进度: ~92%
+
+#### 已完成 ✅
+- ✅ 调度器 (256 级位图 + EDF + ARINC653)
+- ✅ IPC 子系统 (channel + endpoint + notification + IC2)
+- ✅ 虚拟内存管理
+- ✅ 能力系统 (撤销/降权/移动/复制)
+- ✅ SMP 多核 (4核启动 + 每 CPU 调度 + IPI + 负载均衡 + 亲和性)
+- ✅ 同步原语 (Ticket Lock + 优先级继承互斥锁)
+- ✅ 上下文切换 (ARM64 汇编)
+- ✅ 形式化验证框架 + 认证证据收集
+- ✅ 用户态服务 (FS/Proc/Mem/Net/Security/VMM/Path/Init/Dev)
+- ✅ virtio 驱动框架 + 性能基准测试
+- ✅ 多核负载测试验证（4核并行运行）
+- ✅ 系统调用分发器 (32 个系统调用号全覆盖)
+- ✅ ARM64 交叉编译验证
+- ✅ QEMU 端到端验证 (4核)
+- ✅ IRQ→IPC 通知集成
+- ✅ **MMU 细粒度映射 (Device nGnRnE + 从核 MMU)**
+
+#### 待完成 ⏳
+- [ ] 4KB 页映射实现 text(RX) / rodata(R--) / data(RW-) 精细权限
+- [ ] MISRA C:2012 静态分析全量扫描
+- [ ] 安全认证文档 (ISO 26262, IEC 61508)
+- [ ] 驱动完善 (virtio-blk 实际读写、virtio-net 收发包)
+- [ ] 用户态→内核态系统调用 QEMU 验证
+- [ ] 性能基准细化（IPC 延迟、调度延迟、中断延迟精确测量）
+- [ ] cspace_from_root 性能优化 (O(n)→O(1))
+
+---
+
 ## 2026-04-05 P0/P1 开发完成 ✅ (09:45)
 
 ### P0 全部完成 ✅
