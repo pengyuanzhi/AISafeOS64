@@ -26,6 +26,7 @@
 #include <kernel/config.h>
 #include <hal.h>
 #include <stdint.h>
+#include <kernel/mmu.h>
 #include "../../sched/scheduler.h"
 /* boot.S 中定义的从核汇编入口 */
 extern void secondary_entry(void);
@@ -272,6 +273,9 @@ void smp_secondary_entry(uint32_t cpu_id)
     {
         return;
     }
+
+    /* 初始化 MMU（加载与主核相同的页表） */
+    mmu_init_secondary();
 
     /* 使能 FP/SIMD（CPACR_EL1_EL1FPEN = 0b11） */
     __asm__ volatile(

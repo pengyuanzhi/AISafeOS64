@@ -367,9 +367,9 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
 
     /* ---- 第二步：启用 MMU（双地址空间 TTBR0/TTBR1） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (TTBR0/TTBR1 dual address space)...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (fine-grained mapping with permissions)...\n");
     mmu_early_init();
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (TTBR0=idmap, TTBR1=high addr)\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (fine-grained mapping)\n");
 
     /* ---- 第三步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
