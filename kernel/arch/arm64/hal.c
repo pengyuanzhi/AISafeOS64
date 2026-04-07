@@ -266,3 +266,150 @@ void hal_uart_enable_rx_irq(uint64_t base)
     imsc |= UART_IMSC_RXIM_BIT;
     uart_write(base, UART_IMSC_OFFSET, imsc);
 }
+
+/* ========== 定时器接口实现 ========== */
+
+/**
+ * @brief 读取物理定时器计数值
+ * @return CNTPCT_EL0 当前值
+ */
+uint64_t hal_timer_get_count(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 读取物理定时器频率
+ * @return CNTFRQ_EL0 频率值（Hz）
+ */
+uint64_t hal_timer_get_freq(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 读取物理定时器控制寄存器
+ * @return CNTP_CTL_EL0 当前值
+ */
+uint64_t hal_timer_get_control(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 设置物理定时器比较值
+ * @param val 要写入 CNTP_CVAL_EL0 的值
+ */
+void hal_timer_set_compare(uint64_t val)
+{
+    __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(val));
+    __asm__ volatile("isb");
+}
+
+/**
+ * @brief 设置物理定时器控制寄存器
+ * @param val 要写入 CNTP_CTL_EL0 的值
+ */
+void hal_timer_set_control(uint64_t val)
+{
+    __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"(val));
+    __asm__ volatile("isb");
+}
+
+/* ========== 内存屏障接口实现 ========== */
+
+/**
+ * @brief 数据内存屏障 (Inner Shareable)
+ */
+void hal_dmb_ish(void)
+{
+    __asm__ volatile("dmb ish" ::: "memory");
+}
+
+/**
+ * @brief 数据内存屏障 (Inner Shareable, Store)
+ */
+void hal_dmb_ishst(void)
+{
+    __asm__ volatile("dmb ishst" ::: "memory");
+}
+
+/**
+ * @brief 数据内存屏障 (Inner Shareable, Load)
+ */
+void hal_dmb_ishld(void)
+{
+    __asm__ volatile("dmb ishld" ::: "memory");
+}
+
+/* ========== 页表寄存器接口实现 ========== */
+
+/**
+ * @brief 读取 TTBR0_EL1 寄存器
+ * @return TTBR0_EL1 当前值
+ */
+uint64_t hal_read_ttbr0(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 读取 TTBR1_EL1 寄存器
+ * @return TTBR1_EL1 当前值
+ */
+uint64_t hal_read_ttbr1(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, ttbr1_el1" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 写入 TTBR0_EL1 寄存器
+ * @param val 要写入的值
+ */
+void hal_write_ttbr0(uint64_t val)
+{
+    __asm__ volatile("msr ttbr0_el1, %0" :: "r"(val));
+    __asm__ volatile("isb");
+}
+
+/**
+ * @brief 写入 TTBR1_EL1 寄存器
+ * @param val 要写入的值
+ */
+void hal_write_ttbr1(uint64_t val)
+{
+    __asm__ volatile("msr ttbr1_el1, %0" :: "r"(val));
+    __asm__ volatile("isb");
+}
+
+/**
+ * @brief 刷新指定 ASID 的 TLB
+ * @param asid 地址空间标识
+ */
+void hal_tlb_invalidate_asid(uint64_t asid)
+{
+    uint64_t operand = (asid & 0xFFULL) << 48ULL;
+    __asm__ volatile("tlbi aside1is, %0" :: "r"(operand));
+    __asm__ volatile("dmb ish" ::: "memory");
+    __asm__ volatile("isb");
+}
+
+/* ========== 低功耗等待接口实现 ========== */
+
+/**
+ * @brief 等待事件（低功耗 WFE）
+ */
+void hal_wfe(void)
+{
+    __asm__ volatile("wfe" ::: "memory");
+}

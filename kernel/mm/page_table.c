@@ -38,6 +38,7 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/compiler.h>
+#include "hal.h"
 
 /* ========================================================================
  * 编译时断言验证
@@ -50,64 +51,6 @@ static_assert(sizeof(page_table_t) == PAGE_SIZE_4K,
 /* 验证：页表项为 8 字节（64 位） */
 static_assert(sizeof(((page_table_t *)0)->entries[0U]) == sizeof(uint64_t),
               "PTE must be 8 bytes (64-bit)");
-
-/* ========================================================================
- * 内联汇编：ARMv8-A 系统寄存器访问
- * ======================================================================== */
-
-/**
- * @brief 读取 TTBR0_EL1 寄存器
- *
- * @details TTBR0_EL1 保存用户空间（低地址）页表基地址
- *
- * @return TTBR0_EL1 当前值
- */
-static inline uint64_t read_ttbr0_el1(void)
-{
-    uint64_t val;
-    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(val));
-    return val;
-}
-
-/**
- * @brief 写入 TTBR0_EL1 寄存器
- *
- * @details 设置用户空间页表基地址，写入后执行 ISB 确保生效
- *
- * @param val 要写入的页表基地址（物理地址，16 字节对齐）
- */
-static inline void write_ttbr0_el1(uint64_t val)
-{
-    __asm__ volatile("msr ttbr0_el1, %0" :: "r"(val));
-    __asm__ volatile("isb" ::: "memory");
-}
-
-/**
- * @brief 读取 TTBR1_EL1 寄存器
- *
- * @details TTBR1_EL1 保存内核空间（高地址）页表基地址
- *
- * @return TTBR1_EL1 当前值
- */
-static inline uint64_t read_ttbr1_el1(void)
-{
-    uint64_t val;
-    __asm__ volatile("mrs %0, ttbr1_el1" : "=r"(val));
-    return val;
-}
-
-/**
- * @brief 写入 TTBR1_EL1 寄存器
- *
- * @details 设置内核空间页表基地址，写入后执行 ISB 确保生效
- *
- * @param val 要写入的页表基地址（物理地址，16 字节对齐）
- */
-static inline void write_ttbr1_el1(uint64_t val)
-{
-    __asm__ volatile("msr ttbr1_el1, %0" :: "r"(val));
-    __asm__ volatile("isb" ::: "memory");
-}
 
 /* ========================================================================
  * 内部辅助函数
@@ -242,7 +185,7 @@ kernel_status_t page_table_subsys_init(void)
 
     /* 将内核 PGD 物理地址写入 TTBR1_EL1 */
     paddr_t pgd_paddr = (paddr_t)(uintptr_t)kernel_pgd;
-    write_ttbr1_el1(pgd_paddr);
+    hal_write_ttbr1((uint64_t)pgd_paddr);
 
     return KERNEL_OK;
 }
@@ -872,10 +815,7 @@ kernel_status_t page_table_map_block(page_table_t *pgd,
  */
 void tlb_flush_asid(asid_t asid)
 {
-    uint64_t operand = ((uint64_t)asid) << 48U;
-    __asm__ volatile("tlbi aside1is, %0" :: "r"(operand));
-    ARM64_DMB(ish);
-    __asm__ volatile("isb" ::: "memory");
+    hal_tlb_invalidate_asid((uint64_t)asid);
 }
 
 /**
@@ -894,7 +834,5 @@ void tlb_flush_asid(asid_t asid)
  */
 void tlb_flush_all(void)
 {
-    __asm__ volatile("tlbi vmalle1is");
-    ARM64_DMB(ish);
-    __asm__ volatile("isb" ::: "memory");
+    hal_tlb_invalidate_all();
 }

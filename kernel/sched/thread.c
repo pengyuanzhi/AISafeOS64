@@ -212,7 +212,7 @@ void kthread_exit(void)
     {
         for (;;)
         {
-            __asm__ volatile("wfe" ::: "memory");
+            hal_wfe();
         }
     }
 
@@ -226,7 +226,7 @@ void kthread_exit(void)
     /* 永不到达 */
     for (;;)
     {
-        __asm__ volatile("wfe" ::: "memory");
+        hal_wfe();
     }
 }
 
