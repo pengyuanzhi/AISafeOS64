@@ -29,6 +29,7 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/smp.h>
+#include <kernel/mmu.h>
 #include <stdint.h>
 #include "hal.h"
 
@@ -144,7 +145,7 @@ static void idle_task_entry(void *arg)
 
     for (;;)
     {
-        __asm__ volatile("wfe" ::: "memory");
+        hal_wfe();
     }
 }
 
@@ -402,6 +403,16 @@ void schedule(void)
     /* 设置下一个线程为当前线程 */
     scheduler_load_current(next);
 
+    /* P0-2: 用户态地址空间隔离 - 切换 TTBR0 */
+    if (next->is_user != 0U)
+    {
+        mmu_switch_to_user(next->user_pgd);
+    }
+    else
+    {
+        mmu_switch_to_kernel();
+    }
+
     /* 执行上下文切换 */
     context_switch(prev->context, next->context);
 }
@@ -477,7 +488,7 @@ void NORETURN scheduler_start(void)
         /* 没有任何线程，挂起 */
         for (;;)
         {
-            __asm__ volatile("wfe" ::: "memory");
+            hal_wfe();
         }
     }
 
@@ -496,7 +507,7 @@ void NORETURN scheduler_start(void)
     /* 永不到达 */
     for (;;)
     {
-        __asm__ volatile("wfe" ::: "memory");
+        hal_wfe();
     }
 }
 
@@ -535,7 +546,7 @@ void NORETURN scheduler_start_secondary(void)
         {
             for (;;)
             {
-                __asm__ volatile("wfe" ::: "memory");
+                hal_wfe();
             }
         }
     }
@@ -555,7 +566,7 @@ void NORETURN scheduler_start_secondary(void)
     /* 永不到达 */
     for (;;)
     {
-        __asm__ volatile("wfe" ::: "memory");
+        hal_wfe();
     }
 }
 

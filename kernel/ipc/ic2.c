@@ -22,6 +22,7 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
+#include "hal.h"
 
 /* ========================================================================
  * IC2 全局状态
@@ -81,7 +82,7 @@ static void ringbuf_init(ic2_ringbuf_t *ring, uint8_t *buf, uint32_t size)
     /* 由于 ic2_ringbuf_t 使用弹性数组成员，这里需要特殊处理 */
     (void)buf;
 
-    __asm__ volatile("dmb ish" ::: "memory");
+    hal_dmb_ish();
 }
 
 /**
@@ -139,7 +140,7 @@ static uint32_t ringbuf_write(volatile uint32_t *head, volatile uint32_t *tail,
         (void)memcpy(&storage[0U], &src[first_part], to_write - first_part);
     }
 
-    __asm__ volatile("dmb ishst" ::: "memory");
+    hal_dmb_ishst();
     *head = (h + to_write) % capacity;
 
     return to_write;
@@ -160,7 +161,7 @@ static uint32_t ringbuf_read(volatile uint32_t *head, volatile uint32_t *tail,
     uint32_t to_read;
     uint8_t *dst = (uint8_t *)data;
 
-    __asm__ volatile("dmb ishld" ::: "memory");
+    hal_dmb_ishld();
 
     h = *head;
     t = *tail;

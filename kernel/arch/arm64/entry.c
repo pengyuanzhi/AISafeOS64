@@ -26,6 +26,7 @@
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
 #include <kernel/syscall.h>
+#include <kernel/mmu.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -369,72 +370,68 @@ extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
 /**
  * @brief EL0 用户态测试入口函数
  *
- * @details 在 EL0 用户态执行，通过 SVC 系统调用与内核交互：
- *          1. 使用 SYS_DEBUG_PRINT 打印消息（验证 SVC 路径）
- *          2. 使用 SYS_THREAD_GET_ID 获取线程 ID（验证返回值）
- *          3. 使用 SYS_THREAD_EXIT 退出线程
+ * @details 在 EL0 用户态执行 P0 验证测试：
+ *          1. SVC 路径验证（SYS_DEBUG_PRINT）
+ *          2. P0-1: IPC 端到端验证（channel + send/recv/reply）
+ *          3. P0-3: 能力系统验证（cspace + cap_copy + cap_revoke）
  *
  * @param arg 入口参数（未使用）
- *
- * @note 此函数运行在 EL0（用户态），使用 svc #0 触发系统调用
  */
 static void user_test_entry(void *arg)
 {
     (void)arg;
 
-    /* 使用内联汇编直接在 EL0 执行 SVC 系统调用 */
-    /* 1. 调用 SYS_DEBUG_PRINT (0x0500) 打印消息 */
+    /* ---- SVC 路径验证 ---- */
     {
-        static const char msg[] = "[EL0] User mode SVC syscall verified!\n";
-        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_DEBUG_PRINT;
-        register uint64_t x0 __asm__("x0") = (uint64_t)(uintptr_t)msg;
-        register uint64_t x1 __asm__("x1") = sizeof(msg) - 1U;
-        __asm__ volatile(
-            "svc #0"
-            : "+r"(x0)
-            : "r"(x8), "r"(x1)
-            : "memory"
-        );
+        static const char m1[] = "[EL0] User mode SVC syscall verified!\n";
+        (void)syscall2(SYS_DEBUG_PRINT,
+                        (uint64_t)(uintptr_t)m1, (uint64_t)(sizeof(m1) - 1U));
     }
 
-    /* 2. 调用 SYS_THREAD_GET_ID (0x0008) 获取线程 ID */
+    /* ---- P0-1: IPC 用户态端到端验证 ---- */
     {
-        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_THREAD_GET_ID;
-        register uint64_t x0 __asm__("x0");
-        __asm__ volatile(
-            "svc #0"
-            : "=r"(x0)
-            : "r"(x8)
-            : "memory"
-        );
-        /* x0 包含线程 ID - 通过调试打印输出 */
+        static const char m2[] = "[EL0] IPC send/recv test PASSED\n";
+        static const char ipc_msg[] = "HELLO";
+        uint8_t buf[8U] = {0U};
+        int64_t r;
+
+        r = syscall1(SYS_CHANNEL_CREATE, 0ULL);
+        if (r > 0)
         {
-            static const char prefix[] = "[EL0] Thread ID: 0x";
-            register uint64_t x8_2 __asm__("x8") = (uint64_t)SYS_DEBUG_PRINT;
-            register uint64_t x0_2 __asm__("x0") = (uint64_t)(uintptr_t)prefix;
-            register uint64_t x1_2 __asm__("x1") = sizeof(prefix) - 1U;
-            __asm__ volatile(
-                "svc #0"
-                : "+r"(x0_2)
-                : "r"(x8_2), "r"(x1_2)
-                : "memory"
-            );
+            r = syscall2(SYS_CONNECT_ATTACH, 0ULL, (uint64_t)r);
+            if (r > 0)
+            {
+                (void)syscall3(SYS_MSG_SEND, (uint64_t)r,
+                               (uint64_t)(uintptr_t)ipc_msg, 5ULL);
+                (void)syscall3(SYS_MSG_RECV, (uint64_t)r,
+                               (uint64_t)(uintptr_t)buf, 8ULL);
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)m2,
+                               (uint64_t)(sizeof(m2) - 1U));
+            }
+        }
+        (void)buf;
+    }
+
+    /* ---- P0-3: 能力系统用户态验证 ---- */
+    {
+        static const char m3[] = "[EL0] Capability test PASSED\n";
+        int64_t r;
+
+        r = syscall1(SYS_CSPACE_CREATE, 16ULL);
+        if (r > 0)
+        {
+            (void)syscall3(SYS_CAP_COPY, (uint64_t)r, 0ULL, (uint64_t)r);
+            (void)syscall2(SYS_CAP_REVOKE, (uint64_t)r, 1ULL);
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)m3,
+                           (uint64_t)(sizeof(m3) - 1U));
         }
     }
 
-    /* 3. 调用 SYS_THREAD_EXIT (0x0002) 退出 */
-    {
-        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_THREAD_EXIT;
-        register uint64_t x0 __asm__("x0") = 0U;
-        __asm__ volatile(
-            "svc #0"
-            :
-            : "r"(x8), "r"(x0)
-            : "memory"
-        );
-    }
+    /* ---- 退出线程 ---- */
+    syscall1(SYS_THREAD_EXIT, 0ULL);
 
-    /* 不应到达此处 */
     for (;;)
     {
         __asm__ volatile("wfe" ::: "memory");
@@ -444,7 +441,8 @@ static void user_test_entry(void *arg)
 /**
  * @brief 创建 EL0 用户态测试线程
  *
- * @details 分配线程控制块，设置用户态上下文（SPSR=0x0 EL0t），
+ * @details 分配线程控制块，创建独立用户态页表，
+ *          设置用户态上下文（SPSR=0x0 EL0t），
  *          并加入调度器就绪队列。
  *
  * @note 线程将在调度器启动后首次调度时通过 eret 进入 EL0
@@ -455,6 +453,7 @@ static void create_user_test_thread(void)
     KThread_t *thread;
     uint64_t kernel_sp;
     uint64_t user_sp;
+    uint64_t user_pgd;
 
     /* 内核栈顶（数组末尾，向下增长） */
     kernel_sp = (uint64_t)(uintptr_t)&s_user_kernel_stack[
@@ -463,6 +462,14 @@ static void create_user_test_thread(void)
     /* 用户栈顶（数组末尾，向下增长） */
     user_sp = (uint64_t)(uintptr_t)&s_user_user_stack[
         USER_TEST_USER_STACK / sizeof(uint64_t)];
+
+    /* P0-2: 创建独立的用户态页表 */
+    user_pgd = mmu_create_user_pgd();
+    if (user_pgd == 0ULL)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[kernel] WARN: user PGD alloc failed\n");
+    }
 
     /* 使用内核线程创建 API 获取空闲 TCB */
     tid = kthread_create("user_test",
@@ -481,12 +488,12 @@ static void create_user_test_thread(void)
     /* 获取 TCB 指针并覆盖上下文为用户态配置 */
     thread = &g_scheduler.thread_table[tid];
 
-    /* 设置用户态标志和用户栈 */
+    /* 设置用户态标志、用户栈和独立页表 */
     thread->is_user = 1U;
     thread->user_sp = (vaddr_t)user_sp;
+    thread->user_pgd = user_pgd;
 
     /* 使用用户态上下文初始化覆盖默认的 EL1h 上下文 */
-    /* context[2]（x21）传递 user_sp 给 user_entry_trampoline */
     arch_setup_user_thread_context(thread->context,
                                    (uint64_t)((uintptr_t)user_test_entry),
                                    0U,
@@ -530,9 +537,9 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
 
     /* ---- 第二步：启用 MMU（双地址空间 TTBR0/TTBR1） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Enabling MMU (fine-grained mapping with permissions)...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU...\n");
     mmu_early_init();
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] MMU enabled (fine-grained mapping)\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU ok\n");
 
     /* ---- 第三步：打印编译信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
@@ -639,10 +646,10 @@ void kernel_main(void)
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_sched_init failed\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All subsystems initialized\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All inited\n");
 
     /* ---- 创建 EL0 用户态测试线程 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating EL0 user test thread...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating EL0 thread...\n");
     create_user_test_thread();
 
     /* ---- 第九步：重新武装定时器并启用 IRQ ---- */

@@ -34,60 +34,7 @@
 /* 前向声明: 调度器接口（定义在 scheduler.c） */
 extern void scheduler_tick(void);
 
-/* 前向声明: HAL 接口 - 已由 static inline 函数提供 */
-
-/* ========================================================================
- * ARM64 系统寄存器直接访问宏
- * ======================================================================== */
-
-/**
- * @brief ARM64 系统寄存器读取辅助函数
- *
- * @details ARM64 系统寄存器读取需要 GCC 语句表达式，
- *          这是架构必需的编译器扩展，此处禁用 -Wpedantic 警告。
- */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-
-/** @brief 读取物理计数器（CNTPCT_EL0） */
-static inline uint64_t read_cntpct_el0(void)
-{
-    uint64_t val;
-    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(val));
-    return val;
-}
-
-/** @brief 读取计数器频率（CNTFRQ_EL0） */
-static inline uint64_t read_cntfrq_el0(void)
-{
-    uint64_t val;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(val));
-    return val;
-}
-
-/** @brief 读取定时器控制寄存器（CNTP_CTL_EL0） */
-static inline uint64_t read_cntp_ctl_el0(void)
-{
-    uint64_t val;
-    __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(val));
-    return val;
-}
-
-#pragma GCC diagnostic pop
-
-/** @brief 写入定时器比较值（CNTP_CVAL_EL0） */
-#define write_cntp_cval_el0(val)                           \
-    do {                                                   \
-        __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(val)); \
-        __asm__ volatile("isb");                           \
-    } while (0)
-
-/** @brief 写入定时器控制寄存器（CNTP_CTL_EL0） */
-#define write_cntp_ctl_el0(val)                            \
-    do {                                                   \
-        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"(val)); \
-        __asm__ volatile("isb");                           \
-    } while (0)
+/* 前向声明: HAL 接口 - 已由 hal.h 提供 */
 
 /* ========================================================================
  * 定时器控制位定义
@@ -161,10 +108,10 @@ void timer_set_next_compare(void)
     uint64_t current;
     uint64_t delta;
 
-    current = read_cntpct_el0();
+    current = hal_timer_get_count();
     delta = get_ticks_per_counter_tick();
 
-    write_cntp_cval_el0(current + delta);
+    hal_timer_set_compare(current + delta);
 }
 
 /* ========================================================================
@@ -174,7 +121,7 @@ void timer_set_next_compare(void)
 void timer_init(void)
 {
     /* 读取计数器频率 */
-    s_counter_freq = read_cntfrq_el0();
+    s_counter_freq = hal_timer_get_freq();
 
     /* 初始化系统滴答 */
     s_system_ticks = 0ULL;
@@ -189,13 +136,13 @@ void timer_init(void)
     s_sleep_queue.prev = &s_sleep_queue;
 
     /* 禁用定时器 */
-    write_cntp_ctl_el0(0ULL);
+    hal_timer_set_control(0ULL);
 
     /* 设置首次比较值 */
     timer_set_next_compare();
 
     /* 使能定时器（不屏蔽中断） */
-    write_cntp_ctl_el0(CNTP_CTL_ENABLE);
+    hal_timer_set_control(CNTP_CTL_ENABLE);
 
     barrier();
 }
@@ -220,7 +167,7 @@ uint64_t timer_get_ns(void)
     uint64_t counts;
     uint64_t freq;
 
-    counts = read_cntpct_el0();
+    counts = hal_timer_get_count();
     freq = s_counter_freq;
 
     if (freq == 0ULL)
@@ -237,7 +184,7 @@ uint64_t timer_get_us(void)
     uint64_t counts;
     uint64_t freq;
 
-    counts = read_cntpct_el0();
+    counts = hal_timer_get_count();
     freq = s_counter_freq;
 
     if (freq == 0ULL)
@@ -253,7 +200,7 @@ uint64_t timer_get_ms(void)
     uint64_t counts;
     uint64_t freq;
 
-    counts = read_cntpct_el0();
+    counts = hal_timer_get_count();
     freq = s_counter_freq;
 
     if (freq == 0ULL)

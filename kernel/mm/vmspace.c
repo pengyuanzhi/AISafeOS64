@@ -385,12 +385,7 @@ void vmspace_switch(vm_space_t *space)
         pgd_phys = (paddr_t)((uintptr_t)space->pgd);
 
         /* 设置 TTBR0_EL1 */
-        __asm__ volatile(
-            "msr ttbr0_el1, %0\n"
-            "isb\n"
-            :: "r"((uint64_t)pgd_phys | (uint64_t)space->asid)
-            : "memory"
-        );
+        hal_write_ttbr0((uint64_t)pgd_phys | (uint64_t)space->asid);
     }
 
     barrier();
