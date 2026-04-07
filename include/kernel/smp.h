@@ -338,4 +338,21 @@ kernel_status_t smp_migrate_thread(uint32_t src_cpu,
  */
 kernel_status_t smp_send_reschedule(uint32_t target_cpu);
 
+/**
+ * @brief 工作窃取 - 空闲 CPU 从忙碌 CPU 窃取线程
+ *
+ * @details 当当前 CPU 没有就绪线程时调用。
+ *          从负载最高的 CPU 窃取最多 1 个低优先级线程。
+ *          窃取时检查亲和性约束。
+ *
+ * @param my_cpu 当前 CPU 编号（窃取发起方）
+ *
+ * @return KERNEL_OK 窃取成功
+ * @return -EINVAL 参数无效或当前 CPU 有就绪线程
+ * @return -ENOENT 无可窃取的线程
+ *
+ * @note 对应需求: MP-004
+ */
+kernel_status_t smp_work_steal(uint32_t my_cpu);
+
 #endif /* KERNEL_SMP_H */
