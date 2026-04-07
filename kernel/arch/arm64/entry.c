@@ -27,6 +27,7 @@
 #include <kernel/ipi.h>
 #include <kernel/syscall.h>
 #include <kernel/mmu.h>
+#include <kernel/interrupt.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -207,7 +208,7 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
  *          根据中断号分发到对应处理函数：
  *          - SGI 0-15（核间中断）→ ipi_handler
  *          - PPI 30（ARM 通用定时器）→ timer_interrupt_handler
- *          - 其他中断 → 打印中断号
+ *          - 其他中断 → interrupt_dispatch（中断路由子系统）
  *          最后调用 GIC EOI 结束中断。
  *
  * @note 对应需求: IN-001~006（中断控制器管理）
@@ -238,10 +239,8 @@ void irq_handler(void)
     }
     else
     {
-        /* 未知中断：打印诊断信息 */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[irq] unhandled IRQ: ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)irq);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        /* 其他中断：路由到中断分发子系统 */
+        interrupt_dispatch(irq);
     }
 
     /* 通知 GIC 中断处理完成 */
@@ -468,7 +467,7 @@ static void create_user_test_thread(void)
     if (user_pgd == 0ULL)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[kernel] WARN: user PGD alloc failed\n");
+                      "[k] WARN: PGD fail\n");
     }
 
     /* 使用内核线程创建 API 获取空闲 TCB */
@@ -481,7 +480,7 @@ static void create_user_test_thread(void)
     if (tid == THREAD_ID_INVALID)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[kernel] FATAL: Failed to create user test thread\n");
+                      "[k] FATAL: thread fail\n");
         return;
     }
 
@@ -504,7 +503,7 @@ static void create_user_test_thread(void)
     thread->context[2] = (uint64_t)user_sp;
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "[kernel] EL0 user test thread created (tid=");
+                  "[k] EL0 thread tid=");
     uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
 }
@@ -542,25 +541,25 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU ok\n");
 
     /* ---- 第三步：打印编译信息 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Compiler: ");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CC: ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __VERSION__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Build: ");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Build: ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __DATE__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, ' ');
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __TIME__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
     /* ---- 第三步：打印硬件信息 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] CPU ID: ");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CPU: ");
     {
         uint32_t cpu_id = hal_get_cpu_id();
         uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cpu_id);
         hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Exception Level: EL");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] EL");
     {
         uint32_t el = hal_get_current_el();
         hal_uart_putc((uint64_t)QEMU_UART0_BASE, '0' + (char)el);
@@ -568,7 +567,7 @@ void kernel_main(void)
     }
 
     /* ---- 第四步：打印内存布局 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] --- Memory Layout ---\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] --- Memory Layout ---\n");
 
     bss_size = (uint64_t)((uintptr_t)__bss_end - (uintptr_t)__bss_start);
     stack_start = (uint64_t)(uintptr_t)__stacks_start;
@@ -589,11 +588,11 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, " CPUs)\n");
 
     /* ---- 第五步：初始化 GIC 中断控制器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing GIC...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] GIC init\n");
     ret = gic_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] FATAL: gic_init failed\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] FATAL: GIC fail\n");
         for (;;)
         {
             __asm__ volatile("wfe" ::: "memory");
@@ -601,7 +600,7 @@ void kernel_main(void)
     }
 
     /* ---- 第六步：初始化定时器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing timer...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Timer init\n");
     timer_init();
 
     /* 配置定时器 PPI 中断（IRQ 30）的优先级和路由 */
@@ -611,11 +610,11 @@ void kernel_main(void)
     (void)gic_enable_irq(QEMU_TIMER_IRQ);
 
     /* ---- 第七步：初始化调度器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing scheduler...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Sched init\n");
     ret = scheduler_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] FATAL: scheduler_init failed\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] FATAL: sched fail\n");
         for (;;)
         {
             __asm__ volatile("wfe" ::: "memory");
@@ -623,18 +622,18 @@ void kernel_main(void)
     }
 
     /* ---- 第八步：初始化 SMP 多核 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Initializing SMP...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] SMP init\n");
     ret = smp_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_init failed\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: SMP fail\n");
     }
 
     ret = smp_boot_secondary();
 
     {
         uint32_t online = smp_get_online_count();
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Online CPUs: 0x");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Online CPUs: 0x");
         uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)online);
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
     }
@@ -643,13 +642,13 @@ void kernel_main(void)
     ret = smp_sched_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] WARN: smp_sched_init failed\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: smp_sched fail\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All inited\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
 
     /* ---- 创建 EL0 用户态测试线程 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating EL0 thread...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating EL0 thread\n");
     create_user_test_thread();
 
     /* ---- 第九步：重新武装定时器并启用 IRQ ---- */
@@ -683,7 +682,7 @@ void kernel_main(void)
     hal_irq_enable();
 
     /* ---- 第十步：启动调度器（永不返回） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Starting scheduler...\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
     scheduler_start();
 
     /* 永不到达 */

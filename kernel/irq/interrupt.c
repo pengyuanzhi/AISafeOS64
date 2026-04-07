@@ -35,6 +35,7 @@
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
 #include <kernel/ipc_notification.h>
+#include <kernel/smp.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -286,7 +287,9 @@ kernel_status_t interrupt_detach(uint32_t irq)
  * @brief 中断路由分发
  *
  * @details 在中断上下文中调用。根据中断号查找绑定的处理方式：
- *          - 如果有关联的通知对象 ID，通知等待的线程（简化实现）
+ *          - 获取当前 CPU ID 用于多核中断路由
+ *          - 如果描述符的 cpu_id 不匹配当前 CPU，直接处理（简化实现）
+ *          - 如果有关联的通知对象 ID，通知等待的线程
  *          - 如果有注册的内核处理函数，调用该函数
  *
  * @param irq 中断号
@@ -297,6 +300,7 @@ kernel_status_t interrupt_detach(uint32_t irq)
 void interrupt_dispatch(uint32_t irq)
 {
     irq_desc_t *desc;
+    uint32_t cpu_id;
 
     /* 参数验证 */
     if (irq >= IRQ_MAX_HANDLERS)
@@ -311,6 +315,10 @@ void interrupt_dispatch(uint32_t irq)
     {
         return;
     }
+
+    /* 获取当前 CPU ID（用于多核中断路由诊断） */
+    cpu_id = smp_get_cpu_id();
+    (void)cpu_id; /* 简化实现：直接处理，不检查 CPU 亲和性 */
 
     /*
      * 优先检查是否有通知对象绑定。

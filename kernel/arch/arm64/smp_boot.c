@@ -24,6 +24,7 @@
 #include <kernel/errno.h>
 #include <kernel/gic.h>
 #include <kernel/config.h>
+#include <kernel/interrupt.h>
 #include <hal.h>
 #include <stdint.h>
 #include <kernel/mmu.h>
@@ -278,6 +279,7 @@ void smp_secondary_entry(uint32_t cpu_id)
     mmu_init_secondary();
 
     /* 使能 FP/SIMD（CPACR_EL1_EL1FPEN = 0b11） */
+    /* 注意：HAL 无 FP 接口，保留内联汇编 */
     __asm__ volatile(
         "mrs x0, cpacr_el1\n"
         "orr x0, x0, #0x300000\n"
@@ -289,30 +291,38 @@ void smp_secondary_entry(uint32_t cpu_id)
     /* 初始化 GIC CPU interface */
     (void)gic_init_secondary();
 
-    /* 初始化从核定时器 */
+    /* 使能定时器 PPI 中断（IRQ 30） */
+    (void)gic_set_priority(30U, (uint8_t)0xA0U);
+    (void)gic_enable_irq(30U);
+
+    /* 初始化从核定时器（使用 HAL 接口） */
     {
         uint64_t current_val = 0ULL;
         uint64_t freq = 0ULL;
         uint64_t delta = 0ULL;
 
-        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)0U));
-        __asm__ volatile("isb" ::: "memory");
+        /* 禁用物理定时器（清除 ISTATUS） */
+        hal_timer_set_control(0U);
 
-        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(current_val));
-        __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
-        __asm__ volatile("isb" ::: "memory");
+        /* 读取当前计数器和频率 */
+        current_val = hal_timer_get_count();
+        freq = hal_timer_get_freq();
 
         if (freq == 0ULL)
         {
             freq = 24000000ULL;
         }
 
+        /* 设置比较值 */
         delta = freq / (uint64_t)CONFIG_TICK_RATE_HZ;
-        __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(current_val + delta));
-        __asm__ volatile("isb" ::: "memory");
-        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)1U));
-        __asm__ volatile("isb" ::: "memory");
+        hal_timer_set_compare(current_val + delta);
+
+        /* 使能定时器（ENABLE=1, IMASK=0） */
+        hal_timer_set_control(1U);
     }
+
+    /* 初始化中断路由子系统（从核也需要） */
+    (void)interrupt_subsys_init();
 
     /* 初始化 percpu 数据 */
     percpu = &s_percpu_data[cpu_id];
@@ -328,7 +338,7 @@ void smp_secondary_entry(uint32_t cpu_id)
     barrier();
 
     /* 使能中断（IRQ） */
-    __asm__ volatile("msr daifclr, #2" ::: "memory");
+    hal_irq_enable();
 
     /* 从核进入调度循环 */
     scheduler_start_secondary();
@@ -336,6 +346,6 @@ void smp_secondary_entry(uint32_t cpu_id)
     /* 永不到达 */
     for (;;)
     {
-        __asm__ volatile("wfe" ::: "memory");
+        hal_wfe();
     }
 }
