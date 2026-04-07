@@ -86,10 +86,11 @@ static void dispatch_thread(syscall_frame_t *frame)
 
         case SYS_THREAD_EXIT:
         {
-            /* x0=status */
-            /* TODO: 需要 thread_exit API */
+            /* x0=status - 调用 kthread_exit 退出当前线程 */
             (void)frame->x0;
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            kthread_exit();
+            /* kthread_exit 不返回 */
+            frame->x0 = 0U;
             break;
         }
 

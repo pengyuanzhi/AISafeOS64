@@ -37,11 +37,13 @@
  *          - x29 (FP)  : 帧指针
  *          - x30 (LR)  : 链接寄存器
  *          - SP_el1     : 栈指针
- *          - reserved   : 2 个保留位（对齐）
+ *          - SPSR_EL1   : 保存的程序状态（EL1h=0x5 / EL0t=0x0）
+ *          - ELR_EL1    : 异常返回地址
  *          总计：15 个 uint64_t
  *
  * @note context_switch 仅保存/恢复前 13 项（x19-x28, FP, LR, SP）。
- *       cpu_switch_to_first_task 通过 eret 使用 LR 作为入口。
+ *       cpu_switch_to_first_task 通过 eret 使用 context[13] SPSR 和
+ *       context[14] ELR 返回到正确的异常级别。
  */
 #define KTHREAD_CONTEXT_REGS 15U
 
@@ -122,6 +124,9 @@ typedef struct KThread
     struct list_head rq_list;  /**< @brief 就绪队列链表节点 */
     struct list_head sleep_node; /**< @brief 睡眠队列链表节点 */
     tick_t wakeup_tick;    /**< @brief 唤醒时刻（绝对 tick） */
+    uint8_t is_user;       /**< @brief 是否为用户态线程（非0=EL0线程） */
+    uint8_t _reserved[3];  /**< @brief 填充对齐 */
+    vaddr_t user_sp;       /**< @brief 用户态栈指针（EL0 线程使用） */
     char name[KTHREAD_NAME_MAX]; /**< @brief 线程名称 */
 } KThread_t;
 

@@ -56,6 +56,9 @@
 /** @brief 访问权限: EL1 只读, EL0 无访问 (AP[2:1] = 10) */
 #define PTE_AP_RO        (2ULL << 6U)
 
+/** @brief 访问权限: EL1+EL0 只读 (AP[2:1] = 11) */
+#define PTE_AP_USER_RO   (3ULL << 6U)
+
 /** @brief Privileged Execute Never (bit 53) */
 #define PTE_PXN          (1ULL << 53U)
 
@@ -314,21 +317,23 @@ void mmu_early_init(void)
     }
 
     /* 段1: PTE[0..text_end_idx-1] = 4KB Normal RX（.text.boot + .text）
-     * 权限: AP=RO, PXN=0, UXN=1 → EL1 只读可执行 */
+     * 权限: AP=USER_RO (EL0+EL1 只读), PXN=0, UXN=0 → EL0+EL1 可执行
+     * EL0 用户态线程需要执行内核 .text 中的代码（trampoline + user test） */
     for (i = 0U; i < text_end_idx; i++)
     {
         uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
         s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
-                                         PTE_AP_RO | PTE_UXN);
+                                         PTE_AP_USER_RO);
     }
 
     /* 段2: PTE[text_end_idx..ro_end_idx-1] = 4KB Normal R--（.rodata）
-     * 权限: AP=RO, PXN=1, UXN=1 → EL1 只读不可执行 */
+     * 权限: AP=USER_RO (EL0+EL1 只读), PXN=1, UXN=1 → 不可执行
+     * EL0 用户态线程需要读取 .rodata 中的字符串常量 */
     for (i = text_end_idx; i < ro_end_idx; i++)
     {
         uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
         s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
-                                         PTE_AP_RO | PTE_PXN | PTE_UXN);
+                                         PTE_AP_USER_RO | PTE_PXN | PTE_UXN);
     }
 
     /* 段3: PTE[ro_end_idx..511] = 4KB Normal RW-（.data + .bss + percpu + stacks + heap）

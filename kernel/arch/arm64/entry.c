@@ -27,6 +27,7 @@
 #include <kernel/ipi.h>
 #include <kernel/syscall.h>
 #include "../../sched/scheduler.h"
+#include "../../sched/thread.h"
 
 /* ========== 外部函数声明 ========== */
 
@@ -340,6 +341,168 @@ static void uart_print_uint(uint64_t base, uint64_t value)
 }
 
 /* ========================================================================
+ * EL0 用户态测试
+ * ======================================================================== */
+
+/** @brief EL0 用户态测试线程的内核栈大小 */
+#define USER_TEST_KERNEL_STACK  4096U
+
+/** @brief EL0 用户态测试线程的用户栈大小 */
+#define USER_TEST_USER_STACK    4096U
+
+/** @brief EL0 用户态测试线程优先级 */
+#define USER_TEST_PRIO          128U
+
+/** @brief EL0 用户态测试线程内核栈（静态分配，16字节对齐） */
+static uint64_t s_user_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief EL0 用户态测试线程用户栈（静态分配，16字节对齐） */
+static uint64_t s_user_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/* 外部声明：用户态上下文初始化（context.S 中定义） */
+extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
+                                           uint64_t arg, uint64_t kernel_sp,
+                                           uint64_t user_sp);
+
+/**
+ * @brief EL0 用户态测试入口函数
+ *
+ * @details 在 EL0 用户态执行，通过 SVC 系统调用与内核交互：
+ *          1. 使用 SYS_DEBUG_PRINT 打印消息（验证 SVC 路径）
+ *          2. 使用 SYS_THREAD_GET_ID 获取线程 ID（验证返回值）
+ *          3. 使用 SYS_THREAD_EXIT 退出线程
+ *
+ * @param arg 入口参数（未使用）
+ *
+ * @note 此函数运行在 EL0（用户态），使用 svc #0 触发系统调用
+ */
+static void user_test_entry(void *arg)
+{
+    (void)arg;
+
+    /* 使用内联汇编直接在 EL0 执行 SVC 系统调用 */
+    /* 1. 调用 SYS_DEBUG_PRINT (0x0500) 打印消息 */
+    {
+        static const char msg[] = "[EL0] User mode SVC syscall verified!\n";
+        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_DEBUG_PRINT;
+        register uint64_t x0 __asm__("x0") = (uint64_t)(uintptr_t)msg;
+        register uint64_t x1 __asm__("x1") = sizeof(msg) - 1U;
+        __asm__ volatile(
+            "svc #0"
+            : "+r"(x0)
+            : "r"(x8), "r"(x1)
+            : "memory"
+        );
+    }
+
+    /* 2. 调用 SYS_THREAD_GET_ID (0x0008) 获取线程 ID */
+    {
+        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_THREAD_GET_ID;
+        register uint64_t x0 __asm__("x0");
+        __asm__ volatile(
+            "svc #0"
+            : "=r"(x0)
+            : "r"(x8)
+            : "memory"
+        );
+        /* x0 包含线程 ID - 通过调试打印输出 */
+        {
+            static const char prefix[] = "[EL0] Thread ID: 0x";
+            register uint64_t x8_2 __asm__("x8") = (uint64_t)SYS_DEBUG_PRINT;
+            register uint64_t x0_2 __asm__("x0") = (uint64_t)(uintptr_t)prefix;
+            register uint64_t x1_2 __asm__("x1") = sizeof(prefix) - 1U;
+            __asm__ volatile(
+                "svc #0"
+                : "+r"(x0_2)
+                : "r"(x8_2), "r"(x1_2)
+                : "memory"
+            );
+        }
+    }
+
+    /* 3. 调用 SYS_THREAD_EXIT (0x0002) 退出 */
+    {
+        register uint64_t x8 __asm__("x8") = (uint64_t)SYS_THREAD_EXIT;
+        register uint64_t x0 __asm__("x0") = 0U;
+        __asm__ volatile(
+            "svc #0"
+            :
+            : "r"(x8), "r"(x0)
+            : "memory"
+        );
+    }
+
+    /* 不应到达此处 */
+    for (;;)
+    {
+        __asm__ volatile("wfe" ::: "memory");
+    }
+}
+
+/**
+ * @brief 创建 EL0 用户态测试线程
+ *
+ * @details 分配线程控制块，设置用户态上下文（SPSR=0x0 EL0t），
+ *          并加入调度器就绪队列。
+ *
+ * @note 线程将在调度器启动后首次调度时通过 eret 进入 EL0
+ */
+static void create_user_test_thread(void)
+{
+    thread_id_t tid;
+    KThread_t *thread;
+    uint64_t kernel_sp;
+    uint64_t user_sp;
+
+    /* 内核栈顶（数组末尾，向下增长） */
+    kernel_sp = (uint64_t)(uintptr_t)&s_user_kernel_stack[
+        USER_TEST_KERNEL_STACK / sizeof(uint64_t)];
+
+    /* 用户栈顶（数组末尾，向下增长） */
+    user_sp = (uint64_t)(uintptr_t)&s_user_user_stack[
+        USER_TEST_USER_STACK / sizeof(uint64_t)];
+
+    /* 使用内核线程创建 API 获取空闲 TCB */
+    tid = kthread_create("user_test",
+                         (kthread_entry_t)user_test_entry,
+                         NULL,
+                         (priority_t)USER_TEST_PRIO,
+                         KTHREAD_POLICY_RR,
+                         CONFIG_STACK_SIZE_DEFAULT);
+    if (tid == THREAD_ID_INVALID)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[kernel] FATAL: Failed to create user test thread\n");
+        return;
+    }
+
+    /* 获取 TCB 指针并覆盖上下文为用户态配置 */
+    thread = &g_scheduler.thread_table[tid];
+
+    /* 设置用户态标志和用户栈 */
+    thread->is_user = 1U;
+    thread->user_sp = (vaddr_t)user_sp;
+
+    /* 使用用户态上下文初始化覆盖默认的 EL1h 上下文 */
+    /* context[2]（x21）传递 user_sp 给 user_entry_trampoline */
+    arch_setup_user_thread_context(thread->context,
+                                   (uint64_t)((uintptr_t)user_test_entry),
+                                   0U,
+                                   kernel_sp,
+                                   user_sp);
+
+    /* 在 context[2]（x21）中保存 user_sp，供 trampoline 使用 */
+    thread->context[2] = (uint64_t)user_sp;
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                  "[kernel] EL0 user test thread created (tid=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+}
+
+/* ========================================================================
  * 内核主入口
  * ======================================================================== */
 
@@ -477,6 +640,10 @@ void kernel_main(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] All subsystems initialized\n");
+
+    /* ---- 创建 EL0 用户态测试线程 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[kernel] Creating EL0 user test thread...\n");
+    create_user_test_thread();
 
     /* ---- 第九步：重新武装定时器并启用 IRQ ---- */
     {

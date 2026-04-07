@@ -162,18 +162,94 @@ cpu_switch_to_first_task:
     ldr     x9, [x0, #96]
     mov     sp, x9
 
-    /* 设置 SPSR_EL1 = EL1h, IRQ 使能（DAIF=0） */
-    mov     x9, #0x5
+    /* 设置 SPSR_EL1 和 ELR_EL1 */
+    ldr     x9, [x0, #104]           /* context[13] = SPSR */
     msr     spsr_el1, x9
-
-    /* ELR_EL1 = LR（由 arch_setup_thread_context 设置为 trampoline） */
-    msr     elr_el1, x30
+    ldr     x9, [x0, #112]           /* context[14] = ELR */
+    msr     elr_el1, x9
 
     /* 确保所有系统寄存器写入完成 */
     isb
 
     /* 通过 eret 进入第一个任务 */
     eret
+
+
+/* ========================================================================
+ * arch_setup_user_thread_context(ctx, entry, arg, kernel_sp, user_sp)
+ *
+ * x0 = ctx          (uint64_t *)
+ * x1 = entry        (uint64_t) - 用户态入口函数地址
+ * x2 = arg          (uint64_t) - 入口函数参数
+ * x3 = kernel_sp    (uint64_t) - 内核栈顶（16字节对齐）
+ * x4 = user_sp      (uint64_t) - 用户态栈顶（16字节对齐）
+ *
+ * 初始化上下文保存区，使线程首次被调度时：
+ *   - x19 保存 entry
+ *   - x20 保存 arg
+ *   - LR/ELR 指向 user_entry_trampoline
+ *   - SP 指向 kernel_sp（内核栈，中断处理使用）
+ *   - SPSR_EL1 = 0x0（EL0t，所有中断使能）
+ *   - SP_EL0 = user_sp（用户态栈）
+ * ======================================================================== */
+    .global arch_setup_user_thread_context
+    .type arch_setup_user_thread_context, @function
+arch_setup_user_thread_context:
+    /* context[0] = x19 = entry（真实入口地址） */
+    str     x1, [x0, #0]
+
+    /* context[1] = x20 = arg（入口参数） */
+    str     x2, [x0, #8]
+
+    /* 清零 x21 ~ x28 */
+    str     xzr, [x0, #16]        /* context[2] = x21 = 0 */
+    str     xzr, [x0, #24]        /* context[3] = x22 = 0 */
+    str     xzr, [x0, #32]        /* context[4] = x23 = 0 */
+    str     xzr, [x0, #40]        /* context[5] = x24 = 0 */
+    str     xzr, [x0, #48]        /* context[6] = x25 = 0 */
+    str     xzr, [x0, #56]        /* context[7] = x26 = 0 */
+    str     xzr, [x0, #64]        /* context[8] = x27 = 0 */
+    str     xzr, [x0, #72]        /* context[9] = x28 = 0 */
+
+    /* context[10] = FP(x29) = 0 */
+    str     xzr, [x0, #80]
+
+    /* context[11] = LR(x30) = user_entry_trampoline */
+    ldr     x9, =user_entry_trampoline
+    str     x9, [x0, #88]
+
+    /* context[12] = SP = kernel_sp（内核栈） */
+    str     x3, [x0, #96]
+
+    /* context[13] = SPSR_EL1 = 0x0（EL0t，所有中断使能） */
+    str     xzr, [x0, #104]
+
+    /* context[14] = ELR_EL1 = user_entry_trampoline */
+    ldr     x9, =user_entry_trampoline
+    str     x9, [x0, #112]
+
+    ret
+
+
+/* ========================================================================
+ * user_entry_trampoline
+ *
+ * 用户态线程入口跳板。
+ * 从内核态通过 eret 进入（SPSR=0x0 → EL0t）。
+ *
+ * 功能：
+ *   1. 设置 SP_EL0 为用户栈（通过 x21 传递）
+ *   2. 将参数移到 x0
+ *   3. 跳转到用户态入口函数
+ * ======================================================================== */
+    .global user_entry_trampoline
+    .type user_entry_trampoline, @function
+user_entry_trampoline:
+    /* 此时运行在 EL0，SP 已无意义（EL0t 使用 SP_EL0） */
+    /* x19 = entry, x20 = arg, x21 = user_sp（由调度器设置） */
+    mov     sp, x21                /* 设置用户态栈指针 */
+    mov     x0, x20                /* x0 = arg */
+    br      x19                    /* 跳转到用户态 entry(arg) */
 
 
 /* ========================================================================

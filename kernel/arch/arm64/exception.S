@@ -58,16 +58,16 @@ exception_vector_table:
     b       .Lserror_handler_spx
 
     /* ================================================================
-     * [8-11]  低 EL（AArch64）异常
+     * [8-11]  低 EL（AArch64）异常 ← EL0 用户态入口
      * ================================================================ */
     .align 7
-    b       .Lexception_panic         /* [8]  同步 */
+    b       .Lsync_handler_lower64       /* [8]  EL0 同步（SVC/数据异常） */
     .align 7
-    b       .Lexception_panic         /* [9]  IRQ */
+    b       .Lirq_handler_lower64        /* [9]  EL0 IRQ */
     .align 7
-    b       .Lexception_panic         /* [10] FIQ */
+    b       .Lexception_panic            /* [10] FIQ（暂未使用） */
     .align 7
-    b       .Lexception_panic         /* [11] SError */
+    b       .Lexception_panic            /* [11] SError（暂未使用） */
 
     /* ================================================================
      * [12-15] 低 EL（AArch32）异常
@@ -251,6 +251,129 @@ exception_vector_table:
     ldp     x2, x3, [sp], #16
     ldp     x0, x1, [sp], #16
     b       .Lexception_panic
+
+/* ========================================================================
+ * EL0 用户态同步异常处理（SVC / 数据异常）
+ *
+ * @details 与 EL1 sync handler 类似，但 EL0 异常时需要：
+ *          - SP_EL0 保存/恢复（用户栈）
+ *          - 切换到内核栈（SP_EL1）
+ * ======================================================================== */
+
+.Lsync_handler_lower64:
+    /* 切换到内核栈：SP_EL1 保存到临时，加载内核 SP */
+    mrs     x22, sp_el0                /* 保存用户 SP */
+    msr     sp_el0, xzr                /* 清除 SP_EL0（安全） */
+
+    /* 保存所有通用寄存器到内核栈 */
+    stp     x0, x1, [sp, #-16]!
+    stp     x2, x3, [sp, #-16]!
+    stp     x4, x5, [sp, #-16]!
+    stp     x6, x7, [sp, #-16]!
+    stp     x8, x9, [sp, #-16]!
+    stp     x10, x11, [sp, #-16]!
+    stp     x12, x13, [sp, #-16]!
+    stp     x14, x15, [sp, #-16]!
+    stp     x16, x17, [sp, #-16]!
+    stp     x18, x19, [sp, #-16]!
+    stp     x20, x21, [sp, #-16]!
+    stp     x22, x23, [sp, #-16]!
+    stp     x24, x25, [sp, #-16]!
+    stp     x26, x27, [sp, #-16]!
+    stp     x28, x29, [sp, #-16]!
+    str     x30, [sp, #-8]!
+
+    /* 保存 ELR_EL1 和 SPSR_EL1 */
+    mrs     x20, elr_el1
+    mrs     x21, spsr_el1
+    stp     x20, x21, [sp, #-16]!
+
+    /* 读取 ESR_EL1 判断异常类型 */
+    mrs     x20, esr_el1
+    lsr     x21, x20, #26            /* EC = ESR[31:26] */
+
+    /* EC = 0x15 (21) = SVC 指令 */
+    cmp     x21, #0x15
+    b.eq    .Lsvc_handler_lower64
+
+    /* 其他同步异常 → exception_sync_handler(esr, far, &elr, spsr) */
+    mrs     x1, far_el1              /* x1 = FAR */
+    mov     x0, x20                  /* x0 = ESR */
+    mov     x2, sp                   /* x2 = 指向栈上 ELR 的指针 */
+    ldr     x3, [sp, #8]             /* x3 = SPSR */
+    bl      exception_sync_handler
+
+    /* 恢复并返回 */
+    b       .Lsync_restore_lower64
+
+.Lsvc_handler_lower64:
+    /* EL0 SVC 系统调用处理 - 复用 syscall_frame_t 布局 */
+    sub     sp, sp, #72
+
+    /* 从已保存区域加载寄存器并存储到 frame */
+    ldp     x9, x10, [sp, #72+0xF8]
+    stp     x9, x10, [sp, #0]
+
+    ldp     x9, x10, [sp, #72+0xE8]
+    stp     x9, x10, [sp, #16]
+
+    ldp     x9, x10, [sp, #72+0xD8]
+    stp     x9, x10, [sp, #32]
+
+    ldp     x9, x10, [sp, #72+0xC8]
+    stp     x9, x10, [sp, #48]
+
+    ldr     x9, [sp, #72+0xB8]
+    str     x9, [sp, #64]
+
+    /* 调用 syscall_handler(frame) */
+    mov     x0, sp
+    bl      syscall_handler
+
+    /* 从 frame->x0 取返回值，写回已保存区域 */
+    ldr     x9, [sp, #0]
+    str     x9, [sp, #72+0xF8]
+
+    /* 释放 frame */
+    add     sp, sp, #72
+
+.Lsync_restore_lower64:
+    /* 恢复 ELR_EL1 和 SPSR_EL1 */
+    ldp     x20, x21, [sp], #16
+    msr     elr_el1, x20
+    msr     spsr_el1, x21
+
+    /* 恢复 SP_EL0（用户栈） */
+    msr     sp_el0, x22
+
+    /* 恢复所有通用寄存器 */
+    ldr     x30, [sp], #8
+    ldp     x28, x29, [sp], #16
+    ldp     x26, x27, [sp], #16
+    ldp     x24, x25, [sp], #16
+    ldp     x22, x23, [sp], #16
+    ldp     x20, x21, [sp], #16
+    ldp     x18, x19, [sp], #16
+    ldp     x16, x17, [sp], #16
+    ldp     x14, x15, [sp], #16
+    ldp     x12, x13, [sp], #16
+    ldp     x10, x11, [sp], #16
+    ldp     x8, x9, [sp], #16
+    ldp     x6, x7, [sp], #16
+    ldp     x4, x5, [sp], #16
+    ldp     x2, x3, [sp], #16
+    ldp     x0, x1, [sp], #16
+
+    eret
+
+/* ========================================================================
+ * EL0 用户态 IRQ 异常处理
+ *
+ * @details EL0 的 IRQ 处理：直接跳转到 EL1h IRQ handler（共享逻辑）
+ * ======================================================================== */
+
+.Lirq_handler_lower64:
+    b       .Lirq_handler_spx
 
 /* ========== 异常默认处理 ========== */
 
