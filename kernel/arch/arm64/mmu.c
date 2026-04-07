@@ -1,31 +1,36 @@
 /**
  * @file    mmu.c
- * @brief   ARM64 MMU 页表映射（PGD → PUD 1GB Block）
+ * @brief   ARM64 MMU 4KB 精细页表映射 + text/rodata/data 三段权限控制
  * @author  AISafe64 Team
- * @date    2026-04-06
- * @version 4.0
+ * @date    2026-04-07
+ * @version 6.0
  *
- * @details 实现 ARM64 双地址空间 MMU 映射（2级页表: PGD → PUD 1GB Block）:
+ * @details 实现 ARM64 双地址空间 MMU 映射（4级页表: PGD → PUD → PMD → PTE）:
  *          - TTBR0_EL1: 恒等映射（物理地址 = 虚拟地址）
  *          - TTBR1_EL1: 内核态高地址空间
  *
- *          页表结构:
+ *          页表结构（4级精细映射）:
  *          TTBR0 页表:
- *            PGD[0] → PUD 表（覆盖 0x00000000-0x7FFFFFFF）
+ *            PGD[0] → PUD 表
  *              PUD[0] = 1GB Device Block @ 0x00000000 (MMIO: UART, GIC)
- *              PUD[1] = 1GB Normal RW Block @ 0x40000000 (内核 + RAM)
+ *              PUD[1] → PMD 表（内核区域）
+ *                PMD[0] → PTE 表（0x40000000-0x401FFFFF, 4KB 精细映射）
+ *                  PTE[0..text_end_idx-1]   = 4KB RX  (.text.boot + .text)
+ *                  PTE[text_end_idx..ro_end_idx-1] = 4KB R-- (.rodata)
+ *                  PTE[ro_end_idx..511]     = 4KB RW- (.data + .bss + stacks + heap)
+ *                PMD[1..511] = 2MB RW- block (空闲 RAM)
  *
- *          TTBR1 页表（高地址镜像）:
- *            PUD[0] = 1GB Normal RW @ 0x00000000
- *            PUD[1] = 1GB Normal RW @ 0x40000000
+ *          TTBR1 页表（高地址镜像, 1GB block）
  *
- *          权限控制:
- *            - MMIO (0x00000000-0x3FFFFFFF): Device nGnRnE, 读写不可执行
- *            - 内核/RAM (0x40000000-0x7FFFFFFF): Normal WB, 读写可执行 (RWX)
+ *          三段权限控制:
+ *            - MMIO (0x00000000-0x3FFFFFFF): Device nGnRnE, RW-, 不可执行
+ *            - .text (.text.boot+.text): Normal WB, 只读可执行 (RX)
+ *            - .rodata: Normal WB, 只读不可执行 (R--)
+ *            - .data+.bss+stacks+heap: Normal WB, 读写不可执行 (RW-)
+ *            - 空闲 RAM: Normal WB, 读写不可执行 (RW-)
  *
  * @note    对应需求: KR-005（虚拟内存管理）
  * @note    QEMU virt 平台: 内核加载在 0x40000000, UART 在 0x09000000
- * @note    后续将引入 4KB 页映射实现 text(RX) / rodata(R--) / data(RW-) 精细权限
  */
 
 #include <stdint.h>
@@ -66,6 +71,12 @@
 /** @brief 1GB 块大小（PUD 级） */
 #define BLOCK_SIZE_1GB   0x40000000ULL
 
+/** @brief 2MB 块大小（PMD 级） */
+#define BLOCK_SIZE_2MB   0x200000ULL
+
+/** @brief 4KB 页大小（PTE 级） */
+#define PAGE_SIZE_4KB    0x1000ULL
+
 /* ========== TCR_EL1 字段定义 ========== */
 
 #define TCR_T0SZ_SHIFT   0U
@@ -87,6 +98,17 @@
 /** @brief 48 位地址空间 (256TB): T1SZ = 64 - 48 = 16 */
 #define TCR_T1SZ_48BIT   16U
 
+/* ========== 链接脚本导出符号（段边界） ========== */
+
+/** @brief .text 段结束地址（.rodata 开始前） */
+extern char __text_end[];
+
+/** @brief .text + .rodata 只读区域结束地址 */
+extern char __rodata_end[];
+
+/** @brief 内核映像结束地址（含 heap） */
+extern char __kernel_end[];
+
 /* ========== 静态页表（BSS 段，4KB 对齐） ========== */
 
 /**
@@ -94,6 +116,21 @@
  */
 static uint64_t s_pgd_ttbr0[512U] __attribute__((aligned(4096U)));
 static uint64_t s_pud_ttbr0[512U] __attribute__((aligned(4096U)));
+
+/**
+ * @brief PMD 表（内核区域 2MB block 映射）
+ * @details 覆盖 0x40000000-0x7FFFFFFF（1GB）
+ */
+static uint64_t s_pmd_kernel[512U] __attribute__((aligned(4096U)));
+
+/**
+ * @brief PTE 表（内核代码+数据区域 4KB 精细映射）
+ * @details 覆盖 0x40000000-0x401FFFFF（2MB）
+ *          PTE[0..text_end_idx-1] = RX (.text.boot + .text)
+ *          PTE[text_end_idx..ro_end_idx-1] = R-- (.rodata)
+ *          PTE[ro_end_idx..511] = RW- (.data + .bss + stacks + heap)
+ */
+static uint64_t s_pte_kernel[512U] __attribute__((aligned(4096U)));
 
 /**
  * @brief TTBR1 页表（内核态高地址映射）
@@ -151,26 +188,69 @@ static uint64_t make_table_desc(uint64_t next_table)
     return PTE_VALID | PTE_TABLE_BIT | (next_table & ~0xFFFULL);
 }
 
+/**
+ * @brief 构造 2MB 块描述符（Level 2 PMD 级）
+ * @param paddr 物理地址（2MB 对齐）
+ * @param attr_idx MAIR 属性索引（0=Normal, 1=Device）
+ * @param flags 权限标志（PTE_AP_RW/PTE_AP_RO + PTE_PXN + PTE_UXN 组合）
+ * @return 块描述符值
+ */
+static uint64_t make_block2m_desc(uint64_t paddr, uint64_t attr_idx,
+                                   uint64_t flags)
+{
+    return PTE_VALID
+         | PTE_AF
+         | PTE_SH_INNER
+         | attr_idx
+         | flags
+         | (paddr & ~(BLOCK_SIZE_2MB - 1ULL));
+}
+
+/**
+ * @brief 构造 4KB 页描述符（Level 3 PTE 级）
+ * @param paddr 物理地址（4KB 对齐）
+ * @param attr_idx MAIR 属性索引（0=Normal, 1=Device）
+ * @param flags 权限标志（PTE_AP_RW/PTE_AP_RO + PTE_PXN + PTE_UXN 组合）
+ * @return 页描述符值
+ */
+static uint64_t make_pte_desc(uint64_t paddr, uint64_t attr_idx,
+                               uint64_t flags)
+{
+    return PTE_VALID
+         | PTE_TABLE_BIT  /* Level 3 页描述符: bit[1] 必须为 1 */
+         | PTE_AF
+         | PTE_SH_INNER
+         | attr_idx
+         | flags
+         | (paddr & ~(PAGE_SIZE_4KB - 1ULL));
+}
+
 /* ========================================================================
  * MMU 早期初始化
  * ======================================================================== */
 
 /**
- * @brief  MMU 早期初始化（PGD → PUD 1GB Block 映射）
+ * @brief  MMU 早期初始化（PGD → PUD → PMD/PTE 4KB 精细权限映射）
  *
  * @details 建立 TTBR0/TTBR1 双地址空间映射并启用 MMU:
  *
- *          1. 清零所有页表
- *          2. TTBR0 页表（恒等映射，PGD → PUD 1GB block）:
+ *          1. 清零所有页表（含 PMD / PTE）
+ *          2. 构建 TTBR0 PTE 表（4KB 页三段精细权限）:
+ *             PTE[0..text_end_idx-1]       = 4KB Normal RX（.text.boot + .text）
+ *             PTE[text_end_idx..ro_end_idx-1] = 4KB Normal R--（.rodata）
+ *             PTE[ro_end_idx..511]         = 4KB Normal RW-（.data + .bss + stacks + heap）
+ *          3. 构建 TTBR0 PMD 表（2MB 粒度）:
+ *             PMD[0] → PTE 表（0x40000000-0x401FFFFF, 4KB 精细映射）
+ *             PMD[1..511] = 2MB Normal RW- Block（空闲 RAM）
+ *          4. TTBR0 PUD:
  *             PUD[0] = 1GB Device Block @ 0x00000000 (MMIO)
- *             PUD[1] = 1GB Normal RW Block @ 0x40000000 (内核 + RAM)
- *          3. TTBR1 页表（高地址镜像，1GB block）
- *          4. 设置 MAIR_EL1 / TCR_EL1 / TTBR0 / TTBR1
- *          5. 启用 MMU
+ *             PUD[1] → PMD 表（替代原来的 1GB RWX Block）
+ *          5. TTBR1 页表（高地址镜像, 1GB block）
+ *          6. 设置 MAIR_EL1 / TCR_EL1 / TTBR0 / TTBR1，启用 MMU
  *
  * @note 内核通过 TTBR0 恒等映射运行（PC = 0x4008XXXX）
- * @note 2MB 粒度无法区分 text/data 权限（全在 0x40000000-0x401FFFFF 内），
- *       故内核区域统一使用 Normal RW 1GB block，后续引入 4KB 页映射实现精细权限
+ * @note __text_end 由链接脚本提供，用于动态计算 text/rodata 分界点
+ * @note __rodata_end 由链接脚本提供，用于动态计算 rodata/data 分界点
  */
 void mmu_early_init(void)
 {
@@ -181,6 +261,14 @@ void mmu_early_init(void)
     uint64_t pud0_paddr;
     uint64_t pgd1_paddr;
     uint64_t pud1_paddr;
+    uint64_t pmd_paddr;
+    uint64_t pte_paddr;
+    uint64_t text_end_addr;
+    uint64_t rodata_end_addr;
+    uint64_t pmd0_base;
+    uint32_t text_end_idx;
+    uint32_t ro_end_idx;
+    uint32_t i;
 
     /* ---- 第1步: 清零所有页表 ---- */
     clear_table(s_pgd_ttbr0);
@@ -188,26 +276,100 @@ void mmu_early_init(void)
     clear_table(s_pgd_ttbr1);
     clear_table(s_pud_ttbr1);
     clear_table(s_pgd_ttbr0_empty);
+    clear_table(s_pmd_kernel);
+    clear_table(s_pte_kernel);
 
-    /* ---- 第2步: 构建 TTBR0 PUD 表（1GB block） ---- */
+    /* ---- 第2步: 构建 PTE 表（4KB 页三段精细权限映射） ---- */
+    pte_paddr = (uint64_t)(uintptr_t)&s_pte_kernel[0U];
+
+    /* PMD[0] 覆盖 0x40000000-0x401FFFFF（2MB = 512 个 4KB 页） */
+    pmd0_base = 0x40000000ULL;
+
+    /* 从链接符号 __text_end 计算 text/rodata 分界 PTE 索引 */
+    text_end_addr = (uint64_t)(uintptr_t)__text_end;
+    text_end_idx = (uint32_t)((text_end_addr - pmd0_base
+                               + PAGE_SIZE_4KB - 1ULL) / PAGE_SIZE_4KB);
+
+    /* 防御性边界检查 */
+    if (text_end_idx > 512U)
+    {
+        text_end_idx = 512U;
+    }
+
+    /* 从链接符号 __rodata_end 计算 rodata/data 分界 PTE 索引 */
+    rodata_end_addr = (uint64_t)(uintptr_t)__rodata_end;
+    ro_end_idx = (uint32_t)((rodata_end_addr - pmd0_base
+                             + PAGE_SIZE_4KB - 1ULL) / PAGE_SIZE_4KB);
+
+    /* 防御性边界检查: rodata_end 不应超出 PTE 表覆盖范围 */
+    if (ro_end_idx > 512U)
+    {
+        ro_end_idx = 512U;
+    }
+
+    /* 确保 text_end_idx <= ro_end_idx */
+    if (text_end_idx > ro_end_idx)
+    {
+        text_end_idx = ro_end_idx;
+    }
+
+    /* 段1: PTE[0..text_end_idx-1] = 4KB Normal RX（.text.boot + .text）
+     * 权限: AP=RO, PXN=0, UXN=1 → EL1 只读可执行 */
+    for (i = 0U; i < text_end_idx; i++)
+    {
+        uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
+        s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
+                                         PTE_AP_RO | PTE_UXN);
+    }
+
+    /* 段2: PTE[text_end_idx..ro_end_idx-1] = 4KB Normal R--（.rodata）
+     * 权限: AP=RO, PXN=1, UXN=1 → EL1 只读不可执行 */
+    for (i = text_end_idx; i < ro_end_idx; i++)
+    {
+        uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
+        s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
+                                         PTE_AP_RO | PTE_PXN | PTE_UXN);
+    }
+
+    /* 段3: PTE[ro_end_idx..511] = 4KB Normal RW-（.data + .bss + percpu + stacks + heap）
+     * 权限: AP=RW, PXN=1, UXN=1 → EL1 读写不可执行 */
+    for (i = ro_end_idx; i < 512U; i++)
+    {
+        uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
+        s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
+                                         PTE_AP_RW | PTE_PXN | PTE_UXN);
+    }
+
+    /* ---- 第3步: 构建 PMD 表（2MB 粒度） ---- */
+    pmd_paddr = (uint64_t)(uintptr_t)&s_pmd_kernel[0U];
+
+    /* PMD[0] → PTE 表（0x40000000-0x401FFFFF, 4KB 精细映射） */
+    s_pmd_kernel[0U] = make_table_desc(pte_paddr);
+
+    /* PMD[1..511] = 2MB Normal RW- Block（0x40200000-0x7FFFFFFF, 空闲 RAM） */
+    for (i = 1U; i < 512U; i++)
+    {
+        uint64_t blk_addr = 0x40000000ULL + (uint64_t)i * BLOCK_SIZE_2MB;
+        s_pmd_kernel[i] = make_block2m_desc(blk_addr, PTE_ATTR_NORMAL,
+                                             PTE_AP_RW | PTE_PXN | PTE_UXN);
+    }
+
+    /* ---- 第4步: 构建 TTBR0 PUD 表 ---- */
     pud0_paddr = (uint64_t)(uintptr_t)&s_pud_ttbr0[0U];
 
-    /* PUD[0] = 1GB Device nGnRnE Block @ 0x00000000 (MMIO: UART 0x09000000, GIC) */
+    /* PUD[0] = 1GB Device nGnRnE Block @ 0x00000000 (MMIO: UART, GIC) */
     s_pud_ttbr0[0U] = make_block1g_desc(0x00000000ULL, PTE_ATTR_DEVICE,
                                           PTE_AP_RW | PTE_PXN | PTE_UXN);
 
-    /* PUD[1] = 1GB Normal RWX Block @ 0x40000000 (内核代码 + 数据 + RAM)
-     * 注意: 内核代码在此区域执行，不能设置 PXN (Privileged Execute Never)
-     * 后续 4KB 页映射可精确划分 text(RX) / rodata(R--) / data(RW-) */
-    s_pud_ttbr0[1U] = make_block1g_desc(0x40000000ULL, PTE_ATTR_NORMAL,
-                                          PTE_AP_RW | PTE_UXN);
+    /* PUD[1] → PMD 表（替代原来的 1GB RWX Block，实现 4KB 精细权限） */
+    s_pud_ttbr0[1U] = make_table_desc(pmd_paddr);
 
-    /* ---- 第3步: 构建 TTBR0 PGD ---- */
+    /* ---- 第5步: 构建 TTBR0 PGD ---- */
     pgd0_paddr = (uint64_t)(uintptr_t)&s_pgd_ttbr0[0U];
     s_pgd_ttbr0[0U] = make_table_desc(pud0_paddr);
     s_pgd_ttbr0[1U] = make_table_desc(pud0_paddr);
 
-    /* ---- 第4步: 构建 TTBR1 页表（高地址镜像，1GB block） ---- */
+    /* ---- 第6步: 构建 TTBR1 页表（高地址镜像，1GB block） ---- */
     pgd1_paddr = (uint64_t)(uintptr_t)&s_pgd_ttbr1[0U];
     pud1_paddr = (uint64_t)(uintptr_t)&s_pud_ttbr1[0U];
 
@@ -220,12 +382,12 @@ void mmu_early_init(void)
     s_pud_ttbr1[1U] = make_block1g_desc(0x40000000ULL, PTE_ATTR_NORMAL,
                                           PTE_AP_RW | PTE_UXN);
 
-    /* ---- 第5步: 设置 MAIR_EL1 ---- */
+    /* ---- 第7步: 设置 MAIR_EL1 ---- */
     mair_val = (MAIR_DEVICE << 8U) | MAIR_NORMAL;
     __asm__ volatile("msr mair_el1, %0" :: "r"(mair_val));
     __asm__ volatile("isb");
 
-    /* ---- 第6步: 设置 TCR_EL1 ---- */
+    /* ---- 第8步: 设置 TCR_EL1 ---- */
     tcr_val = ((uint64_t)TCR_T0SZ_48BIT << TCR_T0SZ_SHIFT)
             | ((uint64_t)TCR_T1SZ_48BIT << TCR_T1SZ_SHIFT)
             | TCR_TG0_4KB
@@ -242,20 +404,20 @@ void mmu_early_init(void)
     __asm__ volatile("msr tcr_el1, %0" :: "r"(tcr_val));
     __asm__ volatile("isb");
 
-    /* ---- 第7步: 设置 TTBR0_EL1 和 TTBR1_EL1 ---- */
+    /* ---- 第9步: 设置 TTBR0_EL1 和 TTBR1_EL1 ---- */
     __asm__ volatile("msr ttbr0_el1, %0" :: "r"(pgd0_paddr));
     __asm__ volatile("isb");
 
     __asm__ volatile("msr ttbr1_el1, %0" :: "r"(pgd1_paddr));
     __asm__ volatile("isb");
 
-    /* ---- 第8步: 刷新 TLB ---- */
+    /* ---- 第10步: 刷新 TLB ---- */
     __asm__ volatile("tlbi vmalle1is");
     __asm__ volatile("tlbi vmalle1");
     __asm__ volatile("dsb ish");
     __asm__ volatile("isb");
 
-    /* ---- 第9步: 启用 MMU (SCTLR_EL1.M = 1) ---- */
+    /* ---- 第11步: 启用 MMU (SCTLR_EL1.M = 1) ---- */
     __asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr_val));
     sctlr_val |= (1ULL << 0U);
     __asm__ volatile("msr sctlr_el1, %0" :: "r"(sctlr_val));

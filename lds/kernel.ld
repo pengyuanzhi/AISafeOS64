@@ -68,7 +68,9 @@ SECTIONS
      */
     .text : ALIGN(4096) {
         *(.text .text.*)
+        . = ALIGN(4096);
     } > RAM
+    __text_end = .;   /* text 段结束（.rodata 开始前） */
 
     /**
      * .rodata 段 - 只读数据
