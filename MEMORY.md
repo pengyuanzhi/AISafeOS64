@@ -1,5 +1,41 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-08 VirtIO 驱动适配新框架 ✅ (11:45)
+
+**commit**: `f5496c9` feat(driver): PL011 UART + VirtIO Block 内核驱动适配新框架
+
+### 新增内核态驱动
+- **drv_uart.c** (170行): PL011 UART → compatible="pl011" → probe 成功 ✅
+- **drv_virtio_blk.c** (300行): VirtIO MMIO Block → compatible="virtio,blk"
+  - VirtIO 初始化序列: ACKNOWLEDGE→DRIVER→FEATURES_OK→DRIVER_OK
+  - 块设备容量读取 (config space)
+  - QEMU 无 virtio-blk 时优雅降级
+
+### 驱动自动探测
+- kernel_main 中注册 3 驱动 + 3 设备 → device_probe_all() 自动匹配
+- Stats: drv=3 dev=3 probe=2 (pl011 + mock-uart probe 成功)
+
+### QEMU 全量测试
+```
+[DRV TEST] ALL PASSED ✅ (3驱动+3设备+2probe)
+[CAP TEST] ALL PASSED ✅ (44用例)
+[SMP TEST] Workers queued ✅ (4核)
+```
+
+text = 47,344 bytes (46.2KB)
+
+### 当前驱动框架文件
+| 文件 | 行数 | 功能 |
+|------|------|------|
+| driver.h | 393 | 接口+模块头 |
+| driver_core.c | 890 | 注册/匹配/probe/设备操作 |
+| driver_module.c | 432 | 模块加载器 |
+| drv_uart.c | 170 | PL011 UART 驱动 |
+| drv_virtio_blk.c | 300 | VirtIO Block 驱动 |
+| 总计 | 2,185 | |
+
+---
+
 ## 2026-04-08 驱动框架端到端 QEMU 测试通过 ✅ (11:20)
 
 **commit**: `a1211b6` feat+test(driver): 驱动框架测试 + device_unregister 引用计数修复
