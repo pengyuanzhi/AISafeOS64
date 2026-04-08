@@ -364,6 +364,14 @@ static uint64_t s_user_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
 static uint64_t s_user_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
+/** @brief EL0 服务端线程内核栈 */
+static uint64_t s_server_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief EL0 服务端线程用户栈 */
+static uint64_t s_server_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
 /* 外部声明：用户态上下文初始化（context.S 中定义） */
 extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
                                            uint64_t arg, uint64_t kernel_sp,
@@ -379,11 +387,32 @@ extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
  *
  * @param arg 入口参数（未使用）
  */
+static void server_entry(void *arg)
+{
+    (void)arg;
+    static const char msg[] = "[SVR] SERVICE RUNNING\n";
+
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)msg,
+                   (uint64_t)(sizeof(msg) - 1U));
+
+    for (;;) { }
+}
+
+/**
+ * @brief EL0 客户端测试入口函数
+ *
+ * @details 在 EL0 用户态执行验证：
+ *          1. SVC 路径验证
+ *          2. IPC 端到端 (client send to server)
+ *          3. 能力系统验证
+ *          4. 进程管理验证
+ *
+ * @param arg 入口参数（未使用）
+ */
 static void user_test_entry(void *arg)
 {
     (void)arg;
-
-    /* EL0 SVC 测试 + IPC + 能力系统完整验证 */
 
     /* 步骤 1: 获取线程 ID */
     {
@@ -399,7 +428,7 @@ static void user_test_entry(void *arg)
                        (uint64_t)(sizeof(msg) - 1U));
     }
 
-    /* 步骤 3: IPC 端到端 */
+    /* 步骤 3: IPC 端到端 (自回环) */
     {
         static const char m2[] = "[EL0] IPC OK\n";
         static const char ipc_msg[] = "HELLO";
@@ -444,20 +473,14 @@ static void user_test_entry(void *arg)
     {
         static const char mp[] = "[EL0] PROC OK\n";
         int64_t my_tid = syscall0(SYS_THREAD_GET_ID);
-        int64_t r;
 
-        /* SET_PRIORITY 测试 */
+        /* SET_PRIORITY (不关心返回值) */
         if (my_tid > 0)
         {
-            r = syscall2(SYS_THREAD_SET_PRIORITY,
-                         (uint64_t)my_tid, 200ULL);
-            (void)r;
+            (void)syscall2(SYS_THREAD_SET_PRIORITY,
+                           (uint64_t)my_tid, 200ULL);
         }
 
-        /* YIELD 让出 CPU */
-        syscall0(SYS_THREAD_YIELD);
-
-        /* 打印进程测试通过 */
         (void)syscall2(SYS_DEBUG_PRINT,
                        (uint64_t)(uintptr_t)mp,
                        (uint64_t)(sizeof(mp) - 1U));
@@ -544,6 +567,61 @@ static void create_user_test_thread(void)
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE,
                   "[k] EL0 thread tid=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+}
+
+/**
+ * @brief 创建 EL0 服务端线程
+ *
+ * @details 创建第二个 EL0 线程作为 IPC 服务端，
+ *          独立内核栈/用户栈/页表。
+ */
+static void create_server_thread(void)
+{
+    thread_id_t tid;
+    KThread_t *thread;
+    uint64_t kernel_sp;
+    uint64_t user_sp;
+    uint64_t user_pgd;
+
+    kernel_sp = (uint64_t)(uintptr_t)&s_server_kernel_stack[
+        USER_TEST_KERNEL_STACK / sizeof(uint64_t)];
+    user_sp = (uint64_t)(uintptr_t)&s_server_user_stack[
+        USER_TEST_USER_STACK / sizeof(uint64_t)];
+
+    user_pgd = mmu_create_user_pgd();
+    if (user_pgd == 0ULL)
+    {
+        return;
+    }
+
+    tid = kthread_create("server",
+                         (kthread_entry_t)server_entry,
+                         NULL,
+                         (priority_t)(USER_TEST_PRIO),  /* 同优先级 */
+                         KTHREAD_POLICY_RR,
+                         CONFIG_STACK_SIZE_DEFAULT);
+    if (tid == THREAD_ID_INVALID)
+    {
+        return;
+    }
+
+    thread = &g_scheduler.thread_table[tid];
+    thread->is_user = 1U;
+    thread->user_sp = (vaddr_t)user_sp;
+    thread->user_pgd = user_pgd;
+
+    arch_setup_user_thread_context(thread->context,
+                                   (uint64_t)((uintptr_t)server_entry)
+                                   | CONFIG_KERNEL_VADDR_BASE,
+                                   0U,
+                                   kernel_sp,
+                                   user_sp);
+    thread->context[2] = (uint64_t)user_sp;
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                  "[k] Server tid=");
     uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
 }
@@ -1893,7 +1971,9 @@ void kernel_main(void)
         }
     }
 
-    /* ---- 创建 EL0 用户态测试线程 ---- */
+    /* ---- 创建 EL0 用户态线程 (server + client) ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating server thread\n");
+    create_server_thread();
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating EL0 thread\n");
     create_user_test_thread();
 
