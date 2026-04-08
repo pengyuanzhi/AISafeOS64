@@ -35,6 +35,7 @@
 #include <kernel/cspace.h>
 #include <kernel/errno.h>
 #include <kernel/barrier.h>
+#include <kernel/formal_verify.h>
 #include <hal.h>
 #include <stdint.h>
 #include <string.h>
@@ -51,6 +52,149 @@
  *          的能力派生关系深度。
  */
 #define REVOKE_STACK_SIZE   (CONFIG_MAX_CSPACES * 4U)
+
+/* ========================================================================
+ * 对象类型权限矩阵
+ * ======================================================================== */
+
+/**
+ * @brief 对象类型权限矩阵
+ *
+ * @details 定义每种内核对象类型的合法权限集合。
+ *          allowed_rights: 该类型对象允许拥有的最大权限
+ *          mandatory_rights: 该类型对象必须拥有的最小权限
+ *
+ * @note 索引与 kobj_type_t 枚举值一一对应
+ */
+static const cap_type_rights_t s_cap_type_rights_table[] =
+{
+    /* KOBJ_THREAD (0) */
+    {
+        KOBJ_THREAD,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_ENDPOINT (1) */
+    {
+        KOBJ_ENDPOINT,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_NOTIFICATION (2) */
+    {
+        KOBJ_NOTIFICATION,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_CSPACE (3) */
+    {
+        KOBJ_CSPACE,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_VM_SPACE (4) */
+    {
+        KOBJ_VM_SPACE,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_PAGE_FRAME (5) */
+    {
+        KOBJ_PAGE_FRAME,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_INTERRUPT (6) */
+    {
+        KOBJ_INTERRUPT,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_DEVICE (7) */
+    {
+        KOBJ_DEVICE,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_CHANNEL (8) */
+    {
+        KOBJ_CHANNEL,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_CONNECTION (9) */
+    {
+        KOBJ_CONNECTION,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
+    }
+};
+
+/** @brief 权限矩阵表条目数 */
+#define CAP_TYPE_RIGHTS_COUNT \
+    (sizeof(s_cap_type_rights_table) / sizeof(s_cap_type_rights_table[0U]))
+
+/* ========================================================================
+ * 对象类型权限验证
+ * ======================================================================== */
+
+/**
+ * @brief 验证权限是否为指定对象类型的合法子集
+ *
+ * @details 检查请求的权限是否满足以下条件：
+ *          1. 权限是 allowed_rights 的子集
+ *          2. 权限包含所有 mandatory_rights
+ *
+ * @param type   内核对象类型
+ * @param rights 要验证的权限位
+ *
+ * @return KERNEL_OK 权限合法
+ * @return -EINVAL 权限非法
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_validate_rights_for_type(kobj_type_t type, uint8_t rights)
+{
+    uint32_t i;
+    const cap_type_rights_t *entry;
+
+    /* 类型边界检查 */
+    if ((uint32_t)type >= (uint32_t)KOBJ_TYPE_COUNT)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 查找类型对应的权限规则 */
+    entry = NULL;
+    for (i = 0U; i < CAP_TYPE_RIGHTS_COUNT; i++)
+    {
+        if (s_cap_type_rights_table[i].type == type)
+        {
+            entry = &s_cap_type_rights_table[i];
+            break;
+        }
+    }
+
+    /* 未找到类型的权限规则 */
+    if (entry == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 检查 1: 权限必须是 allowed_rights 的子集 */
+    if ((rights & entry->allowed_rights) != rights)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 检查 2: 权限必须包含所有 mandatory_rights */
+    if ((rights & entry->mandatory_rights) != entry->mandatory_rights)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    return KERNEL_OK;
+}
 
 /* ========================================================================
  * SMP 多核同步辅助函数
@@ -150,6 +294,8 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
 {
     cap_t *cap;
     cap_t *parent_cap;
+    kernel_status_t rights_ret;
+    uint8_t new_depth;
 
     if (slot >= cs->capacity)
     {
@@ -163,6 +309,41 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
         return -(int32_t)EINVAL;
     }
 
+    /* 验证权限是否符合对象类型的权限矩阵 */
+    rights_ret = cap_validate_rights_for_type(kobj_type, rights);
+    if (rights_ret != KERNEL_OK)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 计算派生深度 */
+    if (parent_slot != CAP_SLOT_INVALID)
+    {
+        if (parent_slot >= cs->capacity)
+        {
+            return -(int32_t)EINVAL;
+        }
+
+        parent_cap = &cs->cap_table[parent_slot];
+
+        if (parent_cap->state != CAP_STATE_VALID)
+        {
+            return -(int32_t)EINVAL;
+        }
+
+        /* 检查派生深度是否超限 */
+        if (parent_cap->derive_depth >= CAP_MAX_DERIVE_DEPTH)
+        {
+            return -(int32_t)EINVAL;
+        }
+
+        new_depth = parent_cap->derive_depth + 1U;
+    }
+    else
+    {
+        new_depth = 0U;
+    }
+
     /* 填充能力字段 */
     cap->state = CAP_STATE_VALID;
     cap->kobj_type = kobj_type;
@@ -171,6 +352,7 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
     cap->kobj_id = kobj_id;
     cap->parent_slot = parent_slot;
     cap->cspace_root = cs->root_slot;
+    cap->derive_depth = new_depth;
 
     INIT_LIST_HEAD(&cap->children);
     INIT_LIST_HEAD(&cap->sibling);
@@ -178,20 +360,6 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
     /* 如果有父能力，加入父能力的 children 链表 */
     if (parent_slot != CAP_SLOT_INVALID)
     {
-        if (parent_slot >= cs->capacity)
-        {
-            cap->state = CAP_STATE_FREE;
-            return -(int32_t)EINVAL;
-        }
-
-        parent_cap = &cs->cap_table[parent_slot];
-
-        if (parent_cap->state != CAP_STATE_VALID)
-        {
-            cap->state = CAP_STATE_FREE;
-            return -(int32_t)EINVAL;
-        }
-
         list_add_tail(&cap->sibling, &parent_cap->children);
     }
 
@@ -222,7 +390,9 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
  */
 kernel_status_t capability_subsys_init(void)
 {
-    /* 当前版本无需额外初始化，CSpace 子系统已处理 */
+    /* 注册能力系统形式化验证不变式 */
+    (void)fv_register_cap_invariants();
+
     return KERNEL_OK;
 }
 
@@ -1246,6 +1416,301 @@ kernel_status_t cap_get_info(cap_slot_t cspace_root,
     info->child_count = list_count_nodes(&cap->children);
 
     ticket_lock_release(&cs->lock);
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 线程迁移时能力上下文同步
+ * ======================================================================== */
+
+/**
+ * @brief 线程迁移时的能力上下文同步
+ *
+ * @details 当线程从一个 CPU 迁移到另一个 CPU 时调用。
+ *          CSpace 是全局共享的，不需要迁移。
+ *          此函数确保迁移安全：
+ *          - 验证线程的 CSpace 在迁移后仍可安全访问
+ *          - 使用内存屏障确保多核可见性
+ *
+ * @param thread_id 迁移的线程 ID
+ * @param old_cpu   原 CPU 编号
+ * @param new_cpu   新 CPU 编号
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ *
+ * @note 对应需求: KR-013, MP-005
+ * @warning 必须在迁移完成后调用
+ */
+kernel_status_t cap_migrate_context(uint32_t thread_id,
+                                      uint32_t old_cpu,
+                                      uint32_t new_cpu)
+{
+    (void)old_cpu;
+    (void)new_cpu;
+
+    if (thread_id >= CONFIG_MAX_THREADS)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* CSpace 是全局共享数据结构，不需要按 CPU 迁移。
+     * 但需要确保：
+     * 1. 迁移前后的内存屏障（由调用方 barrier() 保证）
+     * 2. 不在持锁期间迁移（由 smp_migrate_thread 的锁设计保证）
+     *
+     * 此函数保留作为未来扩展点：
+     * - 每 CPU CSpace 缓存失效
+     * - 能力对象的 CPU 亲和性追踪
+     * - 地址空间 ASID 刷新（如果需要）
+     */
+
+    /* 硬件内存屏障确保所有之前的内存操作对新 CPU 可见 */
+    hal_dmb_ish();
+    barrier();
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 能力系统完整性自检
+ * ======================================================================== */
+
+/**
+ * @brief 执行 CSpace 能力完整性自检（SMP 多核安全）
+ *
+ * @details 遍历指定 CSpace 的所有能力，检查以下不变式：
+ *          a. 所有 VALID 能力的 parent_slot 指向 VALID 父能力或 CAP_SLOT_INVALID
+ *          b. 所有 children 链表中的子能力确实以当前能力为 parent
+ *          c. derive_depth 单调递增（子 >= 父 + 1）
+ *          d. rights 单调递减（子权限是父权限的子集）
+ *          e. 权限符合类型权限矩阵
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param result      输出检查结果
+ *
+ * @return KERNEL_OK 自检完成
+ * @return -EINVAL 参数无效
+ *
+ * @note 对应需求: KR-013
+ */
+kernel_status_t cap_integrity_check(cap_slot_t cspace_root,
+                                      cap_integrity_result_t *result)
+{
+    cspace_t *cs;
+    uint32_t i;
+    uint32_t total;
+    uint32_t failed;
+
+    /* 参数检查 */
+    if (result == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (cspace_root == CAP_SLOT_INVALID)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 CSpace */
+    cs = cspace_from_root(cspace_root);
+    if (cs == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 获取 CSpace 锁 */
+    ticket_lock_acquire(&cs->lock);
+
+    total = 0U;
+    failed = 0U;
+
+    /* 遍历所有能力槽 */
+    for (i = 0U; i < cs->capacity; i++)
+    {
+        cap_t *cap = &cs->cap_table[i];
+
+        if (cap->state != CAP_STATE_VALID)
+        {
+            continue;
+        }
+
+        total++;
+
+        /* 检查 a: parent_slot 指向 VALID 父能力或 CAP_SLOT_INVALID */
+        if (cap->parent_slot != CAP_SLOT_INVALID)
+        {
+            cap_t *parent;
+
+            if (cap->parent_slot >= cs->capacity)
+            {
+                failed++;
+                continue;
+            }
+
+            parent = &cs->cap_table[cap->parent_slot];
+
+            if (parent->state != CAP_STATE_VALID)
+            {
+                failed++;
+                continue;
+            }
+
+            /* 检查 c: derive_depth 单调递增 */
+            if (cap->derive_depth != (parent->derive_depth + 1U))
+            {
+                failed++;
+                continue;
+            }
+
+            /* 检查 d: rights 单调递减（子权限是父权限的子集） */
+            if ((cap->rights & parent->rights) != cap->rights)
+            {
+                failed++;
+                continue;
+            }
+        }
+        else
+        {
+            /* 根能力：derive_depth 应为 0 */
+            if (cap->derive_depth != 0U)
+            {
+                failed++;
+                continue;
+            }
+        }
+
+        /* 检查 e: 权限符合类型权限矩阵 */
+        if (cap_validate_rights_for_type(cap->kobj_type, cap->rights) != KERNEL_OK)
+        {
+            failed++;
+            continue;
+        }
+
+        /* 检查 b: children 链表中的子能力确实以当前能力为 parent */
+        {
+            struct list_head *pos;
+            struct list_head *n;
+
+            for (pos = cap->children.next, n = pos->next;
+                 pos != &cap->children;
+                 pos = n, n = pos->next)
+            {
+                cap_t *child_cap = cap_from_sibling(pos);
+                cap_slot_t child_idx =
+                    (cap_slot_t)(child_cap - &cs->cap_table[0U]);
+
+                if (child_cap->parent_slot != child_idx)
+                {
+                    /* 子能力的 parent_slot 不指向当前能力的索引 i */
+                    /* 需要判断：child_cap->parent_slot 应等于 i */
+                    if (child_cap->parent_slot != (cap_slot_t)i)
+                    {
+                        failed++;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    ticket_lock_release(&cs->lock);
+
+    result->total_caps = total;
+    result->passed_checks = total - failed;
+    result->failed_checks = failed;
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 能力系统形式化验证条件注册
+ * ======================================================================== */
+
+/**
+ * @brief 注册能力系统形式化验证不变式
+ *
+ * @details 向形式化验证框架注册 8 个能力系统核心不变式条件：
+ *          1. 权限单调递减不变式（cap_derive）
+ *          2. 撤销完整性不变式（cap_revoke）
+ *          3. CSpace 引用完整性（cap_validate）
+ *          4. 权限类型合法性（cap_insert_locked）
+ *          5. 派生深度限制（cap_derive）
+ *          6. 无悬挂引用（cap_delete）
+ *          7. 移动原子性（cap_move）
+ *          8. Badge 不可提升（cap_derive）
+ *
+ * @return KERNEL_OK 成功
+ *
+ * @note 对应需求: SE-007, SE-008
+ */
+kernel_status_t fv_register_cap_invariants(void)
+{
+    /* 1. 权限单调递减不变式 */
+    (void)fv_register_condition(
+        "cap_derive: 子能力权限必须为父能力权限的严格子集",
+        FV_COND_INVARIANT,
+        "cap_derive",
+        "capability",
+        FV_SEVERITY_FATAL);
+
+    /* 2. 撤销完整性不变式 */
+    (void)fv_register_condition(
+        "cap_revoke: 级联撤销必须覆盖所有派生子能力",
+        FV_COND_INVARIANT,
+        "cap_revoke",
+        "capability",
+        FV_SEVERITY_FATAL);
+
+    /* 3. CSpace 引用完整性 */
+    (void)fv_register_condition(
+        "cspace: 所有 VALID 状态能力的 parent_slot 指向的父能力必须也为 VALID",
+        FV_COND_INVARIANT,
+        "cap_validate",
+        "capability",
+        FV_SEVERITY_FATAL);
+
+    /* 4. 权限类型合法性 */
+    (void)fv_register_condition(
+        "cap_insert: 权限必须为对象类型的合法子集",
+        FV_COND_PRECONDITION,
+        "cap_insert_locked",
+        "capability",
+        FV_SEVERITY_ERROR);
+
+    /* 5. 派生深度限制 */
+    (void)fv_register_condition(
+        "cap_derive: 派生深度不得超过 MAX_DERIVE_DEPTH",
+        FV_COND_MAX_BOUNDARY,
+        "cap_derive",
+        "capability",
+        FV_SEVERITY_ERROR);
+
+    /* 6. 无悬挂引用 */
+    (void)fv_register_condition(
+        "cap_delete: 删除后子能力的 parent_slot 必须为 CAP_SLOT_INVALID",
+        FV_COND_POSTCONDITION,
+        "cap_delete",
+        "capability",
+        FV_SEVERITY_FATAL);
+
+    /* 7. 移动原子性 */
+    (void)fv_register_condition(
+        "cap_move: 移动后源能力必须为 FREE，目标能力必须为 VALID",
+        FV_COND_ATOMIC,
+        "cap_move",
+        "capability",
+        FV_SEVERITY_FATAL);
+
+    /* 8. Badge 不可提升 */
+    (void)fv_register_condition(
+        "cap_derive: Badge 值必须为源 Badge 的子集或自定义值",
+        FV_COND_INVARIANT,
+        "cap_derive",
+        "capability",
+        FV_SEVERITY_WARNING);
 
     return KERNEL_OK;
 }

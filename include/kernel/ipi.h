@@ -43,8 +43,14 @@
 /** @brief IPI 类型：缓存维护 */
 #define IPI_TYPE_CACHE_MAINT    4U
 
+/** @brief IPI 类型：能力撤销广播（通知其他核使能力缓存失效） */
+#define IPI_TYPE_CAP_REVOKE     5U
+
+/** @brief IPI 类型：ASID 刷新广播 */
+#define IPI_TYPE_ASID_FLUSH     6U
+
 /** @brief IPI 类型总数 */
-#define IPI_TYPE_COUNT          5U
+#define IPI_TYPE_COUNT          7U
 
 /* ========================================================================
  * IPI 函数调用结构
@@ -61,13 +67,34 @@ typedef struct
 } ipi_call_func_t;
 
 /* ========================================================================
+ * IPI 延迟统计结构
+ * ======================================================================== */
+
+/**
+ * @brief IPI 延迟统计信息
+ *
+ * @details 记录每个 CPU 的 IPI 延迟统计：
+ *          - min_ns: 最小延迟（纳秒）
+ *          - max_ns: 最大延迟（纳秒）
+ *          - avg_ns: 平均延迟（纳秒）
+ *          - count: 采样次数
+ */
+typedef struct
+{
+    uint64_t min_ns;    /**< @brief 最小延迟（纳秒） */
+    uint64_t max_ns;    /**< @brief 最大延迟（纳秒） */
+    uint64_t avg_ns;    /**< @brief 平均延迟（纳秒） */
+    uint64_t count;     /**< @brief 采样次数 */
+} ipi_latency_stats_t;
+
+/* ========================================================================
  * IPI API
  * ======================================================================== */
 
 /**
  * @brief 初始化 IPI 子系统
  *
- * @details 注册 IPI 中断处理函数。
+ * @details 注册 IPI 中断处理函数，初始化批处理位图和延迟统计。
  *
  * @return KERNEL_OK 成功
  *
@@ -77,6 +104,10 @@ kernel_status_t ipi_init(void);
 
 /**
  * @brief 向指定 CPU 发送 IPI
+ *
+ * @details 将 IPI 标记到目标 CPU 的待处理位图中。
+ *          如需立即发送，调用 ipi_flush_pending()。
+ *          批处理模式下不立即触发 SGI，减少 GIC MMIO 写入。
  *
  * @param target_cpu 目标 CPU 编号
  * @param ipi_type   IPI 类型
@@ -119,9 +150,44 @@ kernel_status_t ipi_call_func(uint32_t target_cpu,
  * @brief IPI 中断处理入口
  *
  * @details 在中断上下文中被调用，根据 IPI 类型分发处理。
+ *          处理完成后自动清除该 CPU 的待处理位图。
  *
  * @param ipi_type IPI 类型
  */
 void ipi_handler(uint32_t ipi_type);
+
+/**
+ * @brief 刷新指定 CPU 的所有待处理 IPI
+ *
+ * @details 将目标 CPU 的待处理 IPI 位图合并为一次 SGI 发送，
+ *          减少 GIC MMIO 写入次数（从 N 次 SGI → 1 次 SGI）。
+ *          在调度器返回用户态前、中断返回前调用。
+ *
+ * @param cpu_id 目标 CPU 编号
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ *
+ * @note 对应需求: MP-004
+ */
+kernel_status_t ipi_flush_pending(uint32_t cpu_id);
+
+/**
+ * @brief 刷新当前 CPU 的所有待处理 IPI
+ *
+ * @details ipi_flush_pending() 的便利封装，自动获取当前 CPU ID。
+ */
+void ipi_flush_pending_self(void);
+
+/**
+ * @brief 获取指定 CPU 的 IPI 延迟统计
+ *
+ * @param cpu_id  CPU 编号
+ * @param stats   输出统计信息（调用者提供缓冲区）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ */
+kernel_status_t ipi_get_latency_stats(uint32_t cpu_id, ipi_latency_stats_t *stats);
 
 #endif /* KERNEL_IPI_H */

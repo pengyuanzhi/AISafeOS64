@@ -355,4 +355,90 @@ kernel_status_t smp_send_reschedule(uint32_t target_cpu);
  */
 kernel_status_t smp_work_steal(uint32_t my_cpu);
 
+/* ========================================================================
+ * RCU-like 宽限期接口
+ * ======================================================================== */
+
+/**
+ * @brief SMP 宽限期结构
+ *
+ * @details 用于能力撤销等场景，确保所有 CPU 核心已确认
+ *          进入新的宽限期，安全释放旧资源。
+ *          - gp_seq: 全局宽限期序号（递增）
+ *          - cpu_ack: 每 CPU 确认的序号
+ */
+typedef struct
+{
+    volatile uint64_t gp_seq;                           /**< @brief 当前宽限期序号 */
+    volatile uint64_t cpu_ack[CONFIG_MAX_CPUS];         /**< @brief 每 CPU 确认值 */
+} smp_grace_period_t;
+
+/**
+ * @brief 启动新的宽限期
+ *
+ * @details 递增全局宽限期序号，向所有其他 CPU 广播确认请求。
+ *          配合 smp_grace_period_wait() 使用，确保所有核
+ *          已进入新宽限期后再安全释放资源。
+ *
+ * @param gp 宽限期结构指针
+ *
+ * @note 对应需求: SC-004
+ */
+void smp_grace_period_start(smp_grace_period_t *gp);
+
+/**
+ * @brief 等待所有 CPU 确认当前宽限期
+ *
+ * @details 自旋等待直到所有在线 CPU 的确认值等于当前宽限期序号。
+ *          用于能力撤销时确保所有核已释放旧能力引用。
+ *
+ * @param gp 宽限期结构指针
+ *
+ * @note 对应需求: SC-004
+ * @warning 不可在中断上下文中调用（可能长时间自旋）
+ */
+void smp_grace_period_wait(const smp_grace_period_t *gp);
+
+/**
+ * @brief 当前 CPU 确认宽限期
+ *
+ * @details 在 IPI 处理或调度器路径中调用，
+ *          将当前 CPU 的确认值更新为最新宽限期序号。
+ *
+ * @param gp 宽限期结构指针
+ */
+void smp_grace_period_ack(smp_grace_period_t *gp);
+
+/* ========================================================================
+ * 迁移统计接口
+ * ======================================================================== */
+
+/**
+ * @brief SMP 迁移统计信息
+ *
+ * @details 每 CPU 的线程迁移统计：
+ *          - migrate_count: 显式迁移次数
+ *          - steal_count: 被窃取次数
+ *          - affinity_reject: 亲和性拒绝次数
+ *          - load_balance_count: 负载均衡触发次数
+ */
+typedef struct
+{
+    uint32_t migrate_count;         /**< @brief 显式迁移次数 */
+    uint32_t steal_count;           /**< @brief 被窃取次数 */
+    uint32_t affinity_reject;       /**< @brief 亲和性拒绝次数 */
+    uint32_t load_balance_count;    /**< @brief 负载均衡触发次数 */
+} smp_migrate_stats_t;
+
+/**
+ * @brief 获取指定 CPU 的迁移统计
+ *
+ * @param cpu_id CPU 编号
+ * @param stats  输出统计信息（调用者提供缓冲区）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ */
+kernel_status_t smp_get_migrate_stats(uint32_t cpu_id, smp_migrate_stats_t *stats);
+
 #endif /* KERNEL_SMP_H */

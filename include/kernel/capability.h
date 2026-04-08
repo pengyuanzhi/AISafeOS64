@@ -56,6 +56,31 @@
 #define CAP_RIGHT_NONE      0U
 
 /* ========================================================================
+ * 派生深度限制
+ * ======================================================================== */
+
+/** @brief 能力派生最大深度 */
+#define CAP_MAX_DERIVE_DEPTH    8U
+
+/* ========================================================================
+ * 对象类型权限矩阵
+ * ======================================================================== */
+
+/**
+ * @brief 对象类型权限规则
+ *
+ * @details 定义每种内核对象类型的合法权限集合。
+ *          allowed_rights: 该类型允许拥有的权限位
+ *          mandatory_rights: 该类型必须拥有的权限位
+ */
+typedef struct
+{
+    kobj_type_t type;               /**< @brief 内核对象类型 */
+    uint8_t     allowed_rights;     /**< @brief 允许的权限位集合 */
+    uint8_t     mandatory_rights;   /**< @brief 强制要求的权限位集合 */
+} cap_type_rights_t;
+
+/* ========================================================================
  * 能力槽索引类型
  * ======================================================================== */
 
@@ -101,6 +126,7 @@ typedef struct
     kobj_id_t       kobj_id;        /**< @brief 指向的内核对象 ID */
     cap_slot_t      parent_slot;    /**< @brief 父能力槽索引（CAP_SLOT_INVALID 表示根能力） */
     cap_slot_t      cspace_root;    /**< @brief 所属 CSpace 的根能力槽 */
+    uint8_t         derive_depth;   /**< @brief 派生深度（根能力为 0，每派生一次加 1） */
     struct list_head children;      /**< @brief 子能力链表 */
     struct list_head sibling;       /**< @brief 兄弟链表节点 */
 } cap_t;
@@ -388,5 +414,102 @@ static inline bool cap_rights_check(const cap_t *cap, uint8_t required)
 {
     return ((cap->rights & required) == required);
 }
+
+/* ========================================================================
+ * 线程迁移时能力上下文同步
+ * ======================================================================== */
+
+/**
+ * @brief 线程迁移时的能力上下文同步
+ *
+ * @details 当线程从一个 CPU 迁移到另一个 CPU 时调用。
+ *          确保迁移后的能力访问安全。
+ *
+ * @param thread_id 迁移的线程 ID
+ * @param old_cpu   原 CPU 编号
+ * @param new_cpu   新 CPU 编号
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ *
+ * @note 对应需求: KR-013, MP-005
+ */
+kernel_status_t cap_migrate_context(uint32_t thread_id,
+                                      uint32_t old_cpu,
+                                      uint32_t new_cpu);
+
+/* ========================================================================
+ * 对象类型权限验证
+ * ======================================================================== */
+
+/**
+ * @brief 验证权限是否为指定对象类型的合法子集
+ *
+ * @details 检查请求的权限是否满足以下条件：
+ *          1. 权限是 allowed_rights 的子集
+ *          2. 权限包含所有 mandatory_rights
+ *
+ * @param type   内核对象类型
+ * @param rights 要验证的权限位
+ *
+ * @return KERNEL_OK 权限合法
+ * @return -EINVAL 权限非法
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_validate_rights_for_type(kobj_type_t type, uint8_t rights);
+
+/* ========================================================================
+ * 能力系统完整性自检
+ * ======================================================================== */
+
+/**
+ * @brief 能力系统完整性自检结果
+ */
+typedef struct
+{
+    uint32_t total_caps;        /**< @brief 检查的能力总数 */
+    uint32_t passed_checks;     /**< @brief 通过的检查数 */
+    uint32_t failed_checks;     /**< @brief 失败的检查数 */
+} cap_integrity_result_t;
+
+/**
+ * @brief 执行 CSpace 能力完整性自检
+ *
+ * @details 遍历指定 CSpace 的所有能力，检查以下不变式：
+ *          a. 所有 VALID 能力的 parent_slot 指向 VALID 父能力或 CAP_SLOT_INVALID
+ *          b. 所有 children 链表中的子能力确实以当前能力为 parent
+ *          c. derive_depth 单调递增（子 >= 父 + 1）
+ *          d. rights 单调递减（子权限是父权限的子集）
+ *          e. 权限符合类型权限矩阵
+ *
+ *          在 CSpace 锁保护下执行，多核安全。
+ *
+ * @param cspace_root CSpace 根能力槽
+ * @param result      输出检查结果
+ *
+ * @return KERNEL_OK 自检完成（不代表全部通过，查看 result）
+ * @return -EINVAL 参数无效
+ *
+ * @note 对应需求: KR-013
+ */
+kernel_status_t cap_integrity_check(cap_slot_t cspace_root,
+                                      cap_integrity_result_t *result);
+
+/* ========================================================================
+ * 能力系统形式化验证条件注册
+ * ======================================================================== */
+
+/**
+ * @brief 注册能力系统形式化验证不变式
+ *
+ * @details 向形式化验证框架注册 8 个能力系统核心不变式条件。
+ *          应在 capability_subsys_init() 中调用。
+ *
+ * @return KERNEL_OK 成功
+ *
+ * @note 对应需求: SE-007, SE-008
+ */
+kernel_status_t fv_register_cap_invariants(void);
 
 #endif /* KERNEL_CAPABILITY_H */

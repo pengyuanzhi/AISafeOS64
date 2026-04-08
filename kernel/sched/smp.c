@@ -67,6 +67,16 @@ static uint32_t s_thread_affinity[CONFIG_MAX_THREADS];
 static TicketLock_t s_affinity_lock;
 
 /* ========================================================================
+ * 迁移统计状态
+ * ======================================================================== */
+
+/** @brief 每 CPU 迁移统计 */
+static smp_migrate_stats_t s_migrate_stats[CONFIG_MAX_CPUS];
+
+/** @brief 迁移统计锁 */
+static TicketLock_t s_migrate_stats_lock;
+
+/* ========================================================================
  * 调度器队列远程操作锁
  * ======================================================================== */
 
@@ -145,9 +155,14 @@ kernel_status_t smp_sched_init(void)
     for (cpu = 0U; cpu < CONFIG_MAX_CPUS; cpu++)
     {
         s_lb_interval[cpu] = LB_INTERVAL_DEF;
+        s_migrate_stats[cpu].migrate_count = 0U;
+        s_migrate_stats[cpu].steal_count = 0U;
+        s_migrate_stats[cpu].affinity_reject = 0U;
+        s_migrate_stats[cpu].load_balance_count = 0U;
     }
 
     ticket_lock_init(&s_affinity_lock);
+    ticket_lock_init(&s_migrate_stats_lock);
     barrier();
 
     return KERNEL_OK;
@@ -587,6 +602,9 @@ kernel_status_t smp_load_balance(void)
         if ((tid < CONFIG_MAX_THREADS) &&
             (!smp_affinity_allowed(tid, dst_cpu)))
         {
+            ticket_lock_acquire(&s_migrate_stats_lock);
+            s_migrate_stats[src_cpu].affinity_reject++;
+            ticket_lock_release(&s_migrate_stats_lock);
             sched_unlock_dual(src_q, dst_q);
             break;
         }
@@ -602,6 +620,12 @@ kernel_status_t smp_load_balance(void)
     if (migrated > 0U)
     {
         (void)ipi_send(dst_cpu, IPI_TYPE_RESCHEDULE);
+
+        /* 更新迁移统计 */
+        ticket_lock_acquire(&s_migrate_stats_lock);
+        s_migrate_stats[src_cpu].migrate_count += migrated;
+        s_migrate_stats[dst_cpu].load_balance_count++;
+        ticket_lock_release(&s_migrate_stats_lock);
     }
 
     return KERNEL_OK;
@@ -692,6 +716,9 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     if ((tid < CONFIG_MAX_THREADS) &&
         (!smp_affinity_allowed(tid, current_cpu)))
     {
+        ticket_lock_acquire(&s_migrate_stats_lock);
+        s_migrate_stats[src_cpu].affinity_reject++;
+        ticket_lock_release(&s_migrate_stats_lock);
         sched_unlock_dual(src_q, dst_q);
         return KERNEL_OK;
     }
@@ -700,6 +727,11 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     remote_add_thread(dst_q, thread);
 
     sched_unlock_dual(src_q, dst_q);
+
+    /* 更新窃取统计 */
+    ticket_lock_acquire(&s_migrate_stats_lock);
+    s_migrate_stats[src_cpu].steal_count++;
+    ticket_lock_release(&s_migrate_stats_lock);
 
     (void)ipi_send(src_cpu, IPI_TYPE_RESCHEDULE);
 
@@ -809,4 +841,108 @@ kernel_status_t smp_send_reschedule(uint32_t target_cpu)
         return -(int32_t)EINVAL;
     }
     return ipi_send(target_cpu, IPI_TYPE_RESCHEDULE);
+}
+
+/* ========================================================================
+ * RCU-like 宽限期实现
+ * ======================================================================== */
+
+void smp_grace_period_start(smp_grace_period_t *gp)
+{
+    if (gp == NULL)
+    {
+        return;
+    }
+
+    /* 递增宽限期序号 */
+    gp->gp_seq = gp->gp_seq + 1ULL;
+    barrier_store();
+
+    /* 向所有其他在线 CPU 广播确认请求 */
+    (void)ipi_broadcast(IPI_TYPE_RESCHEDULE, true);
+}
+
+void smp_grace_period_wait(const smp_grace_period_t *gp)
+{
+    uint32_t cpu;
+    uint64_t target_seq;
+
+    if (gp == NULL)
+    {
+        return;
+    }
+
+    target_seq = gp->gp_seq;
+
+    /* 自旋等待所有在线 CPU 确认 */
+    for (;;)
+    {
+        bool all_acked = true;
+
+        barrier_load();
+        for (cpu = 0U; cpu < CONFIG_MAX_CPUS; cpu++)
+        {
+            if (!smp_cpu_online(cpu))
+            {
+                continue;
+            }
+            if (gp->cpu_ack[cpu] < target_seq)
+            {
+                all_acked = false;
+                break;
+            }
+        }
+
+        if (all_acked)
+        {
+            break;
+        }
+
+        cpu_relax();
+    }
+}
+
+void smp_grace_period_ack(smp_grace_period_t *gp)
+{
+    uint32_t cpu_id;
+
+    if (gp == NULL)
+    {
+        return;
+    }
+
+    cpu_id = smp_get_cpu_id();
+    if (cpu_id < CONFIG_MAX_CPUS)
+    {
+        gp->cpu_ack[cpu_id] = gp->gp_seq;
+        barrier_store();
+    }
+}
+
+/* ========================================================================
+ * 迁移统计查询
+ * ======================================================================== */
+
+kernel_status_t smp_get_migrate_stats(uint32_t cpu_id, smp_migrate_stats_t *stats)
+{
+    if (cpu_id >= CONFIG_MAX_CPUS)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (stats == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    ticket_lock_acquire(&s_migrate_stats_lock);
+
+    stats->migrate_count = s_migrate_stats[cpu_id].migrate_count;
+    stats->steal_count = s_migrate_stats[cpu_id].steal_count;
+    stats->affinity_reject = s_migrate_stats[cpu_id].affinity_reject;
+    stats->load_balance_count = s_migrate_stats[cpu_id].load_balance_count;
+
+    ticket_lock_release(&s_migrate_stats_lock);
+
+    return KERNEL_OK;
 }
