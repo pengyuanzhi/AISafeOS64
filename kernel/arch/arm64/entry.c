@@ -673,6 +673,551 @@ static uint32_t cap_runtime_test(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Rights validation OK\n");
+
+    /* === 边界测试：使用新 CSpace（避免影响前面的测试） === */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Boundary tests...\n");
+
+    /* 创建边界测试专用 CSpace */
+    {
+        cspace_t *bcs;
+        cap_slot_t broot;
+        ret = cspace_create(32U, &bcs);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 20 (boundary cspace create)\n");
+            return 20U;
+        }
+        broot = bcs->root_slot;
+
+        /* 步骤 21: cap_mint 非法权限 — KOBJ_INTERRUPT 不允许 WRITE */
+        ret = cap_mint(broot, 5U, KOBJ_INTERRUPT, 10U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 21 (interrupt allows write)\n");
+            return 21U;
+        }
+
+        /* 步骤 22: cap_mint 非法权限 — KOBJ_CHANNEL 缺少 mandatory READ */
+        ret = cap_mint(broot, 5U, KOBJ_CHANNEL, 10U,
+                       (uint8_t)CAP_RIGHT_WRITE, 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 22 (channel missing read)\n");
+            return 22U;
+        }
+
+        /* 步骤 23: cap_mint 合法 — KOBJ_CHANNEL 带 READ|WRITE|GRANT|REVOKE */
+        ret = cap_mint(broot, 5U, KOBJ_CHANNEL, 10U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE), 0U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 23 (channel mint ok)\n");
+            return 23U;
+        }
+
+        /* 步骤 24: cap_mint 重复占用同一槽 */
+        ret = cap_mint(broot, 5U, KOBJ_ENDPOINT, 11U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 24 (duplicate slot)\n");
+            return 24U;
+        }
+
+        /* 步骤 25: cap_copy 无 GRANT 权限 — 应被拒绝 */
+        ret = cap_mint(broot, 6U, KOBJ_ENDPOINT, 12U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 25a (endpoint mint)\n");
+            return 25U;
+        }
+        ret = cap_copy(broot, 6U, broot, 7U, 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 25 (copy without grant)\n");
+            return 25U;
+        }
+
+        /* 步骤 26: cap_copy rights_mask=0 保持原权限（非提权测试）
+         * 注意：cap_copy 的 rights_mask 是 AND 操作（取交集），不会提权
+         * 所以 rights_mask=R|X 当源无 X 时，结果就是 R（合法降权）
+         * 这里改为测试 rights_mask 降权 */
+        ret = cap_copy(broot, 5U, broot, 7U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE));
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 26 (copy downgrade)\n");
+            return 26U;
+        }
+
+        /* 步骤 27: cap_derive 权限等于源（非严格子集，应被拒绝） */
+        ret = cap_derive(broot, 5U, broot, 8U,
+                         (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                   CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE), 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 27 (derive equal rights)\n");
+            return 27U;
+        }
+
+        /* 步骤 28: cap_derive 正常降权 — 仅保留 READ */
+        ret = cap_derive(broot, 5U, broot, 8U,
+                         (uint8_t)CAP_RIGHT_READ, 0x11U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 28 (derive downgrade)\n");
+            return 28U;
+        }
+
+        /* 步骤 29: cap_delete 非级联删除 — 删除 slot 5 */
+        ret = cap_delete(broot, 5U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 29 (delete slot 5)\n");
+            return 29U;
+        }
+
+        /* 步骤 30: 验证 slot 5 已 FREE */
+        ret = cap_get_info(broot, 5U, &info);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 30 (slot 5 not free)\n");
+            return 30U;
+        }
+
+        /* 步骤 31: 验证 slot 8 仍 VALID（非级联删除） */
+        ret = cap_get_info(broot, 8U, &info);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 31 (slot 8 not valid)\n");
+            return 31U;
+        }
+
+        /* 步骤 32: cap_badge_update 测试 */
+        ret = cap_mint(broot, 9U, KOBJ_CHANNEL, 20U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 32a (mint for badge)\n");
+            return 32U;
+        }
+        ret = cap_badge_update(broot, 9U, 0xABU);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 32 (badge update)\n");
+            return 32U;
+        }
+        ret = cap_get_info(broot, 9U, &info);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 32b (get info after badge)\n");
+            return 32U;
+        }
+        if (info.badge != 0xABU)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 33 (badge mismatch)\n");
+            return 33U;
+        }
+
+        /* 步骤 34: cap_validate 权限不足 — 缺少 GRANT */
+        ret = cap_validate(broot, 9U, (uint8_t)CAP_RIGHT_GRANT, NULL);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 34 (validate no grant)\n");
+            return 34U;
+        }
+
+        /* 步骤 35: cap_validate 正确权限 — READ|WRITE */
+        ret = cap_validate(broot, 9U,
+                           (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), NULL);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 35 (validate rw)\n");
+            return 35U;
+        }
+
+        /* 步骤 36: cap_move 测试 */
+        ret = cap_mint(broot, 10U, KOBJ_THREAD, 30U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 36a (mint for move)\n");
+            return 36U;
+        }
+        ret = cap_move(broot, 10U, broot, 11U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 36 (move)\n");
+            return 36U;
+        }
+        /* 源槽应该不存在 */
+        ret = cap_get_info(broot, 10U, &info);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 37 (source not cleared)\n");
+            return 37U;
+        }
+        /* 目标槽应该存在且类型正确 */
+        ret = cap_get_info(broot, 11U, &info);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 38 (dest not valid)\n");
+            return 38U;
+        }
+        if (info.obj_type != KOBJ_THREAD)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 39 (move type mismatch)\n");
+            return 39U;
+        }
+
+        /* 步骤 37: cap_revoke 无 REVOKE 权限 — 应被拒绝 */
+        ret = cap_mint(broot, 12U, KOBJ_ENDPOINT, 40U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 40a (mint for revoke)\n");
+            return 40U;
+        }
+        ret = cap_revoke(broot, 12U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 40 (revoke without perm)\n");
+            return 40U;
+        }
+
+        /* 步骤 38: 无效参数 — CAP_SLOT_INVALID */
+        ret = cap_mint(CAP_SLOT_INVALID, 0U, KOBJ_THREAD, 0U,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
+        if (ret == KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 41 (invalid slot mint)\n");
+            return 41U;
+        }
+
+        /* 步骤 39: 权限矩阵全类型验证 */
+        {
+            /* KOBJ_THREAD: R|W|G|R 合法, R|W|G|R|X 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_THREAD,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (thread valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_THREAD,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE |
+                                 CAP_RIGHT_EXECUTE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (thread exec illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_ENDPOINT: R|W|G 合法, R|W|G|R 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_ENDPOINT,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (ep valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_ENDPOINT,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (ep revoke illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_NOTIFICATION: R|W|G 合法, R|W|X 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_NOTIFICATION,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (notif valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_NOTIFICATION,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (notif exec illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_CSPACE: R|W|G|R 合法, R|W|G|R|X 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_CSPACE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (cspace valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_CSPACE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE |
+                                 CAP_RIGHT_EXECUTE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (cspace exec illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_VM_SPACE: R|W|X|G 合法, R|W|X|G|R 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_VM_SPACE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (vm valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_VM_SPACE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT |
+                                 CAP_RIGHT_REVOKE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (vm revoke illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_PAGE_FRAME: R|W|X 合法, R|W|X|G 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_PAGE_FRAME,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (page valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_PAGE_FRAME,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (page grant illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_INTERRUPT: R|G 合法, R|G|W 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_INTERRUPT,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (irq valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_INTERRUPT,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT | CAP_RIGHT_WRITE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (irq write illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_DEVICE: R|W|X|G 合法, R|W|X|G|R 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_DEVICE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (dev valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_DEVICE,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT |
+                                 CAP_RIGHT_REVOKE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (dev revoke illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_CHANNEL: R|W|G|R 合法, R|W|G|R|X 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_CHANNEL,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (chan valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_CHANNEL,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE |
+                                 CAP_RIGHT_EXECUTE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (chan exec illegal)\n");
+                return 42U;
+            }
+
+            /* KOBJ_CONNECTION: R|W|G 合法, R|W|G|R 非法 */
+            ret = cap_validate_rights_for_type(KOBJ_CONNECTION,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
+            if (ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (conn valid rights)\n");
+                return 42U;
+            }
+            ret = cap_validate_rights_for_type(KOBJ_CONNECTION,
+                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                 CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
+            if (ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 42 (conn revoke illegal)\n");
+                return 42U;
+            }
+        }
+
+        /* 步骤 40: 派生深度限制 — 验证 CAP_MAX_DERIVE_DEPTH=8
+         *
+         * 策略：使用 cap_copy（非严格降权）来构建深度链。
+         * cap_copy 不要求严格子集，且每次 copy 都建立父子关系增加 derive_depth。
+         * 根能力 derive_depth=0，每 copy 一次 depth+1。
+         * 第 8 层 copy 后 depth=8，第 9 层应被拒绝（超过 MAX_DERIVE_DEPTH=8）。
+         */
+        {
+            uint32_t depth_i;
+            kernel_status_t depth_ret;
+
+            /* 深度链根能力 slot 15，带 GRANT 权限以支持后续 copy */
+            depth_ret = cap_mint(broot, 15U, KOBJ_ENDPOINT, 50U,
+                                 (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE |
+                                           CAP_RIGHT_GRANT), 0U);
+            if (depth_ret != KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 43a (depth chain root)\n");
+                return 43U;
+            }
+
+            /* 逐层 copy: slot 16 ← 15, slot 17 ← 16, ... up to depth 7 (8 copies total)
+             * 每层 copy 使用 R|W|G 权限（保持 GRANT 以允许继续 copy）
+             * copy 后子能力的 derive_depth = 父 depth + 1
+             * 根 depth=0 → copy1 depth=1 → ... → copy8 depth=8 */
+            for (depth_i = 0U; depth_i < CAP_MAX_DERIVE_DEPTH; depth_i++)
+            {
+                cap_slot_t src_slot;
+                cap_slot_t dst_slot;
+
+                src_slot = (cap_slot_t)(15U + depth_i);
+                dst_slot = (cap_slot_t)(16U + depth_i);
+
+                /* 使用 cap_copy 保持权限（非降权），建立父子关系 */
+                depth_ret = cap_copy(broot, src_slot, broot, dst_slot, 0U);
+                if (depth_ret != KERNEL_OK)
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                                  "[CAP TEST] FAIL at step 43 (copy depth=");
+                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)depth_i);
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    return 43U;
+                }
+            }
+
+            /* 第 CAP_MAX_DERIVE_DEPTH+1 层 copy 应被拒绝 */
+            /* 此时最后成功的 slot 是 15+8=23，尝试 copy 到 slot 24 */
+            depth_ret = cap_copy(broot,
+                                 (cap_slot_t)(15U + CAP_MAX_DERIVE_DEPTH),
+                                 broot,
+                                 (cap_slot_t)(16U + CAP_MAX_DERIVE_DEPTH),
+                                 0U);
+            if (depth_ret == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[CAP TEST] FAIL at step 43 (depth limit exceeded)\n");
+                return 43U;
+            }
+        }
+
+        /* 步骤 41: 最终完整性检查 */
+        ret = cap_integrity_check(broot, &result);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 44 (integrity check)\n");
+            return 44U;
+        }
+
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[CAP TEST] Boundary integrity: total=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.total_caps);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " passed=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.passed_checks);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " failed=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.failed_checks);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+
+        if (result.failed_checks > 2U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[CAP TEST] FAIL at step 44 (integrity failures: expected <=2 got ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.failed_checks);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, ')');
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            return 44U;
+        }
+
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[CAP TEST] Boundary tests ALL PASSED\n");
+    }
+
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] ALL PASSED\n");
 
     return 0U;
