@@ -449,9 +449,8 @@ void kobj_destroy(KObjHeader_t *obj)
          * 如果子对象引用计数归零，kobj_ref_dec 会再次
          * 调用 kobj_destroy 完成级联销毁。
          * 注意：这里在持锁状态下递归调用 kobj_ref_dec -> kobj_destroy，
-         * 会再次尝试获取锁（嵌套锁）。
-         * 由于 TicketLock_t 支持 nest_count 嵌套检测，
-         * 此处先释放锁再递减，避免死锁。
+         * 会再次尝试获取锁。
+         * 同一把锁不能重复获取，因此此处先释放锁再递减，避免死锁。
          */
         ticket_lock_release(&s_subsys_lock);
         (void)kobj_ref_dec(child);

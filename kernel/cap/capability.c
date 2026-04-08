@@ -222,7 +222,7 @@ static inline cap_t *cap_from_sibling(struct list_head *node)
  * @param a 第一个 CSpace 指针
  * @param b 第二个 CSpace 指针（可与 a 相同）
  *
- * @note 如果 a == b，只获取一次锁（可重入安全由 TicketLock 保证）
+ * @note 如果 a == b，只获取一次锁（同一把锁不重复获取）
  */
 static void cap_lock_dual(cspace_t *a, cspace_t *b)
 {

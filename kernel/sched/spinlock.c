@@ -6,12 +6,12 @@
  * @version 2.0
  *
  * @details 实现所有 spinlock.h 中声明的函数：
- *          - ticket_lock_init:           初始化锁
- *          - ticket_lock_acquire:        获取锁（自旋等待）
- *          - ticket_lock_release:        释放锁
- *          - ticket_lock_try_acquire:    非阻塞尝试获取
- *          - ticket_lock_is_held:        检查锁状态
- *          - ticket_lock_acquire_irqsave:   保存中断状态并获取
+ *          - ticket_lock_init:             初始化锁
+ *          - ticket_lock_acquire:          获取锁（自旋等待）
+ *          - ticket_lock_release:          释放锁
+ *          - ticket_lock_try_acquire:      非阻塞尝试获取
+ *          - ticket_lock_is_held:          检查锁状态
+ *          - ticket_lock_acquire_irqsave:  保存中断状态并获取
  *          - ticket_lock_release_irqrestore: 释放并恢复中断状态
  *
  * @note MISRA-C:2012 合规
@@ -21,16 +21,65 @@
  */
 
 #include <kernel/spinlock.h>
-#include <kernel/barrier.h>
-#include <kernel/compiler.h>
-#include <kernel/types.h>
-#include <stdint.h>
 #include "hal.h"
 
-/* HAL 接口 */
-/* ========================================================================
+/* ============================================================================
+ * 内部辅助
+ * ========================================================================== */
+
+/**
+ * @brief 原子获取下一个票号
+ * @param lock 锁指针
+ * @return 旧票号
+ */
+static inline uint32_t ticket_lock_fetch_next(volatile uint32_t *lock)
+{
+    return __atomic_fetch_add(lock, 1U, __ATOMIC_RELAXED);
+}
+
+/**
+ * @brief 原子读取当前服务票号
+ * @param lock 锁指针
+ * @return 当前票号
+ */
+static inline uint32_t ticket_lock_load(const volatile uint32_t *lock)
+{
+    return __atomic_load_n(lock, __ATOMIC_ACQUIRE);
+}
+
+/**
+ * @brief 原子写入当前服务票号
+ * @param lock 锁指针
+ * @param value 要写入的值
+ */
+static inline void ticket_lock_store_release(volatile uint32_t *lock,
+                                             uint32_t value)
+{
+    __atomic_store_n(lock, value, __ATOMIC_RELEASE);
+}
+
+/**
+ * @brief 原子比较并交换下一个票号
+ * @param lock 锁指针
+ * @param expected 期望值
+ * @param desired 期望写入值
+ * @return true 表示交换成功
+ */
+static inline bool ticket_lock_cas(volatile uint32_t *lock,
+                                   uint32_t *expected,
+                                   uint32_t desired)
+{
+    return __atomic_compare_exchange_n(lock,
+                                       expected,
+                                       desired,
+                                       false,
+                                       __ATOMIC_ACQ_REL,
+                                       __ATOMIC_ACQUIRE);
+}
+
+/* ============================================================================
  * 初始化
- * ======================================================================== */
+ * ========================================================================== */
 
 void ticket_lock_init(TicketLock_t *lock)
 {
@@ -42,13 +91,11 @@ void ticket_lock_init(TicketLock_t *lock)
     lock->next_ticket = 0U;
     lock->serving_ticket = 0U;
     lock->cpu_id = 0xFFFFFFFFU;
-    lock->nest_count = 0U;
-    barrier();
 }
 
-/* ========================================================================
+/* ============================================================================
  * 获取锁（阻塞自旋）
- * ======================================================================== */
+ * ========================================================================== */
 
 void ticket_lock_acquire(TicketLock_t *lock)
 {
@@ -59,57 +106,69 @@ void ticket_lock_acquire(TicketLock_t *lock)
         return;
     }
 
+    if ((lock->cpu_id == hal_get_cpu_id()) &&
+        (lock->next_ticket != lock->serving_ticket))
+    {
+        __builtin_trap();
+    }
+
     /* 原子地获取一个票号 */
-    my_ticket = atomic_inc_u32(&lock->next_ticket);
+    my_ticket = ticket_lock_fetch_next(&lock->next_ticket);
 
     /* 自旋等待直到轮到自己 */
     for (;;)
     {
-        uint32_t serving = atomic_load_acquire_u32(&lock->serving_ticket);
+        uint32_t serving;
+
+        serving = ticket_lock_load(&lock->serving_ticket);
         if (serving == my_ticket)
         {
             break;
         }
 
-        /* 使用 WFE 降低功耗，等待 SEV 唤醒 */
-        WFE();
+        /* 使用 HAL 事件等待接口降低功耗 */
+        hal_wfe();
     }
 
-    /* 获取锁后的内存屏障 */
-    barrier();
-
     lock->cpu_id = hal_get_cpu_id();
-    lock->nest_count++;
+
 }
 
-/* ========================================================================
+/* ============================================================================
  * 释放锁
- * ======================================================================== */
+ * ========================================================================== */
 
 void ticket_lock_release(TicketLock_t *lock)
 {
+    uint32_t serving;
+
     if (lock == NULL)
     {
         return;
     }
 
-    lock->nest_count--;
+    serving = ticket_lock_load(&lock->serving_ticket);
+    if (serving == ticket_lock_load(&lock->next_ticket))
+    {
+        return;
+    }
+
+    if (lock->cpu_id != hal_get_cpu_id())
+    {
+        return;
+    }
+
     lock->cpu_id = 0xFFFFFFFFU;
 
-    /* 释放锁前的内存屏障 */
-    barrier();
-
-    /* 递增 serving_ticket，唤醒下一个等待者 */
-    atomic_store_release_u32(&lock->serving_ticket,
-                             lock->serving_ticket + 1U);
+    ticket_lock_store_release(&lock->serving_ticket, serving + 1U);
 
     /* 广播事件，唤醒所有在 WFE 等待的核心 */
-    SEV();
+    hal_sev();
 }
 
-/* ========================================================================
+/* ============================================================================
  * 尝试获取锁（非阻塞）
- * ======================================================================== */
+ * ========================================================================== */
 
 bool ticket_lock_try_acquire(TicketLock_t *lock)
 {
@@ -121,31 +180,25 @@ bool ticket_lock_try_acquire(TicketLock_t *lock)
         return false;
     }
 
-    /* 读取当前票号 */
-    expected = atomic_load_acquire_u32(&lock->next_ticket);
-
-    /* 检查锁是否空闲 */
-    if (atomic_load_acquire_u32(&lock->serving_ticket) != expected)
+    expected = ticket_lock_load(&lock->next_ticket);
+    if (ticket_lock_load(&lock->serving_ticket) != expected)
     {
         return false;
     }
 
-    /* 尝试原子地递增 next_ticket */
-    success = atomic_cas_u32(&lock->next_ticket, expected, expected + 1U);
+    success = ticket_lock_cas(&lock->next_ticket, &expected, expected + 1U);
     if (success)
     {
-        barrier();
         lock->cpu_id = hal_get_cpu_id();
-        lock->nest_count++;
         return true;
     }
 
     return false;
 }
 
-/* ========================================================================
+/* ============================================================================
  * 检查锁是否被持有
- * ======================================================================== */
+ * ========================================================================== */
 
 bool ticket_lock_is_held(const TicketLock_t *lock)
 {
@@ -157,19 +210,27 @@ bool ticket_lock_is_held(const TicketLock_t *lock)
     return (lock->next_ticket != lock->serving_ticket) ? true : false;
 }
 
-/* ========================================================================
+/* ============================================================================
  * IRQ 安全的锁操作
- * ======================================================================== */
+ * ========================================================================== */
 
 uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)
 {
     uint32_t irq_state;
 
-    /* 先保存并禁用中断 */
     irq_state = hal_irq_saved_state();
-    hal_irq_disable();
+    if (lock == NULL)
+    {
+        return irq_state;
+    }
 
-    /* 再获取自旋锁 */
+    if ((lock->cpu_id == hal_get_cpu_id()) &&
+        (lock->next_ticket != lock->serving_ticket))
+    {
+        __builtin_trap();
+    }
+
+    hal_irq_disable();
     ticket_lock_acquire(lock);
 
     return irq_state;
@@ -177,9 +238,10 @@ uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)
 
 void ticket_lock_release_irqrestore(TicketLock_t *lock, uint32_t irq_state)
 {
-    /* 先释放自旋锁 */
-    ticket_lock_release(lock);
+    if (lock != NULL)
+    {
+        ticket_lock_release(lock);
+    }
 
-    /* 再恢复中断状态 */
     hal_irq_restore(irq_state);
 }

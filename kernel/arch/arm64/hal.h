@@ -307,6 +307,12 @@ void hal_tlb_invalidate_asid(uint64_t asid);
  */
 void hal_wfe(void);
 
+/**
+ * @brief 发送事件
+ * @details 向所有核心广播事件，用于唤醒处于 WFE 的等待者
+ */
+void hal_sev(void);
+
 /* ========== QEMU UART 基地址 ========== */
 
 /** @brief QEMU virt 平台 PL011 UART0 基地址 */

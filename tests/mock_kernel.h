@@ -294,22 +294,34 @@ static inline uint32_t hal_get_cpu_id(void)
     return mock_cpu_id;
 }
 
-/** @brief Mock: IRQ 保存状态 */
-static uint32_t mock_irq_state = 0U;
+/** @brief Mock: IRQ 当前是否关闭 */
+static bool mock_irq_disabled = false;
+/** @brief Mock: 断言是否触发 */
+static bool mock_assert_failed = false;
 
 static inline uint32_t hal_irq_saved_state(void)
 {
-    return mock_irq_state;
+    return (mock_irq_disabled ? 1U : 0U);
 }
 
 static inline void hal_irq_disable(void)
 {
-    /* 空操作 */
+    mock_irq_disabled = true;
 }
 
 static inline void hal_irq_restore(uint32_t state)
 {
-    (void)state;
+    mock_irq_disabled = (state != 0U);
+}
+
+static inline void hal_wfe(void)
+{
+    /* 空操作 */
+}
+
+static inline void hal_sev(void)
+{
+    /* 空操作 */
 }
 
 /* ========================================================================
@@ -324,10 +336,9 @@ typedef struct
     volatile uint32_t next_ticket;    /**< @brief 下一个发放的票号 */
     volatile uint32_t serving_ticket; /**< @brief 当前服务的票号 */
     uint32_t cpu_id;                  /**< @brief 持有者的 CPU ID */
-    uint32_t nest_count;              /**< @brief 嵌套计数 */
 } TicketLock_t;
 
-#define TICKET_LOCK_INIT { 0U, 0U, 0xFFFFFFFFU, 0U }
+#define TICKET_LOCK_INIT { 0U, 0U, 0xFFFFFFFFU }
 
 /* ========================================================================
  * TicketLock 操作（Mock 版本 — 宿主机兼容）
@@ -335,6 +346,7 @@ typedef struct
  * @details 由于 mock_atomic_inc_u32 返回旧值，
  *          释放时使用 atomic_store_release_u32 写入 serving_ticket + 1，
  *          这与真实内核 spinlock.c 逻辑一致。
+ *          同 CPU 重入会置位 mock_assert_failed，便于测试断言路径。
  *          宿主机上 WFE/SEV 为空操作，不会死锁。
  * ======================================================================== */
 
@@ -344,13 +356,18 @@ static inline void ticket_lock_init(TicketLock_t *lock)
     lock->next_ticket = 0U;
     lock->serving_ticket = 0U;
     lock->cpu_id = 0xFFFFFFFFU;
-    lock->nest_count = 0U;
 }
 
 static inline void ticket_lock_acquire(TicketLock_t *lock)
 {
     uint32_t my_ticket;
     if (lock == NULL) { return; }
+    if ((lock->cpu_id == hal_get_cpu_id()) &&
+        (lock->next_ticket != lock->serving_ticket))
+    {
+        mock_assert_failed = true;
+        return;
+    }
     my_ticket = atomic_inc_u32(&lock->next_ticket);
     for (;;)
     {
@@ -361,16 +378,27 @@ static inline void ticket_lock_acquire(TicketLock_t *lock)
         /* WFE() — 宿主机空操作 */
     }
     lock->cpu_id = hal_get_cpu_id();
-    lock->nest_count++;
 }
 
 static inline void ticket_lock_release(TicketLock_t *lock)
 {
+    uint32_t serving;
+
     if (lock == NULL) { return; }
-    lock->nest_count--;
+
+    serving = lock->serving_ticket;
+    if (serving == lock->next_ticket)
+    {
+        return;
+    }
+    if (lock->cpu_id != hal_get_cpu_id())
+    {
+        return;
+    }
+
     lock->cpu_id = 0xFFFFFFFFU;
     atomic_store_release_u32(&lock->serving_ticket,
-                             lock->serving_ticket + 1U);
+                             serving + 1U);
 }
 
 static inline bool ticket_lock_try_acquire(TicketLock_t *lock)
@@ -387,7 +415,6 @@ static inline bool ticket_lock_try_acquire(TicketLock_t *lock)
     if (success)
     {
         lock->cpu_id = hal_get_cpu_id();
-        lock->nest_count++;
         return true;
     }
     return false;
@@ -401,7 +428,21 @@ static inline bool ticket_lock_is_held(const TicketLock_t *lock)
 
 static inline uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)
 {
-    uint32_t state = hal_irq_saved_state();
+    uint32_t state;
+
+    state = hal_irq_saved_state();
+    if (lock == NULL)
+    {
+        return state;
+    }
+
+    if ((lock->cpu_id == hal_get_cpu_id()) && ticket_lock_is_held(lock))
+    {
+        mock_assert_failed = true;
+        return state;
+    }
+
+    hal_irq_disable();
     ticket_lock_acquire(lock);
     return state;
 }

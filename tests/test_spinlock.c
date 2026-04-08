@@ -11,7 +11,7 @@
  *          - 获取/释放基本流程
  *          - 锁状态查询（is_held）
  *          - 非阻塞尝试获取（try_acquire）
- *          - 嵌套获取/释放
+ *          - 重入断言与安全释放
  *          - IRQ 安全的锁操作
  *          - 多获取者 FIFO 顺序
  *          - 静态初始化宏
@@ -37,7 +37,6 @@ static void test_init_lock(void)
     TEST_ASSERT_EQ(lock.next_ticket, 0U);
     TEST_ASSERT_EQ(lock.serving_ticket, 0U);
     TEST_ASSERT_EQ(lock.cpu_id, 0xFFFFFFFFU);
-    TEST_ASSERT_EQ(lock.nest_count, 0U);
     TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
 }
 
@@ -118,77 +117,134 @@ static void test_try_acquire_fail(void)
 }
 
 /**
- * @brief 测试 7: 嵌套获取（模拟同 CPU 重入）
- * @details 模拟同一 CPU 上中断处理函数中再次获取同一锁的场景
+ * @brief 测试 7: 持锁时再次获取应触发断言
+ * @details 同一把锁在同 CPU 上再次获取时必须触发断言
  */
-static void test_nested_acquire(void)
+static void test_reacquire_while_held(void)
 {
     TicketLock_t lock;
     ticket_lock_init(&lock);
 
+    mock_assert_failed = false;
     ticket_lock_acquire(&lock);
-    TEST_ASSERT_EQ(lock.nest_count, 1U);
+    TEST_ASSERT_EQ(lock.cpu_id, 0U);
 
-    /* 模拟同一 CPU 嵌套获取（需模拟持有者是自己） */
-    /* 由于 TicketLock 不自动检测嵌套，第二次获取会阻塞 */
-    /* 在真实内核中，nest_count 由调用方管理 */
-    /* 这里验证 nest_count 递增 */
-    TEST_ASSERT_EQ(lock.nest_count, 1U);
+    ticket_lock_acquire(&lock);
+    TEST_ASSERT_TRUE(mock_assert_failed);
+    TEST_ASSERT_EQ(lock.cpu_id, 0U);
+    TEST_ASSERT_EQ(lock.next_ticket, 1U);
+
+    TEST_ASSERT_TRUE(ticket_lock_try_acquire(&lock) == false);
 
     ticket_lock_release(&lock);
-    TEST_ASSERT_EQ(lock.nest_count, 0U);
+    TEST_ASSERT_EQ(lock.cpu_id, 0xFFFFFFFFU);
 }
 
 /**
- * @brief 测试 8: 嵌套释放后锁变为空闲
+ * @brief 测试 8: 重复释放不会破坏锁状态
  */
-static void test_nested_release(void)
+static void test_double_release_safe(void)
 {
     TicketLock_t lock;
+    uint32_t serving_ticket_after_release;
+    uint32_t cpu_id_after_release;
     ticket_lock_init(&lock);
 
     ticket_lock_acquire(&lock);
-    TEST_ASSERT_EQ(lock.nest_count, 1U);
+    TEST_ASSERT_EQ(lock.cpu_id, 0U);
 
     ticket_lock_release(&lock);
-    TEST_ASSERT_EQ(lock.nest_count, 0U);
+    TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
+
+    serving_ticket_after_release = lock.serving_ticket;
+    cpu_id_after_release = lock.cpu_id;
+    ticket_lock_release(&lock);
+    TEST_ASSERT_EQ(lock.serving_ticket, serving_ticket_after_release);
+    TEST_ASSERT_EQ(lock.cpu_id, cpu_id_after_release);
     TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
 }
 
 /**
- * @brief 测试 9: acquire_irqsave 返回 IRQ 状态
+ * @brief 测试 9: 非持有者释放应被拒绝
+ */
+static void test_release_wrong_cpu_safe(void)
+{
+    TicketLock_t lock;
+    uint32_t serving_ticket_before;
+
+    ticket_lock_init(&lock);
+
+    mock_cpu_id = 0U;
+    ticket_lock_acquire(&lock);
+    serving_ticket_before = lock.serving_ticket;
+
+    mock_cpu_id = 1U;
+    ticket_lock_release(&lock);
+    TEST_ASSERT_EQ(lock.serving_ticket, serving_ticket_before);
+    TEST_ASSERT_EQ(lock.cpu_id, 0U);
+    TEST_ASSERT_TRUE(ticket_lock_is_held(&lock));
+
+    mock_cpu_id = 0U;
+    ticket_lock_release(&lock);
+    TEST_ASSERT_EQ(lock.cpu_id, 0xFFFFFFFFU);
+    TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
+}
+
+/**
+ * @brief 测试 10: acquire_irqsave 返回 IRQ 状态
  */
 static void test_acquire_irqsave(void)
 {
     TicketLock_t lock;
     ticket_lock_init(&lock);
 
+    mock_irq_disabled = false;
     uint32_t irq_state = ticket_lock_acquire_irqsave(&lock);
     TEST_ASSERT_TRUE(ticket_lock_is_held(&lock));
-    /* mock_irq_state 默认 0 */
     TEST_ASSERT_EQ(irq_state, 0U);
+    TEST_ASSERT_TRUE(mock_irq_disabled);
 
     /* 清理 */
     ticket_lock_release_irqrestore(&lock, irq_state);
+    TEST_ASSERT_FALSE(mock_irq_disabled);
 }
 
 /**
- * @brief 测试 10: release_irqrestore 恢复后锁空闲
+ * @brief 测试 11: release_irqrestore 恢复后锁空闲
  */
 static void test_release_irqrestore(void)
 {
     TicketLock_t lock;
     ticket_lock_init(&lock);
 
+    mock_irq_disabled = false;
     uint32_t irq_state = ticket_lock_acquire_irqsave(&lock);
     TEST_ASSERT_TRUE(ticket_lock_is_held(&lock));
 
     ticket_lock_release_irqrestore(&lock, irq_state);
     TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
+    TEST_ASSERT_FALSE(mock_irq_disabled);
 }
 
 /**
- * @brief 测试 11: 多获取者 FIFO 顺序
+ * @brief 测试 12: NULL 锁的 irqsave/irqrestore 不应破坏 IRQ 状态
+ */
+static void test_irqsave_null_safe(void)
+{
+    uint32_t irq_state;
+
+    mock_irq_disabled = false;
+    irq_state = ticket_lock_acquire_irqsave(NULL);
+    TEST_ASSERT_EQ(irq_state, 0U);
+    TEST_ASSERT_FALSE(mock_irq_disabled);
+
+    mock_irq_disabled = true;
+    ticket_lock_release_irqrestore(NULL, 0U);
+    TEST_ASSERT_FALSE(mock_irq_disabled);
+}
+
+/**
+ * @brief 测试 13: 多获取者 FIFO 顺序
  * @details 模拟两个获取者依次获取锁，验证 FIFO
  */
 static void test_multiple_acquirers(void)
@@ -213,7 +269,7 @@ static void test_multiple_acquirers(void)
 }
 
 /**
- * @brief 测试 12: TICKET_LOCK_INIT 静态初始化
+ * @brief 测试 14: TICKET_LOCK_INIT 静态初始化
  */
 static void test_init_static(void)
 {
@@ -222,12 +278,11 @@ static void test_init_static(void)
     TEST_ASSERT_EQ(lock.next_ticket, 0U);
     TEST_ASSERT_EQ(lock.serving_ticket, 0U);
     TEST_ASSERT_EQ(lock.cpu_id, 0xFFFFFFFFU);
-    TEST_ASSERT_EQ(lock.nest_count, 0U);
     TEST_ASSERT_FALSE(ticket_lock_is_held(&lock));
 }
 
 /**
- * @brief 测试 13: NULL 指针安全检查
+ * @brief 测试 15: NULL 指针安全检查
  */
 static void test_null_param(void)
 {
@@ -240,6 +295,9 @@ static void test_null_param(void)
     /* NULL 释放不应崩溃 */
     ticket_lock_release(NULL);
 
+    /* NULL 的 irqrestore 不应崩溃 */
+    ticket_lock_release_irqrestore(NULL, 0U);
+
     /* NULL try_acquire 应返回 false */
     TEST_ASSERT_FALSE(ticket_lock_try_acquire(NULL));
 
@@ -251,7 +309,7 @@ static void test_null_param(void)
 }
 
 /**
- * @brief 测试 14: 模拟两个 CPU 交替获取释放
+ * @brief 测试 16: 模拟两个 CPU 交替获取释放
  * @details 验证票号递增正确
  */
 static void test_concurrent_simulate(void)
@@ -278,7 +336,7 @@ static void test_concurrent_simulate(void)
 }
 
 /**
- * @brief 测试 15: 循环 1000 次获取释放无死锁
+ * @brief 测试 17: 循环 1000 次获取释放无死锁
  */
 static void test_stress_acquire_release(void)
 {
@@ -313,10 +371,12 @@ int main(void)
     test_is_held_after_release();
     test_try_acquire_success();
     test_try_acquire_fail();
-    test_nested_acquire();
-    test_nested_release();
+    test_reacquire_while_held();
+    test_double_release_safe();
+    test_release_wrong_cpu_safe();
     test_acquire_irqsave();
     test_release_irqrestore();
+    test_irqsave_null_safe();
     test_multiple_acquirers();
     test_init_static();
     test_null_param();

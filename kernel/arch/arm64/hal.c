@@ -413,3 +413,11 @@ void hal_wfe(void)
 {
     __asm__ volatile("wfe" ::: "memory");
 }
+
+/**
+ * @brief 发送事件
+ */
+void hal_sev(void)
+{
+    __asm__ volatile("sev" ::: "memory");
+}
