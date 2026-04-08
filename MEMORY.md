@@ -1,6 +1,40 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
-## 2026-04-08 用户态服务端到端 IPC 通信验证 ✅ (17:20)
+## 2026-04-08 多服务并发 + 消息协议 + 服务注册表 ✅ (20:30)
+
+**commit**: `30db837` feat(el0): 多服务并发 — FS/Proc/Mem 三个 EL0 服务 + 服务注册表 + 消息协议 + Client 端到端验证
+
+### 架构
+```
+FS Server (tid=20, prio=49) ── endpoint[0] ──┐
+Proc Server (tid=21, prio=49) ── endpoint[1] ──┤  ← g_service_eps[3]
+Mem Server (tid=22, prio=49) ── endpoint[2] ──┤
+                                               │
+Client (tid=23, prio=50) ── send/reply ────────┘
+```
+
+### 新增
+- `fs/proc/mem_service_entry()`: 三个 EL0 服务入口
+- `create_service_thread()`: 通用 EL0 线程创建
+- `g_service_eps[MAX_SERVICES]`: 服务 endpoint 注册表
+- `service_msg_t`: 结构化消息协议 (type/len/data[4])
+
+### IPC 流程 (每个服务)
+1. `SYS_EP_CREATE` → 注册到 `g_service_eps`
+2. `SYS_MSG_RECV` → 阻塞等待客户端
+3. Client `SYS_MSG_SEND` → 唤醒服务端
+4. `SYS_MSG_REPLY` → 唤醒客户端
+
+### QEMU 验证
+```
+[FS] RUNNING ✅   [PROC] RUNNING ✅   [MEM] RUNNING ✅
+[EL0] ALIVE ✅    [EL0] FS OK ✅      [EL0] PROC OK ✅
+[EL0] MEM OK ✅   [EL0] CAP OK ✅     [EL0] ALL PASSED ✅
+```
+
+text = 51,432 bytes (50.2KB)
+
+---
 
 **commit**: `2dbed64` feat(ipc): 用户态服务端到端 IPC 通信 — Send/Recv/Reply 完整链路
 
@@ -690,11 +724,11 @@ text = 22,470 bytes (21.9KB), bss = 93,680 bytes
 - [ ] 安全认证文档 (ISO 26262, IEC 61508)
 - [ ] virtio-blk 实际块读写
 - [ ] virtio-net 驱动适配
-- [ ] 用户态服务通过 IPC 真正运行
 - [ ] cspace_from_root 性能优化 (O(n)→O(1))
+- [ ] text 段优化 (51KB → <50KB)
 
 ### 内核代码量
-- **text**: 51,544 bytes (50.3KB)
+- **text**: 51,432 bytes (50.2KB)
 
 ### HAL 接口数量
 - **35 个** HAL 接口
