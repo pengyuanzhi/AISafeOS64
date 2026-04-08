@@ -1,5 +1,37 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-08 进程管理 SVC 分发器完善 + TDD 验证 ✅ (13:45)
+
+**commit**: `d54d2b7` feat(proc): 进程管理 SVC 分发器完善 + TDD 单元测试 + QEMU 端到端验证
+
+### SVC 分发器完善
+- SYS_THREAD_CREATE: 实现调用 kthread_create(), 返回 tid 或 -ENOMEM
+- SYS_THREAD_SUSPEND/RESUME/SET_PRIORITY: 拆分为独立 case
+- SYS_THREAD_SET_AFFINITY: 保留 ENOSYS
+
+### 宿主机单元测试 (tests/test_process.c)
+- 23/23 全部通过
+- 覆盖: create/exit/get_id/yield/suspend/resume/set_priority/lifecycle
+
+### QEMU EL0 端到端验证
+```
+[EL0] ALIVE!     ← SVC 系统调用 ✅
+[EL0] IPC OK      ← IPC 端到端 ✅
+[EL0] CAP OK      ← 能力系统 ✅
+[EL0] PROC OK     ← 进程管理 (get_id + yield) ✅
+[EL0] ALL PASSED  ← 全部测试通过 ✅
+```
+
+text = 47,328 bytes (46.2KB)
+
+### HAL 层抽离补充
+**commit**: `1c6bb8d` refactor(hal): ELR/SPSR/ISB 抽离到 HAL 层
+- 新增 5 个 HAL 接口: hal_read/write_elr/spsr, hal_isb
+- scheduler.c 中 5 处 __asm__ 迁移到 HAL
+- kernel/ 非 arch/ 零体系架构违规 ✅
+
+---
+
 ## 2026-04-08 EL0 用户态端到端 QEMU 验证通过 ✅ (13:30)
 
 **commit**: `581e7de` feat(el0): 用户态 EL0 端到端 QEMU 验证通过
