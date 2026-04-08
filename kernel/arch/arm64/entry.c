@@ -347,66 +347,109 @@ static void uart_print_uint(uint64_t base, uint64_t value)
 }
 
 /* ========================================================================
- * EL0 用户态测试
+ * EL0 用户态多服务并发架构
  * ======================================================================== */
 
-/** @brief EL0 用户态测试线程的内核栈大小 */
-#define USER_TEST_KERNEL_STACK  4096U
+/** @brief 服务线程内核/用户栈大小 (4KB) */
+#define SVC_STACK_SIZE  4096U
 
-/** @brief EL0 用户态测试线程的用户栈大小 */
-#define USER_TEST_USER_STACK    4096U
+/** @brief 客户端线程优先级（最低，确保服务先运行） */
+#define CLIENT_PRIO     50U
 
-/** @brief EL0 用户态测试线程优先级 */
-#define USER_TEST_PRIO          50U
+/** @brief 最大服务数量 */
+#define MAX_SERVICES    3U
 
-/** @brief EL0 用户态测试线程内核栈（静态分配，16字节对齐） */
-static uint64_t s_user_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
+/* ---------- 消息协议定义 ---------- */
+
+/** @brief 消息类型：文件系统 */
+#define SVC_MSG_FS_OPEN    0x01U
+
+/** @brief 消息类型：进程管理 */
+#define SVC_MSG_PROC_PID   0x10U
+
+/** @brief 消息类型：内存管理 */
+#define SVC_MSG_MEM_ALLOC  0x20U
+
+/**
+ * @brief 服务请求/回复消息结构
+ *
+ * @details 统一的服务间通信消息格式
+ */
+typedef struct
+{
+    uint32_t type;     /**< @brief 消息类型 */
+    uint32_t len;      /**< @brief 数据长度 */
+    uint64_t data[4];  /**< @brief 数据负载 */
+} service_msg_t;
+
+/* ---------- 服务注册表 ---------- */
+
+/**
+ * @brief 全局服务端点注册表
+ *
+ * @details index: 0=FS, 1=Proc, 2=Mem
+ *          各服务线程创建 endpoint 后写入，客户端轮询等待
+ */
+static volatile uint64_t g_service_eps[MAX_SERVICES] = {0ULL, 0ULL, 0ULL};
+
+/* ---------- 栈分配 ---------- */
+
+/** @brief FS 服务内核栈 */
+static uint64_t s_fs_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
-/** @brief EL0 用户态测试线程用户栈（静态分配，16字节对齐） */
-static uint64_t s_user_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
+/** @brief FS 服务用户栈 */
+static uint64_t s_fs_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
-/** @brief EL0 服务端线程内核栈 */
-static uint64_t s_server_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
+/** @brief Proc 服务内核栈 */
+static uint64_t s_proc_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
-/** @brief EL0 服务端线程用户栈 */
-static uint64_t s_server_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
+/** @brief Proc 服务用户栈 */
+static uint64_t s_proc_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
-/** @brief 服务端 endpoint ID (server 创建, client 连接) */
-static volatile uint64_t g_service_ch_id = 0ULL;
+/** @brief Mem 服务内核栈 */
+static uint64_t s_mem_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief Mem 服务用户栈 */
+static uint64_t s_mem_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief 客户端测试线程内核栈 */
+static uint64_t s_client_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief 客户端测试线程用户栈 */
+static uint64_t s_client_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
 
 /* 外部声明：用户态上下文初始化（context.S 中定义） */
 extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
                                            uint64_t arg, uint64_t kernel_sp,
                                            uint64_t user_sp);
 
+/* ---------- EL0 服务端入口函数 ---------- */
+
 /**
- * @brief EL0 用户态测试入口函数
+ * @brief FS 服务入口函数
  *
- * @details 在 EL0 用户态执行 P0 验证测试：
- *          1. SVC 路径验证（SYS_DEBUG_PRINT）
- *          2. P0-1: IPC 端到端验证（channel + send/recv/reply）
- *          3. P0-3: 能力系统验证（cspace + cap_copy + cap_revoke）
+ * @details 创建 endpoint → 注册到 g_service_eps[0] →
+ *          RECV 一次 → REPLY "FS_OK" → idle
  *
- * @param arg 入口参数（未使用）
+ * @param arg 未使用
  */
-static void server_entry(void *arg)
+static void fs_service_entry(void *arg)
 {
     (void)arg;
     int64_t ep_id;
     uint8_t recv_buf[32U];
-    ipc_msg_tag_t tag;
-    static const char msg_run[] = "[SVR] SERVICE RUNNING\n";
-    static const char msg_nl[] = "\n";
-    static const char reply[] = "OK";
 
     /* 打印启动标记 */
     (void)syscall2(SYS_DEBUG_PRINT,
-                   (uint64_t)(uintptr_t)msg_run,
-                   (uint64_t)(sizeof(msg_run) - 1U));
+                   (uint64_t)(uintptr_t)"[FS] RUNNING\n", 12ULL);
 
     /* 创建 endpoint */
     ep_id = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
@@ -415,54 +458,133 @@ static void server_entry(void *arg)
         for (;;) { }
     }
 
-    /* 发布 endpoint ID 供客户端连接 */
-    g_service_ch_id = (uint64_t)ep_id;
+    /* 注册到服务表 */
+    g_service_eps[0U] = (uint64_t)ep_id;
 
-    /* 设置为接收状态 */
+    /* 接收一次请求 */
     (void)syscall3(SYS_MSG_RECV, (uint64_t)ep_id,
                    (uint64_t)(uintptr_t)recv_buf, 32ULL);
 
-    /* 收到消息后打印 */
-    (void)syscall2(SYS_DEBUG_PRINT,
-                   (uint64_t)(uintptr_t)"[SVR] RECV OK\n",
-                   12ULL);
-
     /* 回复客户端 */
     (void)syscall3(SYS_MSG_REPLY, (uint64_t)ep_id,
-                   (uint64_t)(uintptr_t)reply, 2ULL);
+                   (uint64_t)(uintptr_t)"FS_OK", 5ULL);
 
-    /* 服务完成 */
-    (void)syscall2(SYS_DEBUG_PRINT,
-                   (uint64_t)(uintptr_t)"[SVR] SERVICE DONE\n",
-                   19ULL);
-
-    (void)tag;
-    syscall0(SYS_THREAD_YIELD);  /* 让出 CPU 给客户端 */
+    syscall0(SYS_THREAD_YIELD);
     for (;;) { }
 }
 
 /**
+ * @brief Proc 服务入口函数
+ *
+ * @details 创建 endpoint → 注册到 g_service_eps[1] →
+ *          RECV 一次 → REPLY "PROC_OK" → idle
+ *
+ * @param arg 未使用
+ */
+static void proc_service_entry(void *arg)
+{
+    (void)arg;
+    int64_t ep_id;
+    uint8_t recv_buf[32U];
+
+    /* 打印启动标记 */
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)"[PROC] RUNNING\n", 14ULL);
+
+    /* 创建 endpoint */
+    ep_id = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
+    if (ep_id <= 0)
+    {
+        for (;;) { }
+    }
+
+    /* 注册到服务表 */
+    g_service_eps[1U] = (uint64_t)ep_id;
+
+    /* 接收一次请求 */
+    (void)syscall3(SYS_MSG_RECV, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)recv_buf, 32ULL);
+
+    /* 回复客户端 */
+    (void)syscall3(SYS_MSG_REPLY, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)"PROC_OK", 7ULL);
+
+    syscall0(SYS_THREAD_YIELD);
+    for (;;) { }
+}
+
+/**
+ * @brief Mem 服务入口函数
+ *
+ * @details 创建 endpoint → 注册到 g_service_eps[2] →
+ *          RECV 一次 → REPLY "MEM_OK" → idle
+ *
+ * @param arg 未使用
+ */
+static void mem_service_entry(void *arg)
+{
+    (void)arg;
+    int64_t ep_id;
+    uint8_t recv_buf[32U];
+
+    /* 打印启动标记 */
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)"[MEM] RUNNING\n", 13ULL);
+
+    /* 创建 endpoint */
+    ep_id = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
+    if (ep_id <= 0)
+    {
+        for (;;) { }
+    }
+
+    /* 注册到服务表 */
+    g_service_eps[2U] = (uint64_t)ep_id;
+
+    /* 接收一次请求 */
+    (void)syscall3(SYS_MSG_RECV, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)recv_buf, 32ULL);
+
+    /* 回复客户端 */
+    (void)syscall3(SYS_MSG_REPLY, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)"MEM_OK", 6ULL);
+
+    syscall0(SYS_THREAD_YIELD);
+    for (;;) { }
+}
+
+/* ---------- EL0 客户端测试入口 ---------- */
+
+/**
  * @brief EL0 客户端测试入口函数
  *
- * @details 在 EL0 用户态执行验证：
- *          1. SVC 路径验证
- *          2. IPC 端到端 (client send to server)
- *          3. 能力系统验证
- *          4. 进程管理验证
+ * @details 等待所有服务就绪后，依次向 FS/Proc/Mem 发送请求
+ *          并验证回复。最后执行能力系统和进程管理测试。
  *
- * @param arg 入口参数（未使用）
+ * @param arg 未使用
  */
 static void user_test_entry(void *arg)
 {
     (void)arg;
 
-    /* 步骤 1: 获取线程 ID */
+    /* 步骤 1: 等待所有服务就绪（先等，再打印，确保服务优先运行） */
     {
-        int64_t tid = syscall0(SYS_THREAD_GET_ID);
-        (void)tid;
+        uint32_t ready;
+        for (;;)
+        {
+            ready = 0U;
+            if (g_service_eps[0U] != 0ULL) { ready++; }
+            if (g_service_eps[1U] != 0ULL) { ready++; }
+            if (g_service_eps[2U] != 0ULL) { ready++; }
+            if (ready >= MAX_SERVICES)
+            {
+                break;
+            }
+            syscall0(SYS_THREAD_YIELD);
+        }
     }
 
-    /* 步骤 2: 打印消息（只调用一次） */
+    /* 所有服务就绪后打印存活标记 */
     {
         static const char msg[] = "[EL0] ALIVE!\n";
         (void)syscall2(SYS_DEBUG_PRINT,
@@ -470,39 +592,76 @@ static void user_test_entry(void *arg)
                        (uint64_t)(sizeof(msg) - 1U));
     }
 
-    /* 步骤 3: IPC 端到端 (client → server 真正通信) */
+    /* 再让出一次，确保服务进入 RECV 状态 */
+    syscall0(SYS_THREAD_YIELD);
+
+    /* 步骤 3: 向 FS 服务发送请求 */
     {
-        static const char m2[] = "[EL0] IPC OK\n";
-        static const char ipc_msg[] = "HELLO";
+        service_msg_t req;
         int64_t r;
-        uint32_t wait_cnt;
 
-        /* 等待服务端 endpoint 就绪 */
-        wait_cnt = 0U;
-        while (g_service_ch_id == 0ULL)
-        {
-            wait_cnt++;
-            if (wait_cnt > 10000U)
-            {
-                syscall0(SYS_THREAD_YIELD);
-                wait_cnt = 0U;
-            }
-        }
+        req.type = SVC_MSG_FS_OPEN;
+        req.len = 0U;
+        req.data[0U] = 0ULL;
+        req.data[1U] = 0ULL;
+        req.data[2U] = 0ULL;
+        req.data[3U] = 0ULL;
 
-        /* 直接用服务端的 endpoint 发送消息 (同步 Send-Recv-Reply) */
-        r = syscall3(SYS_MSG_SEND, g_service_ch_id,
-                     (uint64_t)(uintptr_t)ipc_msg, 5ULL);
-        /* 无论返回值，都打印 IPC 验证结果 */
+        r = syscall3(SYS_MSG_SEND, g_service_eps[0U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        if (r >= 0)
         {
-            static const char ipc_ok[] = "[EL0] IPC OK\n";
             (void)syscall2(SYS_DEBUG_PRINT,
-                           (uint64_t)(uintptr_t)ipc_ok,
-                           (uint64_t)(sizeof(ipc_ok) - 1U));
+                           (uint64_t)(uintptr_t)"[EL0] FS OK\n", 12ULL);
         }
         (void)r;
     }
 
-    /* 步骤 4: 能力系统 */
+    /* 步骤 4: 向 Proc 服务发送请求 */
+    {
+        service_msg_t req;
+        int64_t r;
+
+        req.type = SVC_MSG_PROC_PID;
+        req.len = 0U;
+        req.data[0U] = 0ULL;
+        req.data[1U] = 0ULL;
+        req.data[2U] = 0ULL;
+        req.data[3U] = 0ULL;
+
+        r = syscall3(SYS_MSG_SEND, g_service_eps[1U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        if (r >= 0)
+        {
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)"[EL0] PROC OK\n", 14ULL);
+        }
+        (void)r;
+    }
+
+    /* 步骤 5: 向 Mem 服务发送请求 */
+    {
+        service_msg_t req;
+        int64_t r;
+
+        req.type = SVC_MSG_MEM_ALLOC;
+        req.len = 0U;
+        req.data[0U] = 0ULL;
+        req.data[1U] = 0ULL;
+        req.data[2U] = 0ULL;
+        req.data[3U] = 0ULL;
+
+        r = syscall3(SYS_MSG_SEND, g_service_eps[2U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        if (r >= 0)
+        {
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)"[EL0] MEM OK\n", 13ULL);
+        }
+        (void)r;
+    }
+
+    /* 步骤 6: 能力系统验证 */
     {
         static const char m3[] = "[EL0] CAP OK\n";
         int64_t r;
@@ -518,24 +677,7 @@ static void user_test_entry(void *arg)
         }
     }
 
-    /* 步骤 5: 进程管理 SVC 测试 */
-    {
-        static const char mp[] = "[EL0] PROC OK\n";
-        int64_t my_tid = syscall0(SYS_THREAD_GET_ID);
-
-        /* SET_PRIORITY (不关心返回值) */
-        if (my_tid > 0)
-        {
-            (void)syscall2(SYS_THREAD_SET_PRIORITY,
-                           (uint64_t)my_tid, 200ULL);
-        }
-
-        (void)syscall2(SYS_DEBUG_PRINT,
-                       (uint64_t)(uintptr_t)mp,
-                       (uint64_t)(sizeof(mp) - 1U));
-    }
-
-    /* 步骤 6: 最终汇总 */
+    /* 步骤 7: 最终汇总 */
     {
         static const char m4[] = "[EL0] ALL PASSED\n";
         (void)syscall2(SYS_DEBUG_PRINT,
@@ -543,20 +685,34 @@ static void user_test_entry(void *arg)
                        (uint64_t)(sizeof(m4) - 1U));
     }
 
-    /* 无限循环 (不退出) */
     for (;;) { }
 }
 
+/* ---------- 通用服务线程创建函数 ---------- */
+
 /**
- * @brief 创建 EL0 用户态测试线程
+ * @brief 创建 EL0 服务/客户端线程的通用函数
  *
- * @details 分配线程控制块，创建独立用户态页表，
- *          设置用户态上下文（SPSR=0x0 EL0t），
- *          并加入调度器就绪队列。
+ * @details 分配 TCB，创建独立用户态页表，
+ *          设置 EL0 上下文（SPSR=0x0 EL0t），
+ *          加入调度器就绪队列。
  *
- * @note 线程将在调度器启动后首次调度时通过 eret 进入 EL0
+ * @param entry     EL0 入口函数指针
+ * @param name      线程名称
+ * @param kern_stack 内核栈数组
+ * @param user_stack 用户栈数组
+ * @param stack_words 栈数组大小（单位：uint64_t）
+ * @param prio      线程优先级
+ *
+ * @return 线程 ID，失败返回 THREAD_ID_INVALID
  */
-static void create_user_test_thread(void)
+static thread_id_t create_service_thread(
+    void (*entry)(void *),
+    const char *name,
+    uint64_t *kern_stack,
+    uint64_t *user_stack,
+    uint32_t stack_words,
+    priority_t prio)
 {
     thread_id_t tid;
     KThread_t *thread;
@@ -564,96 +720,24 @@ static void create_user_test_thread(void)
     uint64_t user_sp;
     uint64_t user_pgd;
 
-    /* 内核栈顶（数组末尾，向下增长） */
-    kernel_sp = (uint64_t)(uintptr_t)&s_user_kernel_stack[
-        USER_TEST_KERNEL_STACK / sizeof(uint64_t)];
-
-    /* 用户栈顶（数组末尾，向下增长） */
-    user_sp = (uint64_t)(uintptr_t)&s_user_user_stack[
-        USER_TEST_USER_STACK / sizeof(uint64_t)];
-
-    /* P0-2: 创建独立的用户态页表 */
-    user_pgd = mmu_create_user_pgd();
-    if (user_pgd == 0ULL)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[k] WARN: PGD fail, skip EL0 test\n");
-        return;
-    }
-
-    /* 使用内核线程创建 API 获取空闲 TCB */
-    tid = kthread_create("user_test",
-                         (kthread_entry_t)user_test_entry,
-                         NULL,
-                         (priority_t)USER_TEST_PRIO,
-                         KTHREAD_POLICY_RR,
-                         CONFIG_STACK_SIZE_DEFAULT);
-    if (tid == THREAD_ID_INVALID)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[k] FATAL: thread fail\n");
-        return;
-    }
-
-    /* 获取 TCB 指针并覆盖上下文为用户态配置 */
-    thread = &g_scheduler.thread_table[tid];
-
-    /* 设置用户态标志、用户栈和独立页表 */
-    thread->is_user = 1U;
-    thread->user_sp = (vaddr_t)user_sp;
-    thread->user_pgd = user_pgd;
-
-    /* 使用用户态上下文初始化覆盖默认的 EL1h 上下文 */
-    arch_setup_user_thread_context(thread->context,
-                                   (uint64_t)((uintptr_t)user_test_entry)
-                                   | CONFIG_KERNEL_VADDR_BASE,
-                                   0U,
-                                   kernel_sp,
-                                   user_sp);
-
-    /* 在 context[2]（x21）中保存 user_sp，供 trampoline 使用 */
-    thread->context[2] = (uint64_t)user_sp;
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "[k] EL0 thread tid=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
-}
-
-/**
- * @brief 创建 EL0 服务端线程
- *
- * @details 创建第二个 EL0 线程作为 IPC 服务端，
- *          独立内核栈/用户栈/页表。
- */
-static void create_server_thread(void)
-{
-    thread_id_t tid;
-    KThread_t *thread;
-    uint64_t kernel_sp;
-    uint64_t user_sp;
-    uint64_t user_pgd;
-
-    kernel_sp = (uint64_t)(uintptr_t)&s_server_kernel_stack[
-        USER_TEST_KERNEL_STACK / sizeof(uint64_t)];
-    user_sp = (uint64_t)(uintptr_t)&s_server_user_stack[
-        USER_TEST_USER_STACK / sizeof(uint64_t)];
+    kernel_sp = (uint64_t)(uintptr_t)&kern_stack[stack_words];
+    user_sp = (uint64_t)(uintptr_t)&user_stack[stack_words];
 
     user_pgd = mmu_create_user_pgd();
     if (user_pgd == 0ULL)
     {
-        return;
+        return THREAD_ID_INVALID;
     }
 
-    tid = kthread_create("server",
-                         (kthread_entry_t)server_entry,
+    tid = kthread_create(name,
+                         (kthread_entry_t)entry,
                          NULL,
-                         (priority_t)(USER_TEST_PRIO),  /* 同优先级 */
+                         prio,
                          KTHREAD_POLICY_RR,
                          CONFIG_STACK_SIZE_DEFAULT);
     if (tid == THREAD_ID_INVALID)
     {
-        return;
+        return THREAD_ID_INVALID;
     }
 
     thread = &g_scheduler.thread_table[tid];
@@ -662,17 +746,20 @@ static void create_server_thread(void)
     thread->user_pgd = user_pgd;
 
     arch_setup_user_thread_context(thread->context,
-                                   (uint64_t)((uintptr_t)server_entry)
+                                   (uint64_t)((uintptr_t)entry)
                                    | CONFIG_KERNEL_VADDR_BASE,
                                    0U,
                                    kernel_sp,
                                    user_sp);
     thread->context[2] = (uint64_t)user_sp;
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "[k] Server tid=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] ");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, name);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " tid=");
     uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+    return tid;
 }
 
 /* ========================================================================
@@ -2020,11 +2107,30 @@ void kernel_main(void)
         }
     }
 
-    /* ---- 创建 EL0 用户态线程 (server + client) ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating server thread\n");
-    create_server_thread();
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating EL0 thread\n");
-    create_user_test_thread();
+    /* ---- 创建 EL0 多服务线程 + 客户端 ---- */
+    {
+        uint32_t svc_stack_words = SVC_STACK_SIZE / sizeof(uint64_t);
+
+        /* FS 服务 (prio=48, 最高优先级先运行) */
+        (void)create_service_thread(fs_service_entry, "fs_svc",
+                                    s_fs_kern_stack, s_fs_user_stack,
+                                    svc_stack_words, (priority_t)49U);
+
+        /* Proc 服务 (prio=49) */
+        (void)create_service_thread(proc_service_entry, "proc_svc",
+                                    s_proc_kern_stack, s_proc_user_stack,
+                                    svc_stack_words, (priority_t)49U);
+
+        /* Mem 服务 (prio=49) */
+        (void)create_service_thread(mem_service_entry, "mem_svc",
+                                    s_mem_kern_stack, s_mem_user_stack,
+                                    svc_stack_words, (priority_t)49U);
+
+        /* 客户端 (prio=50, 最低优先级，确保服务先就绪) */
+        (void)create_service_thread(user_test_entry, "client",
+                                    s_client_kern_stack, s_client_user_stack,
+                                    svc_stack_words, (priority_t)CLIENT_PRIO);
+    }
 
     /* ---- 第九步：重新武装定时器并启用 IRQ ---- */
     {
