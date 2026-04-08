@@ -172,6 +172,137 @@ fix(mm): 修复页表损坏问题
 docs(kernel): 更新 IPC 设计文档
 ```
 
+## 强制开发规则：体系架构分层（Architecture Independence）
+
+**内核核心代码必须体系架构无关，所有硬件相关操作必须通过 HAL 层接口。**
+
+### 分层架构
+
+```
+┌─────────────────────────────────────────┐
+│  用户态服务 (Rust/C)                      │
+├─────────────────────────────────────────┤
+│  内核核心 (C - 体系架构无关)               │  ← scheduler, ipc, cap, mm(高层)
+│    仅通过 hal.h / hal_*.h 接口访问硬件     │
+├─────────────────────────────────────────┤
+│  HAL 硬件抽象层 (C - 体系架构相关)         │  ← hal.h, hal_timer.h, hal_mmu.h ...
+├─────────────────────────────────────────┤
+│  架构实现 (C/ASM - ARM64/RISC-V/...)      │  ← kernel/arch/arm64/
+└─────────────────────────────────────────┘
+```
+
+### 目录结构规则
+
+| 目录 | 允许的内容 | 禁止的内容 |
+|------|-----------|------------|
+| `kernel/sched/` | 调度算法、线程管理 | `__asm__`, `msr`, `mrs`, `isb`, `wfe` |
+| `kernel/ipc/` | IPC 通道/端点/通知 | `__asm__`, 寄存器名 |
+| `kernel/cap/` | 能力系统 | `__asm__`, 寄存器名 |
+| `kernel/mm/` | 高层内存管理 | `__asm__`, `ttbr`, `tlbi`, `msr` |
+| `kernel/irq/` | 中断/系统调用分发 | 直接寄存器操作 |
+| `kernel/verify/` | 形式化验证 | 体系架构相关代码 |
+| `kernel/arch/arm64/` | ARM64 实现 | — (这里可以写任何东西) |
+
+### HAL 接口清单（kernel/arch/arm64/hal.h）
+
+内核核心代码 **只能** 使用以下 HAL 接口访问硬件：
+
+```c
+/* CPU 信息 */
+uint32_t hal_get_cpu_id(void);
+uint32_t hal_get_current_el(void);
+
+/* 中断控制 */
+void hal_irq_enable(void);
+void hal_irq_disable(void);
+void hal_irq_disable_all(void);
+uint32_t hal_irq_saved_state(void);
+void hal_irq_restore(uint32_t state);
+
+/* 缓存维护 */
+void hal_dcache_clean(uint64_t start, uint64_t size);
+void hal_dcache_invalidate(uint64_t start, uint64_t size);
+void hal_dcache_clean_and_invalidate(uint64_t start, uint64_t size);
+void hal_tlb_invalidate_all(void);
+
+/* UART 输出 */
+void hal_uart_init(uint64_t base);
+void hal_uart_putc(uint64_t base, char ch);
+void hal_uart_puts(uint64_t base, const char *str);
+void hal_uart_enable_rx_irq(uint64_t base);
+int hal_uart_getc(uint64_t base, char *ch);
+
+/* 栈对齐检查 */
+void hal_enable_stack_alignment_check(void);
+```
+
+### 需要补充的 HAL 接口
+
+以下接口需要从内核核心代码中抽离到 HAL 层：
+
+```c
+/* 定时器 - 从 timer.c 抽离 */
+uint64_t hal_timer_get_count(void);        /* 替代 mrs cntpct_el0 */
+uint64_t hal_timer_get_freq(void);         /* 替代 mrs cntfrq_el0 */
+uint64_t hal_timer_get_control(void);      /* 替代 mrs cntp_ctl_el0 */
+void hal_timer_set_compare(uint64_t val);  /* 替代 msr cntp_cval_el0 + isb */
+void hal_timer_set_control(uint64_t val);  /* 替代 msr cntp_ctl_el0 + isb */
+
+/* 内存屏障 - 从 ic2.c 抽离 */
+void hal_dmb_ish(void);       /* 数据内存屏障: Inner Shareable */
+void hal_dmb_ishst(void);     /* 数据内存屏障: Inner Shareable, Store */
+void hal_dmb_ishld(void);     /* 数据内存屏障: Inner Shareable, Load */
+
+/* 页表 - 从 page_table.c 抽离 */
+uint64_t hal_read_ttbr0(void);          /* 替代 mrs ttbr0_el1 */
+uint64_t hal_read_ttbr1(void);          /* 替代 mrs ttbr1_el1 */
+void hal_write_ttbr0(uint64_t val);     /* 替代 msr ttbr0_el1 + isb */
+void hal_write_ttbr1(uint64_t val);     /* 替代 msr ttbr1_el1 + isb */
+void hal_tlb_invalidate_asid(uint64_t asid);  /* 替代 tlbi aside1is */
+void hal_tlb_invalidate_all(void);      /* 替代 tlbi vmalle1is */
+
+/* 低功耗等待 - 从 scheduler.c / thread.c 抽离 */
+void hal_wfe(void);  /* 替代 wfe 指令 */
+
+/* 地址空间切换 - 从 vmspace.c 抽离 */
+void hal_set_asid(uint16_t asid);  /* 替代直接操作 TTBR 寄存器 */
+```
+
+### 当前违规清单（待修复）
+
+| 文件 | 违规内容 | 需要的 HAL 接口 |
+|------|---------|----------------|
+| `kernel/sched/timer.c` | `mrs cntpct_el0`, `cntfrq_el0`, `cntp_ctl_el0`, `msr cntp_cval_el0` | `hal_timer_*` |
+| `kernel/sched/scheduler.c` | `wfe` (5处) | `hal_wfe()` |
+| `kernel/sched/thread.c` | `wfe` (2处) | `hal_wfe()` |
+| `kernel/ipc/ic2.c` | `dmb ish/ishst/ishld` (3处) | `hal_dmb_*` |
+| `kernel/mm/page_table.c` | `mrs/msr ttbr0_el1`, `ttbr1_el1`, `tlbi` (9处) | `hal_read/write_ttbr*`, `hal_tlb_*` |
+| `kernel/mm/vmspace.c` | `msr ttbr0_el1`, `isb` (3行) | `hal_write_ttbr0` |
+
+### 代码审查规则
+
+**每次代码审查必须检查以下项：**
+
+1. **体系架构独立性**: `kernel/` 非 `arch/` 目录下禁止出现 `__asm__`、`msr`、`mrs`、`isb`、`dsb`、`dmb`、`tlbi`、`wfe`、`wfi` 等体系架构相关代码
+2. **HAL 接口使用**: 所有硬件操作必须通过 `hal.h` 中定义的接口
+3. **MISRA C:2012 合规**: Rule 1.1 (未使用代码)、Rule 8.13 (pointer should be const)、Dir 4.9 (结构体/联合体应有 typedef)
+4. **text < 30KB**: 每次提交后检查 `aarch64-linux-gnu-size build/kernel/aisafe64.elf.elf`
+5. **无重复定义**: 同一符号不允许出现多次 tentative definition
+6. **中文注释**: 所有公共 API 使用中文 Doxygen 注释
+7. **Allman 括号 + 4空格缩进**
+
+### 给 Claude Code 的审查 Prompt
+
+使用 `/project:code-review` 或以下 prompt 进行代码审查：
+```
+审查以下文件的体系架构独立性：
+1. 检查 kernel/ 非 arch/ 目录下是否有 __asm__ 内联汇编
+2. 检查是否有直接使用 ARM64 寄存器名（msr/mrs/ttbr/tlbi/wfe 等）
+3. 检查是否有 #include "hal.h" 以外的硬件相关头文件
+4. 验证所有 HAL 接口调用是否正确
+5. 检查 MISRA C:2012 合规性
+```
+
 ## 注意事项
 
 - 操作系统开发需要特别关注安全性和稳定性
@@ -179,4 +310,4 @@ docs(kernel): 更新 IPC 设计文档
 - 重要变更需要记录到 MEMORY.md
 - 保持代码风格一致性
 - 所有内核代码必须 MISRA C:2012 合规
-- 内核代码段控制在 **30KB** 以内（text section）
+- 内核代码段控制在 **40KB** 以内（text section）

@@ -381,11 +381,15 @@ void mmu_early_init(void)
     s_pgd_ttbr1[0U] = make_table_desc(pud1_paddr);
     s_pgd_ttbr1[1U] = make_table_desc(pud1_paddr);
 
+    /* TTBR1 PUD[0]: 1GB Normal RW- (物理内存 0x00000000-0x3FFFFFFF) */
     s_pud_ttbr1[0U] = make_block1g_desc(0x00000000ULL, PTE_ATTR_NORMAL,
                                           PTE_AP_RW | PTE_PXN | PTE_UXN);
-    /* 高地址镜像: 内核代码也需要执行权限 */
-    s_pud_ttbr1[1U] = make_block1g_desc(0x40000000ULL, PTE_ATTR_NORMAL,
-                                          PTE_AP_RW | PTE_UXN);
+    /* TTBR1 PUD[1]: 使用与 TTBR0 相同的细粒度 PMD→PTE 映射
+     * 这样 EL0 用户态可以通过 TTBR1 高地址映射访问内核代码（EL0 可读） */
+    {
+        uint64_t pmd_paddr = (uint64_t)(uintptr_t)&s_pmd_kernel[0U];
+        s_pud_ttbr1[1U] = make_table_desc(pmd_paddr);
+    }
 
     /* ---- 第7步: 设置 MAIR_EL1 ---- */
     mair_val = (MAIR_DEVICE << 8U) | MAIR_NORMAL;
@@ -521,13 +525,19 @@ uint64_t mmu_create_user_pgd(void)
             s_user_pgd_bitmap |= (1UL << i);
             clear_table(s_user_pgds[i]);
 
-            /* 复制内核高地址映射到 TTBR1 部分（PGD 高 256 entries） */
+            /* 复制内核 TTBR1 映射到用户 PGD
+             * TTBR1 地址的 PGD 索引从 0 开始（因为 0xFFFF0000 基地址）
+             * 需要复制 s_pgd_ttbr1 的所有有效 entries */
             pud1_paddr = (uint64_t)(uintptr_t)&s_pud_ttbr1[0U];
             {
                 uint32_t j;
-                for (j = 256U; j < 512U; j++)
+                /* 复制 TTBR1 的低 entries (s_pgd_ttbr1[0] 指向 s_pud_ttbr1) */
+                for (j = 0U; j < 512U; j++)
                 {
-                    s_user_pgds[i][j] = s_pgd_ttbr1[j];
+                    if (s_pgd_ttbr1[j] != 0ULL)
+                    {
+                        s_user_pgds[i][j] = s_pgd_ttbr1[j];
+                    }
                 }
             }
 

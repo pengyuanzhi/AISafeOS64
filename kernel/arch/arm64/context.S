@@ -30,6 +30,14 @@
  *
  * x0 = prev->context (uint64_t *)
  * x1 = next->context (uint64_t *)
+ *
+ * 上下文布局扩展（17 个 uint64_t）:
+ * [0]  x19    [1]  x20    [2]  x21    [3]  x22
+ * [4]  x23    [5]  x24    [6]  x25    [7]  x26
+ * [8]  x27    [9]  x28    [10] x29/FP [11] x30/LR
+ * [12] SP_el1 [13] SPSR   [14] ELR    [15] reserved
+ *
+ * 如果 SPSR 指向 EL0（值=0），则通过 eret 进入用户态
  * ======================================================================== */
     .global context_switch
     .type context_switch, @function
@@ -67,7 +75,7 @@ context_switch:
     ldr     x9, [x1, #96]
     mov     sp, x9
 
-    /* 返回到 next 线程的 LR（不修改 SPSR/ELR，IRQ 上下文安全） */
+    /* 返回到 schedule()，ELR/SPSR 已在 schedule() 中恢复 */
     ret
 
 
@@ -195,7 +203,7 @@ cpu_switch_to_first_task:
     .global arch_setup_user_thread_context
     .type arch_setup_user_thread_context, @function
 arch_setup_user_thread_context:
-    /* context[0] = x19 = entry（真实入口地址） */
+    /* context[0] = x19 = entry（已由调用方加 TTBR1 偏移） */
     str     x1, [x0, #0]
 
     /* context[1] = x20 = arg（入口参数） */
@@ -214,8 +222,10 @@ arch_setup_user_thread_context:
     /* context[10] = FP(x29) = 0 */
     str     xzr, [x0, #80]
 
-    /* context[11] = LR(x30) = user_entry_trampoline */
+    /* context[11] = LR(x30) = user_entry_trampoline (TTBR1 高地址) */
     ldr     x9, =user_entry_trampoline
+    orr     x9, x9, #0x8000000000000000
+    orr     x9, x9, #0x7FFF000000000000
     str     x9, [x0, #88]
 
     /* context[12] = SP = kernel_sp（内核栈） */
@@ -224,8 +234,10 @@ arch_setup_user_thread_context:
     /* context[13] = SPSR_EL1 = 0x0（EL0t，所有中断使能） */
     str     xzr, [x0, #104]
 
-    /* context[14] = ELR_EL1 = user_entry_trampoline */
+    /* context[14] = ELR_EL1 = user_entry_trampoline (TTBR1 高地址) */
     ldr     x9, =user_entry_trampoline
+    orr     x9, x9, #0x8000000000000000
+    orr     x9, x9, #0x7FFF000000000000
     str     x9, [x0, #112]
 
     ret

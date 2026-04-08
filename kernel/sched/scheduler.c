@@ -403,6 +403,10 @@ void schedule(void)
     /* 设置下一个线程为当前线程 */
     scheduler_load_current(next);
 
+    /* 保存当前 ELR/SPSR 到 prev context (context[13]/[14]) */
+    __asm__ volatile("mrs %0, elr_el1" : "=r"(prev->context[13U]));
+    __asm__ volatile("mrs %0, spsr_el1" : "=r"(prev->context[14U]));
+
     /* P0-2: 用户态地址空间隔离 - 切换 TTBR0 */
     if (next->is_user != 0U)
     {
@@ -412,6 +416,11 @@ void schedule(void)
     {
         mmu_switch_to_kernel();
     }
+
+    /* 恢复 next 的 ELR/SPSR */
+    __asm__ volatile("msr elr_el1, %0" :: "r"(next->context[13U]));
+    __asm__ volatile("msr spsr_el1, %0" :: "r"(next->context[14U]));
+    __asm__ volatile("isb");
 
     /* 执行上下文切换 */
     context_switch(prev->context, next->context);

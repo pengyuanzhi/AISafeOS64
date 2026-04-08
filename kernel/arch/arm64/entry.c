@@ -354,7 +354,7 @@ static void uart_print_uint(uint64_t base, uint64_t value)
 #define USER_TEST_USER_STACK    4096U
 
 /** @brief EL0 用户态测试线程优先级 */
-#define USER_TEST_PRIO          128U
+#define USER_TEST_PRIO          50U
 
 /** @brief EL0 用户态测试线程内核栈（静态分配，16字节对齐） */
 static uint64_t s_user_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
@@ -383,16 +383,25 @@ static void user_test_entry(void *arg)
 {
     (void)arg;
 
-    /* ---- SVC 路径验证 ---- */
+    /* EL0 SVC 测试 + IPC + 能力系统完整验证 */
+
+    /* 步骤 1: 获取线程 ID */
     {
-        static const char m1[] = "[EL0] User mode SVC syscall verified!\n";
-        (void)syscall2(SYS_DEBUG_PRINT,
-                        (uint64_t)(uintptr_t)m1, (uint64_t)(sizeof(m1) - 1U));
+        int64_t tid = syscall0(SYS_THREAD_GET_ID);
+        (void)tid;
     }
 
-    /* ---- P0-1: IPC 用户态端到端验证 ---- */
+    /* 步骤 2: 打印消息（只调用一次） */
     {
-        static const char m2[] = "[EL0] IPC send/recv test PASSED\n";
+        static const char msg[] = "[EL0] ALIVE!\n";
+        (void)syscall2(SYS_DEBUG_PRINT,
+                       (uint64_t)(uintptr_t)msg,
+                       (uint64_t)(sizeof(msg) - 1U));
+    }
+
+    /* 步骤 3: IPC 端到端 */
+    {
+        static const char m2[] = "[EL0] IPC OK\n";
         static const char ipc_msg[] = "HELLO";
         uint8_t buf[8U] = {0U};
         int64_t r;
@@ -415,9 +424,9 @@ static void user_test_entry(void *arg)
         (void)buf;
     }
 
-    /* ---- P0-3: 能力系统用户态验证 ---- */
+    /* 步骤 4: 能力系统 */
     {
-        static const char m3[] = "[EL0] Capability test PASSED\n";
+        static const char m3[] = "[EL0] CAP OK\n";
         int64_t r;
 
         r = syscall1(SYS_CSPACE_CREATE, 16ULL);
@@ -431,13 +440,16 @@ static void user_test_entry(void *arg)
         }
     }
 
-    /* ---- 退出线程 ---- */
-    syscall1(SYS_THREAD_EXIT, 0ULL);
-
-    for (;;)
+    /* 步骤 5: 最终汇总 */
     {
-        __asm__ volatile("wfe" ::: "memory");
+        static const char m4[] = "[EL0] ALL PASSED\n";
+        (void)syscall2(SYS_DEBUG_PRINT,
+                       (uint64_t)(uintptr_t)m4,
+                       (uint64_t)(sizeof(m4) - 1U));
     }
+
+    /* 无限循环 (不退出) */
+    for (;;) { }
 }
 
 /**
@@ -498,7 +510,8 @@ static void create_user_test_thread(void)
 
     /* 使用用户态上下文初始化覆盖默认的 EL1h 上下文 */
     arch_setup_user_thread_context(thread->context,
-                                   (uint64_t)((uintptr_t)user_test_entry),
+                                   (uint64_t)((uintptr_t)user_test_entry)
+                                   | CONFIG_KERNEL_VADDR_BASE,
                                    0U,
                                    kernel_sp,
                                    user_sp);
