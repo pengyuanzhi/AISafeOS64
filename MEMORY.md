@@ -1,5 +1,41 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-08 EL0 用户态端到端 QEMU 验证通过 ✅ (13:30)
+
+**commit**: `581e7de` feat(el0): 用户态 EL0 端到端 QEMU 验证通过
+
+### 修复 5 个关键 bug
+1. **context_switch ELR/SPSR 保存恢复** — schedule() 中保存 ELR_EL1/SPSR_EL1 到 context[13]/[14]，修复 IRQ 导致 EL0 ELR 被覆盖
+2. **TTBR1 PGD 索引计算** — 0xFFFF0000 基地址的 PGD 索引从 0 开始（不是 256），mmu_create_user_pgd 修复
+3. **TTBR1 精细页表映射** — PUD[1] 改为 PMD→PTE 细粒度，text 段 PTE_AP_USER_RO
+4. **EL0 代码使用 TTBR1 高地址** — arch_setup_user_thread_context 加 CONFIG_KERNEL_VADDR_BASE 偏移
+5. **trampoline 路径** — context_switch 不再做 eret，由 schedule() + IRQ eret 路径处理
+
+### EL0 端到端测试结果
+```
+[EL0] ALIVE!      ← SVC + SYS_DEBUG_PRINT ✅
+[EL0] IPC OK       ← channel + connect + send/recv ✅
+[EL0] CAP OK       ← cspace + cap_copy + cap_revoke ✅
+[EL0] ALL PASSED   ← 全部通过 ✅
+```
+
+### QEMU 4 核全量测试
+```
+[DRV TEST] ALL PASSED ✅ (3驱动+3设备+2probe)
+[CAP TEST] ALL PASSED ✅ (44用例)
+[SMP TEST] Workers queued ✅ (4核)
+[EL0] ALL PASSED ✅
+text = 47,304 bytes (46.2KB)
+```
+
+### ARM64 EL0 关键技术
+- EL0 代码必须通过 TTBR1 高地址 (0xFFFF0000_xxxxxxxx) 执行
+- 用户 PGD 的 TTBR0 为空，TTBR1 复制内核映射
+- context_switch 只保存 callee-saved (x19-x28)，ELR/SPSR 由 schedule() 管理
+- EL0 IRQ/SVC 异常向量正确分离处理
+
+---
+
 ## 2026-04-08 VirtIO 驱动适配新框架 ✅ (11:45)
 
 **commit**: `f5496c9` feat(driver): PL011 UART + VirtIO Block 内核驱动适配新框架
