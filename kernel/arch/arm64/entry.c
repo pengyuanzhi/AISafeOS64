@@ -592,9 +592,6 @@ static void user_test_entry(void *arg)
                        (uint64_t)(sizeof(msg) - 1U));
     }
 
-    /* 再让出一次，确保服务进入 RECV 状态 */
-    syscall0(SYS_THREAD_YIELD);
-
     /* 步骤 3: 向 FS 服务发送请求 */
     {
         service_msg_t req;
@@ -751,6 +748,8 @@ static thread_id_t create_service_thread(
                                    0U,
                                    kernel_sp,
                                    user_sp);
+
+    /* 在 context[2]（x21）中保存 user_sp，供 trampoline 使用 */
     thread->context[2] = (uint64_t)user_sp;
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] ");
