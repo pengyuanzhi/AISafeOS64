@@ -322,6 +322,27 @@ static void dispatch_ipc(syscall_frame_t *frame)
             break;
         }
 
+        case SYS_EP_CREATE:
+        {
+            /* x0=owner_tid (0=current) */
+            kobj_id_t ep_id;
+            thread_id_t tid = (thread_id_t)frame->x0;
+            if (tid == 0U)
+            {
+                tid = kthread_get_current_tid();
+            }
+            ret = ipc_endpoint_create(tid, &ep_id);
+            if (ret == KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)ep_id;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ret);
+            }
+            break;
+        }
+
         default:
         {
             frame->x0 = (uint64_t)(-(int64_t)ENOSYS);

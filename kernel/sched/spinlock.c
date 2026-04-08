@@ -21,6 +21,7 @@
  */
 
 #include <kernel/spinlock.h>
+#include <stddef.h>
 #include "hal.h"
 
 /* ============================================================================

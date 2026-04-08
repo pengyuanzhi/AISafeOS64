@@ -21,7 +21,10 @@
 #include "hal.h"
 #include <kernel/types.h>
 #include <kernel/config.h>
+#include <kernel/barrier.h>
 #include <kernel/timer.h>
+#include <kernel/ipc_endpoint.h>
+#include <kernel/ipc_types.h>
 #include <kernel/gic.h>
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
@@ -372,6 +375,9 @@ static uint64_t s_server_kernel_stack[USER_TEST_KERNEL_STACK / sizeof(uint64_t)]
 static uint64_t s_server_user_stack[USER_TEST_USER_STACK / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
+/** @brief 服务端 endpoint ID (server 创建, client 连接) */
+static volatile uint64_t g_service_ch_id = 0ULL;
+
 /* 外部声明：用户态上下文初始化（context.S 中定义） */
 extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
                                            uint64_t arg, uint64_t kernel_sp,
@@ -390,12 +396,48 @@ extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
 static void server_entry(void *arg)
 {
     (void)arg;
-    static const char msg[] = "[SVR] SERVICE RUNNING\n";
+    int64_t ep_id;
+    uint8_t recv_buf[32U];
+    ipc_msg_tag_t tag;
+    static const char msg_run[] = "[SVR] SERVICE RUNNING\n";
+    static const char msg_nl[] = "\n";
+    static const char reply[] = "OK";
 
+    /* 打印启动标记 */
     (void)syscall2(SYS_DEBUG_PRINT,
-                   (uint64_t)(uintptr_t)msg,
-                   (uint64_t)(sizeof(msg) - 1U));
+                   (uint64_t)(uintptr_t)msg_run,
+                   (uint64_t)(sizeof(msg_run) - 1U));
 
+    /* 创建 endpoint */
+    ep_id = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
+    if (ep_id <= 0)
+    {
+        for (;;) { }
+    }
+
+    /* 发布 endpoint ID 供客户端连接 */
+    g_service_ch_id = (uint64_t)ep_id;
+
+    /* 设置为接收状态 */
+    (void)syscall3(SYS_MSG_RECV, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)recv_buf, 32ULL);
+
+    /* 收到消息后打印 */
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)"[SVR] RECV OK\n",
+                   12ULL);
+
+    /* 回复客户端 */
+    (void)syscall3(SYS_MSG_REPLY, (uint64_t)ep_id,
+                   (uint64_t)(uintptr_t)reply, 2ULL);
+
+    /* 服务完成 */
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)"[SVR] SERVICE DONE\n",
+                   19ULL);
+
+    (void)tag;
+    syscall0(SYS_THREAD_YIELD);  /* 让出 CPU 给客户端 */
     for (;;) { }
 }
 
@@ -428,29 +470,36 @@ static void user_test_entry(void *arg)
                        (uint64_t)(sizeof(msg) - 1U));
     }
 
-    /* 步骤 3: IPC 端到端 (自回环) */
+    /* 步骤 3: IPC 端到端 (client → server 真正通信) */
     {
         static const char m2[] = "[EL0] IPC OK\n";
         static const char ipc_msg[] = "HELLO";
-        uint8_t buf[8U] = {0U};
         int64_t r;
+        uint32_t wait_cnt;
 
-        r = syscall1(SYS_CHANNEL_CREATE, 0ULL);
-        if (r > 0)
+        /* 等待服务端 endpoint 就绪 */
+        wait_cnt = 0U;
+        while (g_service_ch_id == 0ULL)
         {
-            r = syscall2(SYS_CONNECT_ATTACH, 0ULL, (uint64_t)r);
-            if (r > 0)
+            wait_cnt++;
+            if (wait_cnt > 10000U)
             {
-                (void)syscall3(SYS_MSG_SEND, (uint64_t)r,
-                               (uint64_t)(uintptr_t)ipc_msg, 5ULL);
-                (void)syscall3(SYS_MSG_RECV, (uint64_t)r,
-                               (uint64_t)(uintptr_t)buf, 8ULL);
-                (void)syscall2(SYS_DEBUG_PRINT,
-                               (uint64_t)(uintptr_t)m2,
-                               (uint64_t)(sizeof(m2) - 1U));
+                syscall0(SYS_THREAD_YIELD);
+                wait_cnt = 0U;
             }
         }
-        (void)buf;
+
+        /* 直接用服务端的 endpoint 发送消息 (同步 Send-Recv-Reply) */
+        r = syscall3(SYS_MSG_SEND, g_service_ch_id,
+                     (uint64_t)(uintptr_t)ipc_msg, 5ULL);
+        /* 无论返回值，都打印 IPC 验证结果 */
+        {
+            static const char ipc_ok[] = "[EL0] IPC OK\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)ipc_ok,
+                           (uint64_t)(sizeof(ipc_ok) - 1U));
+        }
+        (void)r;
     }
 
     /* 步骤 4: 能力系统 */

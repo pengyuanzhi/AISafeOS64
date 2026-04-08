@@ -163,6 +163,7 @@ kernel_status_t ipc_endpoint_subsys_init(void)
         s_endpoints[i].id = KOBJ_ID_INVALID;
         s_endpoints[i].state = IPC_EP_IDLE;
         s_endpoints[i].owner_tid = THREAD_ID_INVALID;
+        s_endpoints[i].sender_tid = THREAD_ID_INVALID;
         s_endpoints[i].pending_list.next = &s_endpoints[i].pending_list;
         s_endpoints[i].pending_list.prev = &s_endpoints[i].pending_list;
         s_endpoints[i].node.next = &s_endpoints[i].node;
@@ -208,6 +209,7 @@ kernel_status_t ipc_endpoint_create(thread_id_t owner_tid, kobj_id_t *ep_id)
     ep->id = (kobj_id_t)((uint32_t)idx | ((uint32_t)idx << 16U));
     ep->state = IPC_EP_PENDING;
     ep->owner_tid = owner_tid;
+    ep->sender_tid = THREAD_ID_INVALID;
     ep->pending_list.next = &ep->pending_list;
     ep->pending_list.prev = &ep->pending_list;
     ep->node.next = &ep->node;
@@ -269,6 +271,7 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
     ep->id = KOBJ_ID_INVALID;
     ep->state = IPC_EP_IDLE;
     ep->owner_tid = THREAD_ID_INVALID;
+    ep->sender_tid = THREAD_ID_INVALID;
 
     ticket_lock_release_irqrestore(&ep->lock, irq_state);
 
@@ -323,6 +326,9 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
         /* 快速路径：直接传递消息给接收者 */
         ep->state = IPC_EP_REPLYING;
 
+        /* 保存发送方 tid，供 ipc_msg_reply 唤醒 */
+        ep->sender_tid = current->tid;
+
         /* 如果有内联数据，通过寄存器/共享结构传递 */
         if ((send_buf != NULL) && (send_size <= sizeof(uint64_t) * CONFIG_IPC_REG_MSG_WORDS))
         {
@@ -353,6 +359,9 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
 
     /* 慢速路径：将消息加入待处理队列 */
     /* 在完整实现中，需要构造消息节点并挂入 pending_list */
+
+    /* 保存发送方 tid */
+    ep->sender_tid = current->tid;
 
     /* 阻塞发送方线程 */
     current->state = KTHREAD_STATE_BLOCKED;
@@ -470,7 +479,17 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
         /* 回复数据传递 - 完整实现需要写入发送方的 recv_buf */
     }
 
-    /* 唤醒发送方线程（框架：在完整实现中需要追踪发送方） */
+    /* 唤醒发送方线程 */
+    if (ep->sender_tid != THREAD_ID_INVALID)
+    {
+        KThread_t *sender = &g_scheduler.thread_table[ep->sender_tid];
+        if (sender->state == KTHREAD_STATE_BLOCKED)
+        {
+            sender->state = KTHREAD_STATE_READY;
+            scheduler_enqueue(sender);
+        }
+        ep->sender_tid = THREAD_ID_INVALID;
+    }
 
     barrier();
     ticket_lock_release_irqrestore(&ep->lock, irq_state);

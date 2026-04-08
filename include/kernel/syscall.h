@@ -74,6 +74,7 @@ typedef struct
 #define SYS_PULSE_SEND             0x0107U   /**< @brief 发送 Pulse */
 #define SYS_NOTIFICATION_SIGNAL    0x0108U   /**< @brief 信号通知 */
 #define SYS_NOTIFICATION_WAIT      0x0109U   /**< @brief 等待通知 */
+#define SYS_EP_CREATE              0x010AU   /**< @brief 创建 IPC 端点 */
 
 /* --- 内存管理（0x0200 - 0x02FF） --- */
 #define SYS_VMSPACE_CREATE         0x0200U   /**< @brief 创建地址空间 */

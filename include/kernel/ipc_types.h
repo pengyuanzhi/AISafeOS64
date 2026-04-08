@@ -195,7 +195,8 @@ typedef struct
 {
     kobj_id_t           id;             /**< @brief 端点 ID */
     ipc_ep_state_t      state;          /**< @brief 端点当前状态 */
-    thread_id_t         owner_tid;      /**< @brief 拥有者线程 ID */
+    thread_id_t         owner_tid;      /**< @brief 拥有者线程 ID（接收方） */
+    thread_id_t         sender_tid;     /**< @brief 发送方线程 ID（用于 reply 唤醒） */
     struct list_head    pending_list;   /**< @brief 待处理消息队列 */
     struct list_head    node;           /**< @brief 全局端点链表节点 */
     TicketLock_t        lock;           /**< @brief 端点自旋锁 */
