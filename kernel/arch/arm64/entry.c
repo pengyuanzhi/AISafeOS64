@@ -30,6 +30,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/capability.h>
 #include <kernel/cspace.h>
+#include <kernel/driver.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -1502,6 +1503,14 @@ void kernel_main(void)
 
     /* ---- 第八步：初始化 SMP 多核 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] SMP init\n");
+
+    /* ---- 驱动框架初始化 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Driver framework init\n");
+    ret = driver_subsys_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: driver subsys fail\n");
+    }
     ret = smp_init();
     if (ret != KERNEL_OK)
     {

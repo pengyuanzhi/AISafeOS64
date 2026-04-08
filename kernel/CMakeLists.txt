@@ -16,6 +16,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/mm
     ${CMAKE_CURRENT_SOURCE_DIR}/irq
     ${CMAKE_CURRENT_SOURCE_DIR}/verify
+    ${CMAKE_CURRENT_SOURCE_DIR}/driver
     ${KERNEL_ARCH_DIR}
 )
 
@@ -97,6 +98,14 @@ set(KERNEL_VERIFY_SOURCES
 )
 
 # ==============================================================================
+# 驱动框架源文件 (driver/)
+# ==============================================================================
+set(KERNEL_DRIVER_SOURCES
+    driver/driver_core.c
+    driver/driver_module.c
+)
+
+# ==============================================================================
 # 合并所有源文件
 # ==============================================================================
 set(KERNEL_SOURCES
@@ -107,6 +116,7 @@ set(KERNEL_SOURCES
     ${KERNEL_MM_SOURCES}
     ${KERNEL_IRQ_SOURCES}
     ${KERNEL_VERIFY_SOURCES}
+    ${KERNEL_DRIVER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
 )
 
