@@ -1,5 +1,34 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-08 驱动框架端到端 QEMU 测试通过 ✅ (11:20)
+
+**commit**: `a1211b6` feat+test(driver): 驱动框架测试 + device_unregister 引用计数修复
+
+### 驱动端到端测试 (driver_e2e_test)
+- driver_register_kern("mock-uart") ✅ 重复注册拒绝 ✅
+- device_register("qemu-uart", MMIO=0x09000000, IRQ=33) ✅
+- device_probe_all: compatible 匹配 + probe 调用 ✅
+- device_write("HELLO", 5字节) → device_read 回环验证 ✅
+- device_ioctl(GET_IRQ_COUNT) ✅
+- driver_find_by_name ✅ 统计 drv=1 dev=1 probe=1 ✅
+- device_unregister + driver_unregister_kern 清理 ✅
+- **[DRV TEST] ALL PASSED** ✅
+
+### Bug 修复
+- device_unregister: 添加 device_count-- 和 ref_count--（注销后驱动引用计数正确清零）
+- driver_subsys_init: 添加 driver_module_init() 调用
+
+### QEMU 全量测试结果
+```
+[DRV TEST] ALL PASSED ✅
+[CAP TEST] ALL PASSED ✅ (44 用例)
+[SMP TEST] Workers queued ✅ (4核)
+```
+
+text = 47,178 bytes (46.1KB)
+
+---
+
 ## 2026-04-08 驱动动态加载框架 ✅ (09:27)
 
 **commit**: `0a390ef` feat(driver): 驱动动态加载框架 - 注册/匹配/模块加载器
