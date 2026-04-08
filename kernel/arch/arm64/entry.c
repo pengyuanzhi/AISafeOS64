@@ -469,7 +469,8 @@ static void create_user_test_thread(void)
     if (user_pgd == 0ULL)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[k] WARN: PGD fail\n");
+                      "[k] WARN: PGD fail, skip EL0 test\n");
+        return;
     }
 
     /* 使用内核线程创建 API 获取空闲 TCB */

@@ -993,11 +993,13 @@ static kernel_status_t cspace_create_root_cap(cspace_t *cspace)
     /* 填充根能力字段 */
     root_cap->state = CAP_STATE_VALID;
     root_cap->kobj_type = KOBJ_CSPACE;
-    root_cap->rights = (uint8_t)CAP_RIGHT_ALL;
+    /* 使用 KOBJ_CSPACE 权限矩阵的 allowed_rights（不含 EXECUTE） */
+    root_cap->rights = (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE);
     root_cap->badge = 0U;
     root_cap->kobj_id = cspace->header.id;
     root_cap->parent_slot = CAP_SLOT_INVALID;
     root_cap->cspace_root = 0U; /* 根能力的 cspace_root 指向自身 slot 0 */
+    root_cap->derive_depth = 0U; /* 根能力派生深度为 0 */
 
     /* 初始化子能力链表 */
     INIT_LIST_HEAD(&root_cap->children);
