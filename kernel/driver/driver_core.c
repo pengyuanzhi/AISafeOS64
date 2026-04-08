@@ -93,6 +93,11 @@ static uint32_t s_next_dev_id;
 /** @brief 驱动子系统统计 */
 static driver_stats_t s_stats;
 
+/* ========== 外部声明（driver_module.c 提供） ========== */
+
+/** @brief 模块加载器初始化 */
+extern void driver_module_init(void);
+
 /* ========== 内部辅助函数声明 ========== */
 
 static driver_desc_t *alloc_driver_slot(void);
@@ -138,6 +143,9 @@ kernel_status_t driver_subsys_init(void)
 
     /* 清零统计 */
     kernel_memzero(&s_stats, sizeof(s_stats));
+
+    /* 初始化模块加载器 */
+    driver_module_init();
 
     return KERNEL_OK;
 }
@@ -344,6 +352,19 @@ kernel_status_t device_unregister(uint32_t dev_id)
         if ((drv != NULL) && (drv->ops != NULL) && (drv->ops->remove != NULL))
         {
             (void)drv->ops->remove(dev->priv);
+        }
+        if (drv != NULL)
+        {
+            /* 递减驱动设备计数 */
+            if (drv->device_count > 0U)
+            {
+                drv->device_count--;
+            }
+            /* 递减引用计数 */
+            if (drv->ref_count > 0U)
+            {
+                drv->ref_count--;
+            }
         }
         ticket_lock_release(&s_driver_lock);
     }

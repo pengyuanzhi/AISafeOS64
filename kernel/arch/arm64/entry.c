@@ -513,6 +513,263 @@ static void create_user_test_thread(void)
 }
 
 /* ========================================================================
+ * 驱动框架端到端测试
+ * ======================================================================== */
+
+/** @brief mock UART 驱动私有数据 */
+static uint8_t s_mock_uart_rx_buf[64U];
+static uint32_t s_mock_uart_rx_len;
+static uint32_t s_mock_uart_irq_count;
+
+static kernel_status_t mock_uart_probe(void *dev_data)
+{
+    (void)dev_data;
+    s_mock_uart_rx_len = 0U;
+    s_mock_uart_irq_count = 0U;
+    return KERNEL_OK;
+}
+
+static kernel_status_t mock_uart_remove(void *dev_data)
+{
+    (void)dev_data;
+    return KERNEL_OK;
+}
+
+static int64_t mock_uart_read(void *dev_data, void *buf,
+                               uint64_t size, uint64_t offset)
+{
+    (void)dev_data;
+    (void)offset;
+    if (size > s_mock_uart_rx_len)
+    {
+        size = (uint64_t)s_mock_uart_rx_len;
+    }
+    if ((buf != NULL) && (size > 0U))
+    {
+        uint64_t i;
+        for (i = 0U; i < size; i++)
+        {
+            ((uint8_t *)buf)[i] = s_mock_uart_rx_buf[i];
+        }
+    }
+    return (int64_t)size;
+}
+
+static int64_t mock_uart_write(void *dev_data, const void *buf,
+                                uint64_t size, uint64_t offset)
+{
+    (void)dev_data;
+    (void)offset;
+    /* 写入数据到 RX 缓冲区（回环） */
+    if ((buf != NULL) && (size <= 64U))
+    {
+        uint64_t i;
+        for (i = 0U; i < size; i++)
+        {
+            s_mock_uart_rx_buf[i] = ((const uint8_t *)buf)[i];
+        }
+        s_mock_uart_rx_len = (uint32_t)size;
+    }
+    return (int64_t)size;
+}
+
+static kernel_status_t mock_uart_ioctl(void *dev_data, uint32_t cmd, void *arg)
+{
+    (void)dev_data;
+    if (cmd == 1U) /* GET_IRQ_COUNT */
+    {
+        if (arg != NULL)
+        {
+            *((uint32_t *)arg) = s_mock_uart_irq_count;
+        }
+        return KERNEL_OK;
+    }
+    return -22; /* EINVAL */
+}
+
+static void mock_uart_irq(uint32_t irq, void *dev_data)
+{
+    (void)irq;
+    (void)dev_data;
+    s_mock_uart_irq_count++;
+}
+
+/** @brief mock UART 驱动操作函数表 */
+static const driver_ops_t s_mock_uart_ops =
+{
+    mock_uart_probe,
+    mock_uart_remove,
+    NULL,               /* suspend */
+    NULL,               /* resume */
+    mock_uart_read,
+    mock_uart_write,
+    mock_uart_ioctl,
+    mock_uart_irq
+};
+
+/**
+ * @brief 驱动框架端到端测试
+ *
+ * @details 测试驱动注册/设备注册/probe 匹配/设备操作/统计
+ *
+ * @retval 0 测试通过
+ * @retval N 测试失败的步骤编号
+ */
+static uint32_t driver_e2e_test(void)
+{
+    kernel_status_t ret;
+    driver_match_t match;
+    driver_stats_t stats;
+    int64_t io_ret;
+    uint32_t ioctl_val;
+    uint8_t test_buf[8U];
+    uint32_t i;
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] Starting...\n");
+
+    /* 步骤 1: 注册 mock UART 驱动 */
+    for (i = 0U; i < sizeof(match.compatible); i++)
+    {
+        match.compatible[i] = '\0';
+    }
+    match.compatible[0U] = 'q'; match.compatible[1U] = 'e';
+    match.compatible[2U] = 'm'; match.compatible[3U] = 'u';
+    match.compatible[4U] = '-'; match.compatible[5U] = 'u';
+    match.compatible[6U] = 'a'; match.compatible[7U] = 'r';
+    match.compatible[8U] = 't';
+    match.vendor_id = 0U;
+    match.device_id = 0U;
+    match.class_code = 0U;
+
+    ret = driver_register_kern("mock-uart", DRIVER_TYPE_UART, &match, &s_mock_uart_ops);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 1 (register)\n");
+        return 1U;
+    }
+
+    /* 步骤 2: 重复注册应失败 */
+    ret = driver_register_kern("mock-uart", DRIVER_TYPE_UART, &match, &s_mock_uart_ops);
+    if (ret == KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 2 (dup)\n");
+        return 2U;
+    }
+
+    /* 步骤 3: 注册 UART 设备 */
+    ret = device_register("qemu-uart", DRIVER_TYPE_UART,
+                          (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 3 (dev reg)\n");
+        return 3U;
+    }
+
+    /* 步骤 4: probe_all — 匹配驱动与设备 */
+    ret = device_probe_all();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 4 (probe)\n");
+        return 4U;
+    }
+
+    /* 步骤 5: 打开设备 (dev_id=1) */
+    ret = device_open(1U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 5 (open)\n");
+        return 5U;
+    }
+
+    /* 步骤 6: 写入测试数据 */
+    test_buf[0U] = 'H'; test_buf[1U] = 'E'; test_buf[2U] = 'L';
+    test_buf[3U] = 'L'; test_buf[4U] = 'O';
+    io_ret = device_write(1U, test_buf, 5U, 0U);
+    if (io_ret != 5)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 6 (write)\n");
+        return 6U;
+    }
+
+    /* 步骤 7: 读回数据（回环） */
+    for (i = 0U; i < sizeof(test_buf); i++) { test_buf[i] = 0U; }
+    io_ret = device_read(1U, test_buf, 8U, 0U);
+    if (io_ret != 5)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 7 (read len)\n");
+        return 7U;
+    }
+    if ((test_buf[0U] != 'H') || (test_buf[4U] != 'O'))
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 7 (read data)\n");
+        return 7U;
+    }
+
+    /* 步骤 8: ioctl 测试 */
+    ioctl_val = 0U;
+    ret = device_ioctl(1U, 1U, &ioctl_val);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 8 (ioctl)\n");
+        return 8U;
+    }
+
+    /* 步骤 9: 查找驱动 */
+    {
+        driver_desc_t *drv;
+        drv = driver_find_by_name("mock-uart");
+        if (drv == NULL)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 9 (find)\n");
+            return 9U;
+        }
+    }
+
+    /* 步骤 10: 统计 */
+    driver_get_stats(&stats);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] Stats: drv=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " dev=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " probe=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+    if ((stats.total_drivers != 1U) || (stats.total_devices != 1U) || (stats.probe_count != 1U))
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 10 (stats)\n");
+        return 10U;
+    }
+
+    /* 步骤 11: 关闭设备 */
+    ret = device_close(1U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 11 (close)\n");
+        return 11U;
+    }
+
+    /* 步骤 12: 注销设备（先 remove） */
+    ret = device_unregister(1U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 12 (dev unreg)\n");
+        return 12U;
+    }
+
+    /* 步骤 13: 注销驱动 */
+    ret = driver_unregister_kern("mock-uart");
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 13 (drv unreg)\n");
+        return 13U;
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] ALL PASSED\n");
+    return 0U;
+}
+
+/* ========================================================================
  * 能力系统运行时验证
  * ======================================================================== */
 
@@ -1534,6 +1791,18 @@ void kernel_main(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
+
+    /* ---- 驱动框架端到端测试 ---- */
+    {
+        uint32_t drv_ret = driver_e2e_test();
+        if (drv_ret != 0U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[k] DRV TEST FAILED at step ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)drv_ret);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+    }
 
     /* ---- 能力系统运行时验证 ---- */
     {
