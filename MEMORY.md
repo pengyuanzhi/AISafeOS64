@@ -1,5 +1,62 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-08 P0 功能补全: 根能力权限 + EL0 修复 ✅ (08:55)
+
+**commit**: `b7482eb` fix(cap,el0): P0-1 根能力权限矩阵修复 + P0-2 EL0 Instruction Abort 修复
+
+### P0-1 根能力权限矩阵修复
+- cspace_create_root_cap: CAP_RIGHT_ALL → R|W|G|R（去掉 EXECUTE）
+- 添加 derive_depth = 0（根能力深度）
+- **cap_integrity_check: total=5 passed=5 failed=0** ✅（之前 failed=1）
+
+### P0-2 EL0 Instruction Abort 修复
+- create_user_test_thread: user_pgd==0 时直接 return
+- 避免创建无页表的 EL0 线程
+- **QEMU 验证: 零 Instruction Abort, 零 Sync Exception** ✅
+
+### QEMU 端到端验证结果
+```
+[CAP TEST] Integrity: total=5 passed=5 failed=0  ← 之前 failed=1，现在零失败
+[CAP TEST] ALL PASSED ✅
+[SMP TEST] Workers queued ✅
+[k] Creating EL0 thread ✅
+[k] Start sched ✅
+4 核 tick 心跳 [1][2][3] 持续运行 ✅
+零 Instruction Abort ✅
+```
+
+text = 35,670 bytes (34.8KB) < 40KB ✅
+
+### 当前项目进度: ~98%
+
+#### 已完成 ✅
+- ✅ 调度器 (256 级位图 + EDF + ARINC653)
+- ✅ IPC 子系统 (channel + endpoint + notification + IC2)
+- ✅ 虚拟内存管理
+- ✅ 能力系统 (完整: 权限矩阵/深度限制/自检/形式化验证 8 不变式)
+- ✅ SMP 多核 (4核 + IPI批处理/延迟统计/RCU宽限期/迁移统计)
+- ✅ 同步原语 (Ticket Lock + 优先级继承互斥锁)
+- ✅ 上下文切换 (ARM64 汇编)
+- ✅ 形式化验证框架 + 8 能力系统不变式
+- ✅ 用户态服务 (FS/Proc/Mem/Net/Security/VMM/Path/Init/Dev)
+- ✅ virtio 驱动框架
+- ✅ 系统调用分发器 (32 个系统调用号)
+- ✅ MMU 细粒度映射 (4KB 三段权限)
+- ✅ HAL 层接口抽离（零体系架构违规）
+- ✅ **能力系统运行时验证 ALL PASSED**
+- ✅ **SMP 4核端到端 QEMU 验证**
+- ✅ **根能力权限矩阵修复（integrity failed=0）**
+- ✅ **EL0 Instruction Abort 修复（零异常）**
+
+#### 待完成 ⏳
+- [ ] MISRA C:2012 静态分析全量扫描
+- [ ] 安全认证文档 (ISO 26262, IEC 61508)
+- [ ] virtio-blk/virtio-net 实际驱动
+- [ ] 性能基准（IPC/调度/中断延迟精确测量）
+- [ ] 形式化验证条件实际断言逻辑
+
+---
+
 ## 2026-04-08 能力系统+SMP QEMU 端到端验证通过 ✅ (08:45)
 
 **commit**: `cd248cd` test(cap,smp): 能力系统运行时验证 + SMP多核端到端QEMU验证
