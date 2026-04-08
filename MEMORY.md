@@ -1,6 +1,30 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
-## 2026-04-08 P0 功能补全: 根能力权限 + EL0 修复 ✅ (08:55)
+## 2026-04-08 驱动动态加载框架 ✅ (09:27)
+
+**commit**: `0a390ef` feat(driver): 驱动动态加载框架 - 注册/匹配/模块加载器
+
+### 新增内核驱动子系统 (kernel/driver/)
+- **driver_core.c** (877 行): 驱动注册表 + 设备-驱动匹配 + probe + 设备文件操作
+- **driver_module.c** (432 行): 模块加载器（magic 验证 + 段加载 + 驱动注册）
+- **driver.h** (393 行): 完整接口（driver_ops_t/driver_match_t/device_desc_t/driver_desc_t）
+
+### 核心设计
+- 静态池: s_drivers[16] + s_devices[32]
+- 匹配: compatible 字符串 或 PCI vendor:device ID
+- 模块格式: module_header_t (magic=0x4D4F4452) + text/data/bss 段
+- 64KB 静态模块内存池
+- driver_ops_t: probe/remove/suspend/resume/read/write/ioctl/irq_handler
+
+### QEMU 验证
+- [k] Driver framework init ✅
+- [CAP TEST] ALL PASSED ✅
+- [SMP TEST] Workers queued ✅
+- text = 42,406 bytes (41.4KB)
+
+---
+
+## 2026-04-08 P0 功能补全 + 能力边界测试 + 驱动框架 ✅ (综合)
 
 **commit**: `b7482eb` fix(cap,el0): P0-1 根能力权限矩阵修复 + P0-2 EL0 Instruction Abort 修复
 
