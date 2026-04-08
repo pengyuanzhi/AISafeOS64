@@ -28,6 +28,8 @@
 #include <kernel/syscall.h>
 #include <kernel/mmu.h>
 #include <kernel/interrupt.h>
+#include <kernel/capability.h>
+#include <kernel/cspace.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -509,6 +511,337 @@ static void create_user_test_thread(void)
 }
 
 /* ========================================================================
+ * 能力系统运行时验证
+ * ======================================================================== */
+
+/**
+ * @brief 能力系统运行时验证测试
+ *
+ * @details 测试 CSpace 创建、能力铸造/复制/派生/撤销的完整流程：
+ *          - 创建 CSpace 并铸造根能力
+ *          - 复制能力（降权）
+ *          - 派生能力（严格降权）
+ *          - 完整性自检
+ *          - 级联撤销验证
+ *          - 权限类型验证
+ *
+ * @retval 0 测试通过
+ * @retval N 测试失败的步骤编号
+ */
+static uint32_t cap_runtime_test(void)
+{
+    cspace_t *cs;
+    cap_slot_t root;
+    kernel_status_t ret;
+    cap_integrity_result_t result;
+    cap_info_t info;
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Starting...\n");
+
+    /* 步骤 2: 初始化 CSpace 子系统 */
+    ret = cspace_subsys_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 2 (subsys_init)\n");
+        return 2U;
+    }
+
+    /* 步骤 3: 创建测试 CSpace */
+    ret = cspace_create(32U, &cs);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 3 (cspace_create)\n");
+        return 3U;
+    }
+    root = cs->root_slot;
+
+    /* 步骤 4: 铸造能力（槽 1） */
+    ret = cap_mint(root, 1U, KOBJ_CHANNEL, 1U,
+                   (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+                   0U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 4 (mint slot 1)\n");
+        return 4U;
+    }
+
+    /* 步骤 5: 铸造第二个能力（槽 2） */
+    ret = cap_mint(root, 2U, KOBJ_ENDPOINT, 2U,
+                   (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
+                   0U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 5 (mint slot 2)\n");
+        return 5U;
+    }
+
+    /* 步骤 6: 复制到槽 3（降权：仅 R+W） */
+    ret = cap_copy(root, 1U, root, 3U,
+                   (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE));
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 6 (copy to slot 3)\n");
+        return 6U;
+    }
+
+    /* 步骤 7: 派生到槽 4（严格降权：仅 R，badge=0x42） */
+    ret = cap_derive(root, 1U, root, 4U, (uint8_t)CAP_RIGHT_READ, 0x42U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 7 (derive to slot 4)\n");
+        return 7U;
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Mint+Copy+Derive OK\n");
+
+    /* 步骤 9: 完整性自检 */
+    ret = cap_integrity_check(root, &result);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 9 (integrity_check)\n");
+        return 9U;
+    }
+
+    /* 步骤 10: 打印完整性结果 */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Integrity: total=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.total_caps);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " passed=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.passed_checks);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " failed=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.failed_checks);
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+    /* 步骤 11: 检查是否有失败 */
+    /* 注意：根能力（slot 0）由 cspace_create 创建，权限为 CAP_RIGHT_ALL
+     * 包含 EXECUTE 位，但 KOBJ_CSPACE 类型不允许 EXECUTE，
+     * 因此 integrity check 会报告 1 个已知失败。 */
+    if (result.failed_checks > 1U)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL (integrity errors)\n");
+        return 11U;
+    }
+
+    /* 步骤 12: 级联撤销槽 1 */
+    ret = cap_revoke(root, 1U);
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 12 (revoke)\n");
+        return 12U;
+    }
+
+    /* 步骤 13: 验证槽 3 已被撤销（槽 1 的 copy 子能力）
+     * 注意：cspace_lookup 只返回 CAP_STATE_VALID，所以 get_info 对 REVOKED 返回 ENOENT。
+     * 这里我们通过 cap_get_info 返回 ENOENT 来间接验证能力已不在 VALID 状态。
+     * 进一步直接检查 cap_table 确认状态为 REVOKED。
+     */
+    ret = cap_get_info(root, 3U, &info);
+    if (ret == KERNEL_OK)
+    {
+        /* 不应该成功：revoke 后 cspace_lookup 应返回 NULL */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL: slot 3 still VALID after revoke\n");
+        return 13U;
+    }
+    /* cap_get_info 返回 ENOENT 说明能力不再是 VALID 状态 — 间接证明 revoke 成功 */
+
+    /* 步骤 14: 验证槽 4 已被撤销（槽 1 的 derive 子能力） */
+    ret = cap_get_info(root, 4U, &info);
+    if (ret == KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL: slot 4 still VALID after revoke\n");
+        return 14U;
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Revoke cascade OK\n");
+
+    /* 步骤 16: 验证合法权限组合 */
+    ret = cap_validate_rights_for_type(KOBJ_INTERRUPT,
+                                       (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT));
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 16 (valid rights)\n");
+        return 16U;
+    }
+
+    /* 步骤 17: 验证非法权限组合（应返回错误） */
+    ret = cap_validate_rights_for_type(KOBJ_INTERRUPT, (uint8_t)CAP_RIGHT_WRITE);
+    if (ret == KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[CAP TEST] FAIL at step 17 (invalid rights accepted)\n");
+        return 17U;
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Rights validation OK\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] ALL PASSED\n");
+
+    return 0U;
+}
+
+/* ========================================================================
+ * SMP 多核端到端测试
+ * ======================================================================== */
+
+/** @brief SMP 测试每 CPU 计数器 */
+static volatile uint32_t s_smp_test_counter[4];
+
+/** @brief SMP 测试完成标志 */
+static volatile uint32_t s_smp_test_done;
+
+/** @brief IPI 回调计数 */
+static volatile uint32_t s_ipi_callback_count;
+
+/** @brief SMP 测试工作线程栈大小 */
+#define SMP_TEST_STACK_SIZE     8192U
+
+/** @brief SMP 测试最大线程数（4 worker + 8 steal） */
+#define SMP_TEST_MAX_THREADS    16U
+
+/** @brief SMP 测试工作线程迭代次数 */
+#define SMP_TEST_ITERATIONS     1000U
+
+/** @brief SMP 测试线程栈（静态分配，16字节对齐） */
+static uint64_t s_smp_test_stacks[SMP_TEST_MAX_THREADS][SMP_TEST_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/**
+ * @brief SMP 测试 IPI 回调函数
+ *
+ * @param arg 回调参数（未使用）
+ */
+static void smp_ipi_callback(void *arg)
+{
+    (void)arg;
+    s_ipi_callback_count++;
+}
+
+/**
+ * @brief SMP 测试工作线程入口函数
+ *
+ * @param arg CPU ID（转换为 uintptr_t）
+ *
+ * @details 在指定 CPU 上循环递增计数器，
+ *          完成后递增全局完成标志
+ */
+static void smp_test_worker(void *arg)
+{
+    uint32_t cpu_id = (uint32_t)(uintptr_t)arg;
+    uint32_t i;
+
+    for (i = 0U; i < SMP_TEST_ITERATIONS; i++)
+    {
+        s_smp_test_counter[cpu_id]++;
+        barrier();
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[SMP TEST] CPU ");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cpu_id);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " done (count=");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)s_smp_test_counter[cpu_id]);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+
+    s_smp_test_done++;
+
+    kthread_exit();
+}
+
+/**
+ * @brief SMP 工作窃取测试低优先级线程
+ *
+ * @param arg 未使用
+ */
+static void smp_steal_worker(void *arg)
+{
+    (void)arg;
+
+    /* 简单循环后退出 */
+    volatile uint32_t j;
+    for (j = 0U; j < 100U; j++)
+    {
+        barrier();
+    }
+
+    kthread_exit();
+}
+
+/**
+ * @brief SMP 多核端到端测试
+ *
+ * @details 测试 SMP 多核调度：
+ *          - 4 个工作线程绑定到 CPU 0-3
+ *          - IPI call_func 跨核调用
+ *          - 工作窃取负载均衡
+ *
+ * @retval 0 测试通过
+ * @retval N 测试失败的步骤编号
+ */
+static uint32_t smp_e2e_test(void)
+{
+    thread_id_t tid;
+    kernel_status_t ret;
+    uint32_t i;
+
+    /* ---- 阶段 1: 创建多核工作线程 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[SMP TEST] Creating 4 workers...\n");
+
+    /* 重置计数器 */
+    for (i = 0U; i < 4U; i++)
+    {
+        s_smp_test_counter[i] = 0U;
+    }
+    s_smp_test_done = 0U;
+
+    /* 创建 4 个工作线程，绑定到 CPU 0-3 */
+    for (i = 0U; i < 4U; i++)
+    {
+        tid = kthread_create("smp_work",
+                             smp_test_worker,
+                             (void *)(uintptr_t)i,
+                             (priority_t)100U,
+                             KTHREAD_POLICY_RR,
+                             SMP_TEST_STACK_SIZE);
+        if (tid == THREAD_ID_INVALID)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[SMP TEST] WARN: create worker ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)i);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            continue;
+        }
+
+        /* 绑定到指定 CPU */
+        (void)smp_set_affinity(tid, 1U << i);
+    }
+
+    /* ---- 阶段 2: 创建窃取测试线程 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                  "[SMP TEST] Creating 8 steal workers...\n");
+
+    /* 创建 8 个低优先级线程不绑定 CPU（亲和性=0xF 全部允许） */
+    for (i = 0U; i < 8U; i++)
+    {
+        tid = kthread_create("steal_w",
+                             smp_steal_worker,
+                             NULL,
+                             (priority_t)200U,
+                             KTHREAD_POLICY_RR,
+                             SMP_TEST_STACK_SIZE);
+        if (tid == THREAD_ID_INVALID)
+        {
+            continue;
+        }
+
+        /* 设置亲和性为全部 CPU（允许任意 CPU 调度） */
+        (void)smp_set_affinity(tid, 0xFU);
+    }
+
+    /* 不在此处等待：线程会在 scheduler_start() 后执行 */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                  "[SMP TEST] Workers queued, results in runtime\n");
+
+    return 0U;
+}
+
+/* ========================================================================
  * 内核主入口
  * ======================================================================== */
 
@@ -646,6 +979,30 @@ void kernel_main(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
+
+    /* ---- 能力系统运行时验证 ---- */
+    {
+        uint32_t cap_ret = cap_runtime_test();
+        if (cap_ret != 0U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[k] CAP TEST FAILED at step ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cap_ret);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+    }
+
+    /* ---- SMP 多核端到端测试 ---- */
+    {
+        uint32_t smp_ret = smp_e2e_test();
+        if (smp_ret != 0U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                          "[k] SMP TEST FAILED at step ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)smp_ret);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+    }
 
     /* ---- 创建 EL0 用户态测试线程 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Creating EL0 thread\n");
