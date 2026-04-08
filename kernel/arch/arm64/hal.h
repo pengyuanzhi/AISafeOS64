@@ -404,4 +404,57 @@ void hal_tlb_invalidate_asid(uint64_t asid);
  */
 void hal_wfe(void);
 
+/* ========== 异常返回寄存器接口 ========== */
+
+/**
+ * @brief 读取 ELR_EL1（异常链接寄存器）
+ * @details 保存异常返回地址，eret 时恢复到 PC
+ * @return ELR_EL1 当前值
+ */
+static inline uint64_t hal_read_elr(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, elr_el1" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 写入 ELR_EL1（异常链接寄存器）
+ * @param val 要写入的值
+ */
+static inline void hal_write_elr(uint64_t val)
+{
+    __asm__ volatile("msr elr_el1, %0" :: "r"(val));
+}
+
+/**
+ * @brief 读取 SPSR_EL1（保存的程序状态寄存器）
+ * @details 保存异常发生时的 PSTATE，eret 时恢复
+ * @return SPSR_EL1 当前值
+ */
+static inline uint64_t hal_read_spsr(void)
+{
+    uint64_t val;
+    __asm__ volatile("mrs %0, spsr_el1" : "=r"(val));
+    return val;
+}
+
+/**
+ * @brief 写入 SPSR_EL1（保存的程序状态寄存器）
+ * @param val 要写入的值
+ */
+static inline void hal_write_spsr(uint64_t val)
+{
+    __asm__ volatile("msr spsr_el1, %0" :: "r"(val));
+}
+
+/**
+ * @brief 指令同步屏障 (ISB)
+ * @details 刷新流水线，确保之前所有上下文改变操作完成
+ */
+static inline void hal_isb(void)
+{
+    __asm__ volatile("isb");
+}
+
 #endif /* HAL_H */
