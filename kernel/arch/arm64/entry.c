@@ -673,8 +673,8 @@ static uint32_t driver_e2e_test(void)
         return 4U;
     }
 
-    /* 步骤 5: 打开设备 (dev_id=1) */
-    ret = device_open(1U);
+    /* 步骤 5: 打开设备 (dev_id=3, 因为 1=pl011, 2=virtio-blk, 3=mock-uart) */
+    ret = device_open(3U);
     if (ret != KERNEL_OK)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 5 (open)\n");
@@ -684,7 +684,7 @@ static uint32_t driver_e2e_test(void)
     /* 步骤 6: 写入测试数据 */
     test_buf[0U] = 'H'; test_buf[1U] = 'E'; test_buf[2U] = 'L';
     test_buf[3U] = 'L'; test_buf[4U] = 'O';
-    io_ret = device_write(1U, test_buf, 5U, 0U);
+    io_ret = device_write(3U, test_buf, 5U, 0U);
     if (io_ret != 5)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 6 (write)\n");
@@ -693,7 +693,7 @@ static uint32_t driver_e2e_test(void)
 
     /* 步骤 7: 读回数据（回环） */
     for (i = 0U; i < sizeof(test_buf); i++) { test_buf[i] = 0U; }
-    io_ret = device_read(1U, test_buf, 8U, 0U);
+    io_ret = device_read(3U, test_buf, 8U, 0U);
     if (io_ret != 5)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 7 (read len)\n");
@@ -707,7 +707,7 @@ static uint32_t driver_e2e_test(void)
 
     /* 步骤 8: ioctl 测试 */
     ioctl_val = 0U;
-    ret = device_ioctl(1U, 1U, &ioctl_val);
+    ret = device_ioctl(3U, 1U, &ioctl_val);
     if (ret != KERNEL_OK)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 8 (ioctl)\n");
@@ -735,14 +735,21 @@ static uint32_t driver_e2e_test(void)
     uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
-    if ((stats.total_drivers != 1U) || (stats.total_devices != 1U) || (stats.probe_count != 1U))
+    if ((stats.total_drivers != 3U) || (stats.total_devices != 3U) || (stats.probe_count < 2U))
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 10 (stats)\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 10 (stats: drv=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " dev=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " probe=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, ')');
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
         return 10U;
     }
 
     /* 步骤 11: 关闭设备 */
-    ret = device_close(1U);
+    ret = device_close(3U);
     if (ret != KERNEL_OK)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 11 (close)\n");
@@ -750,7 +757,7 @@ static uint32_t driver_e2e_test(void)
     }
 
     /* 步骤 12: 注销设备（先 remove） */
-    ret = device_unregister(1U);
+    ret = device_unregister(3U);
     if (ret != KERNEL_OK)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 12 (dev unreg)\n");
@@ -1767,6 +1774,28 @@ void kernel_main(void)
     if (ret != KERNEL_OK)
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: driver subsys fail\n");
+    }
+
+    /* ---- 注册内建驱动 ---- */
+    {
+        extern kernel_status_t drv_uart_register(void);
+        extern kernel_status_t drv_virtio_blk_register(void);
+
+        (void)drv_uart_register();
+        (void)drv_virtio_blk_register();
+
+        /* 注册 QEMU 平台设备 */
+        /* PL011 UART @ 0x09000000, IRQ 33 */
+        (void)device_register("pl011", DRIVER_TYPE_UART,
+                              (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
+
+        /* VirtIO Block MMIO @ 0x0A000000, IRQ 48
+         * (QEMU virt 默认 virtio-mmio 基地址) */
+        (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
+                              (paddr_t)0x0A000000ULL, 0x200ULL, 48U, NULL);
+
+        /* 执行设备探测 */
+        (void)device_probe_all();
     }
     ret = smp_init();
     if (ret != KERNEL_OK)

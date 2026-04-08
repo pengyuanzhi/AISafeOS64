@@ -25,6 +25,7 @@
 #include <kernel/config.h>
 #include <kernel/list.h>
 #include <kernel/spinlock.h>
+#include <hal.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -427,6 +428,7 @@ kernel_status_t device_probe_all(void)
         drv = find_driver_for_device(dev);
         if (drv == NULL)
         {
+            /* 无匹配驱动，跳过 */
             continue;
         }
 
@@ -435,7 +437,7 @@ kernel_status_t device_probe_all(void)
         {
             kernel_status_t ret;
 
-            ret = drv->ops->probe(dev->priv);
+            ret = drv->ops->probe((void *)dev);
             if (ret == KERNEL_OK)
             {
                 /* probe 成功：绑定设备到驱动 */

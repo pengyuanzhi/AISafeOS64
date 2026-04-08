@@ -103,6 +103,8 @@ set(KERNEL_VERIFY_SOURCES
 set(KERNEL_DRIVER_SOURCES
     driver/driver_core.c
     driver/driver_module.c
+    driver/drv_uart.c
+    driver/drv_virtio_blk.c
 )
 
 # ==============================================================================
