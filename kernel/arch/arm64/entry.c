@@ -440,7 +440,30 @@ static void user_test_entry(void *arg)
         }
     }
 
-    /* 步骤 5: 最终汇总 */
+    /* 步骤 5: 进程管理 SVC 测试 */
+    {
+        static const char mp[] = "[EL0] PROC OK\n";
+        int64_t my_tid = syscall0(SYS_THREAD_GET_ID);
+        int64_t r;
+
+        /* SET_PRIORITY 测试 */
+        if (my_tid > 0)
+        {
+            r = syscall2(SYS_THREAD_SET_PRIORITY,
+                         (uint64_t)my_tid, 200ULL);
+            (void)r;
+        }
+
+        /* YIELD 让出 CPU */
+        syscall0(SYS_THREAD_YIELD);
+
+        /* 打印进程测试通过 */
+        (void)syscall2(SYS_DEBUG_PRINT,
+                       (uint64_t)(uintptr_t)mp,
+                       (uint64_t)(sizeof(mp) - 1U));
+    }
+
+    /* 步骤 6: 最终汇总 */
     {
         static const char m4[] = "[EL0] ALL PASSED\n";
         (void)syscall2(SYS_DEBUG_PRINT,

@@ -75,12 +75,29 @@ static void dispatch_thread(syscall_frame_t *frame)
     {
         case SYS_THREAD_CREATE:
         {
-            /* x0=entry, x1=stack, x2=priority */
-            /* TODO: 需要从调度器获取 thread_create API */
-            (void)frame->x0;
-            (void)frame->x1;
-            (void)frame->x2;
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            /* x0=entry 函数地址, x1=arg, x2=priority */
+            kthread_entry_t entry = (kthread_entry_t)(uintptr_t)frame->x0;
+            void *arg = (void *)(uintptr_t)frame->x1;
+            priority_t prio = (priority_t)frame->x2;
+            thread_id_t tid;
+
+            if (entry == NULL)
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EINVAL);
+                break;
+            }
+
+            tid = kthread_create("user_thr", entry, arg, prio,
+                                   KTHREAD_POLICY_RR,
+                                   CONFIG_STACK_SIZE_DEFAULT);
+            if (tid != THREAD_ID_INVALID)
+            {
+                frame->x0 = (uint64_t)tid;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ENOMEM);
+            }
             break;
         }
 
@@ -95,11 +112,36 @@ static void dispatch_thread(syscall_frame_t *frame)
         }
 
         case SYS_THREAD_SUSPEND:
+        {
+            /* 内核 API 返回负错误码，直接传递 */
+            thread_id_t tid = (thread_id_t)frame->x0;
+            kernel_status_t ret = kthread_suspend(tid);
+            frame->x0 = (uint64_t)(int64_t)ret;
+            break;
+        }
+
         case SYS_THREAD_RESUME:
+        {
+            thread_id_t tid = (thread_id_t)frame->x0;
+            kernel_status_t ret = kthread_resume(tid);
+            frame->x0 = (uint64_t)(int64_t)ret;
+            break;
+        }
+
         case SYS_THREAD_SET_PRIORITY:
+        {
+            thread_id_t tid = (thread_id_t)frame->x0;
+            priority_t prio = (priority_t)frame->x1;
+            kernel_status_t ret = kthread_set_priority(tid, prio);
+            frame->x0 = (uint64_t)(int64_t)ret;
+            break;
+        }
+
         case SYS_THREAD_SET_AFFINITY:
         {
-            /* TODO: 需要线程管理 API */
+            /* x0=tid, x1=affinity_mask */
+            (void)frame->x0;
+            (void)frame->x1;
             frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
             break;
         }
