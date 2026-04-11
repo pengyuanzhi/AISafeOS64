@@ -1,5 +1,55 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-11 C 库架构决策变更：标准 musl + 适配层 ✅ (20:02)
+
+### 架构决策
+
+**❌ 废弃方案**: 手写 musl libc 子集（lib/musl/ 3,786 行）
+**✅ 新方案**: 标准 musl 上游代码 + 最小适配层（参考 seL4/musllibc）
+
+### 技术依据
+- seL4 的 musllibc 分支只创建 `arch/<arch>_sel4/` 适配目录（~6 个文件）
+- 核心机制: `syscall_arch.h` 通过 `__sysinfo` 函数指针路由所有系统调用
+- musl 的 `__syscall*()` 系列函数全部重定向到 `__sysinfo` 函数指针
+- 适配层实现 `__sysinfo` 分发器: Linux syscall 号 → seL4 IPC 调用
+- **musl 源码零修改**，只需要架构覆盖文件
+
+### AISafeOS64 适配架构
+```
+lib/musl_upstream/    ← 标准 musl 1.2.x (git submodule，不修改)
+lib/musl_aisafe/      ← AISafeOS64 适配层（我们写的）
+  arch/aarch64_aisafe/
+    syscall_arch.h    ← __syscall* → __sysinfo 路由
+    atomic_arch.h / crt_arch.h / pthread_arch.h / reloc.h
+  src/
+    syscall_dispatch.c  ← __sysinfo 分发器: Linux→AISafeOS64 翻译
+    musl_safety.c       ← 功能安全改造包装
+lib/musl_legacy/      ← 旧手写代码（参考，逐步废弃）
+```
+
+### seL4 syscall_arch.h 关键代码
+```c
+extern unsigned long __sysinfo;
+#define CALL_SYSINFO(n, ...) ((long(*)(long,...))__sysinfo)(n, ##__VA_ARGS__)
+static inline long __syscall0(long n) { return CALL_SYSINFO(n); }
+static inline long __syscall1(long n, long a1) { return CALL_SYSINFO(n, a1); }
+// ... __syscall2 ~ __syscall6
+```
+
+### 开发阶段
+- Phase 0: musl 上游集成 + aarch64_aisafe 适配 + syscall_dispatch
+- Phase 1: 核心 POSIX 验证 (string/stdio/stdlib/unistd/fcntl)
+- Phase 2: 功能安全改造 (参数验证/确定性分配/审计/MISRA 包装)
+- Phase 3: 服务迁移 (旧 lib/musl → 标准 musl)
+- Phase 4: 安全认证 (MISRA 合规/ISO 26262 偏差记录)
+
+### AGENTS.md 更新
+- 已更新 "强制开发规则：用户态 C 库" 部分
+- 旧 "AISafe-libc" 规则替换为 "标准 musl + AISafeOS64 适配层"
+- 旧手写代码移入 lib/musl_legacy/ 作为参考
+
+---
+
 ## 2026-04-11 AISafe-libc Phase 2 — POSIX 文件 I/O 完成 ✅ (19:55)
 
 **commit**: `493cb2d` feat(lib): AISafe-libc Phase 2 — POSIX 文件 I/O (fcntl/unistd/sys_stat)

@@ -210,3 +210,6 @@ ENV/
 *.pid.lock
 .npm
 .eslintcache
+lib/musl_upstream/
+build_arm64/
+build_host/

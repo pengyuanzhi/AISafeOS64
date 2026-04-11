@@ -303,162 +303,213 @@ void hal_set_asid(uint16_t asid);  /* 替代直接操作 TTBR 寄存器 */
 5. 检查 MISRA C:2012 合规性
 ```
 
-## 强制开发规则：用户态 musl C 库（AISafe-libc）
+## 强制开发规则：用户态 C 库（标准 musl + AISafeOS64 适配层）
 
-**所有用户态服务必须通过 AISafe-libc（基于 musl libc 接口子集）进行系统调用，禁止直接使用 syscall.h 桩函数。**
+**所有用户态服务必须通过 C 库进行系统调用，禁止直接使用底层 syscall 桩函数。**
 
-### 为什么需要 musl libc 子集
-- 用户态服务（fs/proc/mem/net/security/vmm/path/init/dev）目前直接使用 syscall.h 底层桩函数
-- 引入 C 库层可提供 POSIX 兼容接口（open/read/write/close/malloc/printf 等）
-- 便于后续移植现有软件和库
-- 符合标准微内核架构：内核→libc→用户态服务
+### 设计原则（参考 seL4/musllibc 方案）
 
-### AISafe-libc 架构
+**❌ 错误做法**: 自己手写 musl 子集 — 不标准、不可维护、无法通过安全认证
+**✅ 正确做法**: 使用标准 musl 上游代码 + 最小适配层（arch + syscall shim）
+
+seL4 项目的 musllibc 适配证明了此方案的可行性：
+- 保留标准 musl 源码不动（MIT 许可证，安全认证友好）
+- 只创建 `arch/<arch>_aisafe/` 适配目录（约 6 个文件）
+- 核心适配文件 `syscall_arch.h` 通过 `__sysinfo` 函数指针路由所有系统调用
+- 实现 `__sysinfo` 分发器：Linux syscall 号 → AISafeOS64 SVC/IPC 翻译
+
+### 架构
 
 ```
-┌─────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────┐
 │  用户态服务 (fs/proc/mem/net/security/vmm/...)       │
-├─────────────────────────────────────────────────────┤
-│  AISafe-libc (musl libc 子集)                       │  ← POSIX 接口层
-│    ├── stdio: printf/sprintf/snputs/puts             │
-│    ├── stdlib: malloc/free/abort/exit/atexit         │
-│    ├── string: memcpy/memset/strcmp/strlen/...       │
-│    ├── unistd: read/write/close/lseek/getpid/...     │
-│    ├── fcntl: open/openat/fcntl                      │
-│    ├── errno: __errno_location / errno               │
-│    ├── signal: kill/raise/signal                     │
-│    ├── time: clock_gettime/nanosleep                 │
-│    └── sys/: mmap/munmap/mprotect/...                │
-├─────────────────────────────────────────────────────┤
-│  libkernel (syscall 桩函数)                           │  ← 现有 syscall.c
-├─────────────────────────────────────────────────────┤
-│  内核 (SVC 系统调用分发)                              │
-└─────────────────────────────────────────────────────┘
+│    #include <stdio.h>  #include <string.h>  ...       │
+├──────────────────────────────────────────────────────┤
+│  标准 musl libc (upstream, 不修改源码)               │
+│    string / stdio / stdlib / time / signal / math ... │
+│    完整 POSIX C 库功能                                │
+├──────────────────────────────────────────────────────┤
+│  AISafeOS64 musl 适配层 (lib/musl_aisafe/)           │
+│    ├── arch/aarch64_aisafe/syscall_arch.h  ← 核心适配  │
+│    │     __syscall*() → __sysinfo 函数指针路由        │
+│    ├── arch/aarch64_aisafe/atomic_arch.h              │
+│    ├── arch/aarch64_aisafe/crt_arch.h                 │
+│    ├── arch/aarch64_aisafe/pthread_arch.h             │
+│    ├── src/syscall_dispatch.c  __sysinfo 分发器        │
+│    │     Linux syscall 号 → AISafeOS64 SVC 翻译       │
+│    └── src/musl_safety.c  功能安全改造包装              │
+│         参数验证 / 确定性 / 审计日志 / MISRA 包装       │
+├──────────────────────────────────────────────────────┤
+│  内核 (AISafeOS64 SVC 系统调用分发)                   │
+└──────────────────────────────────────────────────────┘
 ```
 
-### AISafe-libc 目录结构
+### 目录结构
 
 ```
 lib/
-├── musl/                     # musl libc 子集
-│   ├── include/              # C 库公共头文件
-│   │   ├── stdio.h           # printf/sprintf/...
-│   │   ├── stdlib.h          # malloc/free/exit/...
-│   │   ├── string.h          # memcpy/memset/strcmp/...
-│   │   ├── unistd.h          # read/write/close/...
-│   │   ├── fcntl.h           # open/openat/...
-│   │   ├── errno.h           # errno / __errno_location
-│   │   ├── signal.h          # signal/kill/...
-│   │   ├── time.h            # clock_gettime/...
-│   │   ├── sys/              # 系统调用相关头文件
-│   │   │   ├── mmap.h        # mmap/munmap/mprotect
-│   │   │   └── types.h       # size_t/ssize_t/...
-│   │   └── aisafe/           # AISafe 扩展
-│   │       └── syscall.h     # 与内核 syscall.h 对应
-│   ├── src/                  # C 库实现
-│   │   ├── stdio/            # printf.c, sprintf.c, ...
-│   │   ├── stdlib/           # malloc.c, exit.c, ...
-│   │   ├── string/           # memcpy.c, memset.c, ...
-│   │   ├── unistd/           # read.c, write.c, ...
-│   │   ├── fcntl/            # open.c, ...
-│   │   ├── errno/            # errno.c
-│   │   ├── signal/           # signal.c
-│   │   ├── time/             # clock_gettime.c
-│   │   └── internal/         # 内部支持函数
-│   │       ├── syscall_dispatch.c  # 统一系统调用入口
-│   │       └── locking.c           # 内部锁支持
-│   ├── arch/                 # 架构相关
-│   │   └── aarch64/          # ARM64 特定实现
-│   │       ├── syscall.S     # SVC 入口（汇编）
-│   │       └── setjmp.S      # setjmp/longjmp
+├── musl_upstream/            # 标准 musl 1.2.x (git submodule 或 vendor)
+│   ├── src/                  # musl 标准实现（不修改）
+│   ├── include/              # musl 标准头文件（不修改）
+│   ├── arch/aarch64/         # 标准 ARM64 支持（不修改）
+│   └── ...                   # musl 完整源码树
+│
+├── musl_aisafe/              # AISafeOS64 musl 适配层（我们写的）
+│   ├── arch/aarch64_aisafe/  # musl 架构适配（覆盖 musl arch/）
+│   │   ├── syscall_arch.h    # ← 核心: __syscall* → __sysinfo 路由
+│   │   ├── atomic_arch.h     # 原子操作适配
+│   │   ├── crt_arch.h        # 启动代码适配
+│   │   ├── pthread_arch.h    # 线程适配
+│   │   ├── reloc.h           # 重定位支持
+│   │   └── bits/             # 类型定义
+│   ├── src/                  # 适配实现
+│   │   ├── syscall_dispatch.c   # __sysinfo 分发器
+│   │   │     Linux syscall → AISafeOS64 SVC 翻译表
+│   │   ├── musl_safety.c        # 功能安全改造包装
+│   │   │     参数验证 / 确定性 / 审计 / MISRA 包装
+│   │   ├── tls.c                # Thread-local storage 适配
+│   │   └── boot.c               # 启动初始化
 │   └── CMakeLists.txt        # 构建配置
-├── libkernel/                # 现有内核系统调用桩（保持不变）
+│
+├── musl_legacy/              # 旧手写代码（仅保留参考，逐步废弃）
+│   └── (现有 lib/musl/ 内容移入此处作为过渡)
+│
+├── libkernel/                # 内核系统调用桩（保持不变）
 │   └── syscall.c
-└── kernel_string.c           # 现有内核字符串库（保持不变）
+└── kernel_string.c           # 内核字符串库（保持不变）
 ```
 
-### 开发优先级和阶段
+### syscall_arch.h 核心机制
 
-**Phase 1: 基础 C 库核心（最高优先级）**
-- [ ] `<string.h>`: memcpy, memset, memmove, memcmp, strlen, strcmp, strncmp, strcpy, strncpy, strcat, strncat, strchr, strrchr, strstr
-- [ ] `<stdlib.h>`: abort, exit, atexit, atoi, atol, strtol, strtoul, malloc, free, calloc, realloc
-- [ ] `<stdio.h>`: printf, sprintf, snprintf, puts, putchar
-- [ ] `<errno.h>`: errno 变量, __errno_location()
-- [ ] `<aisafe/syscall.h>`: 统一系统调用入口，映射到内核 syscall 号
+参考 seL4 的做法，musl 的所有系统调用通过 `__sysinfo` 函数指针分发：
 
-**Phase 2: POSIX 文件 I/O（高优先级）**
-- [ ] `<unistd.h>`: read, write, close, lseek, getpid, getppid, fork, exec, _exit
-- [ ] `<fcntl.h>`: open, openat, fcntl, creat
-- [ ] `<sys/stat.h>`: stat, fstat, lstat, mkdir
+```c
+/* arch/aarch64_aisafe/syscall_arch.h */
+#define __SYSCALL_LL_E(x) (x)
+#define __SYSCALL_LL_O(x) (x)
 
-**Phase 3: 系统和进程接口（中优先级）**
-- [ ] `<signal.h>`: signal, kill, raise, sigaction
-- [ ] `<time.h>`: clock_gettime, nanosleep, time
-- [ ] `<sys/mman.h>`: mmap, munmap, mprotect
-- [ ] `<sys/wait.h>`: waitpid, wait
+extern unsigned long __sysinfo;
 
-**Phase 4: 高级功能（低优先级）**
-- [ ] `<math.h>`: 基础数学函数
-- [ ] `<setjmp.h>`: setjmp, longjmp
-- [ ] `<assert.h>`: assert 宏
-- [ ] `<ctype.h>`: isalpha, isdigit, ...
+/* 所有 __syscall* 通过 __sysinfo 函数指针路由 */
+#define CALL_SYSINFO(n, ...) ((long(*)(long,...))__sysinfo)(n, ##__VA_ARGS__)
 
-### 代码规范（AISafe-libc 专用）
-- 遵循 MISRA C:2012 基本规则（用户态可适度放宽）
-- 4 空格缩进，Allman 括号风格
-- 中文 Doxygen 注释（公共 API）
-- 所有函数通过 `aisafe_syscall()` 统一入口调用内核
-- 线程安全：errno 使用 thread-local 或 per-thread 存储
-- 内存分配器：简单 bump allocator（Phase 1）→ slab allocator（Phase 2）
+static inline long __syscall0(long n) { return CALL_SYSINFO(n); }
+static inline long __syscall1(long n, long a1) { return CALL_SYSINFO(n, a1); }
+// ... __syscall2 ~ __syscall6
+```
+
+```c
+/* src/syscall_dispatch.c */
+
+/* Linux syscall 号 → AISafeOS64 SVC 翻译表 */
+static long aisafe_syscall_dispatch(long nr, ...)
+{
+    switch (nr) {
+        case SYS_linux_read:     → SYS_MSG_SEND + IPC → FS 服务
+        case SYS_linux_write:    → SYS_DEBUG_PRINT 或 IPC → FS 服务
+        case SYS_linux_exit:     → SYS_THREAD_EXIT
+        case SYS_linux_getpid:   → SYS_THREAD_GET_ID
+        case SYS_linux_mmap:     → SYS_VM_MAP
+        case SYS_linux_munmap:   → SYS_VM_UNMAP
+        case SYS_linux_ioctl:    → IPC → 驱动服务
+        // ... 完整映射表
+        default:                 → return -ENOSYS;
+    }
+}
+
+/* 设置 __sysinfo 函数指针（在 C 库初始化时调用） */
+unsigned long __sysinfo = (unsigned long)aisafe_syscall_dispatch;
+```
+
+### 功能安全改造（musl_safety.c）
+
+标准 musl 不满足 MISRA C:2012 / ISO 26262 要求，通过包装层改造：
+
+1. **参数验证**: 每个 syscall 路径添加参数边界检查
+2. **确定性行为**: 替换 musl 中不确定行为（malloc 使用确定性分配器）
+3. **错误路径覆盖**: 补齐 musl 未覆盖的边界条件
+4. **审计日志**: 关键 syscall 路径添加安全审计点
+5. **MISRA 包装头**: 对 musl 公共 API 提供符合 MISRA 的薄包装
+6. **递归消除**: musl 内部使用递归的地方（如 regex），替换为迭代
+
+### 开发阶段
+
+**Phase 0: musl 上游集成（当前阶段）**
+- [ ] 获取 musl 1.2.x 源码（git submodule `lib/musl_upstream/`）
+- [ ] 创建 `lib/musl_aisafe/arch/aarch64_aisafe/` 适配目录（6 个文件）
+- [ ] 实现 `syscall_arch.h` — __sysinfo 函数指针路由
+- [ ] 实现 `syscall_dispatch.c` — Linux→AISafeOS64 syscall 号翻译
+- [ ] 实现 `crt_arch.h` — 启动代码适配
+- [ ] 交叉编译 musl 静态库 (`libmusl.a`)
+- [ ] 验证: 简单 hello world 程序通过 musl + SVC 在 QEMU 中运行
+
+**Phase 1: 核心 POSIX 接口验证**
+- [ ] string/stdio/stdlib 通过 musl 标准实现可用
+- [ ] unistd/fcntl/stat 通过 syscall 分发器工作
+- [ ] errno/thread-local 正确工作
+- [ ] 宿主机单元测试通过（已有的 247 个测试迁移到 musl upstream）
+
+**Phase 2: 功能安全改造**
+- [ ] musl_safety.c 参数验证包装
+- [ ] 确定性内存分配器替换 musl malloc
+- [ ] 审计日志集成
+- [ ] MISRA 包装头文件
+- [ ] 递归消除
+
+**Phase 3: 服务迁移**
+- [ ] 所有用户态服务从旧 `lib/musl/` 迁移到标准 musl
+- [ ] 移除 `lib/musl_legacy/`
+- [ ] 完整 POSIX 子集验证
+
+**Phase 4: 安全认证**
+- [ ] musl 适配层 MISRA C:2012 合规
+- [ ] musl 本身安全认证偏差记录
+- [ ] ISO 26262 ASIL-D 软件组件认证
+
+### 旧手写代码处理（lib/musl_legacy/）
+
+现有的 `lib/musl/` 手写代码（Phase 1+2, ~3,786 行, 247 测试全通过）有价值：
+- **保留为参考**: 移入 `lib/musl_legacy/`，标记为 deprecated
+- **测试可复用**: 宿主机测试用例继续使用，验证 musl upstream 行为一致
+- **适配层参考**: syscall 号映射逻辑可参考旧 `aisafe/syscall.h`
+- **逐步废弃**: Phase 3 完成后可删除
 
 ### 给 Claude Code 的 Prompt 模板
 
 ```
-使用 TDD 方法开发 AISafe-libc <模块名>：
+开发 AISafeOS64 musl 适配层 <模块名>：
 
 ## 背景
-AISafeOS64 是 64 位微内核 RTOS，用户态服务需要 C 库支持。
-当前已有 libkernel/syscall.c 提供底层 SVC 桩函数。
+AISafeOS64 是 64 位微内核 RTOS，采用标准 musl libc + 最小适配层方案（参考 seL4/musllibc）。
+
+## 架构
+- 标准 musl 源码在 lib/musl_upstream/（不修改）
+- 适配层在 lib/musl_aisafe/（我们写的）
+- 核心: syscall_arch.h 通过 __sysinfo 函数指针路由
+- 分发器: syscall_dispatch.c 做 Linux syscall → AISafeOS64 SVC 翻译
 
 ## 系统调用映射
-- 内核调用号定义在 include/kernel/syscall.h
-- 桩函数在 lib/libkernel/syscall.c
-- libc 通过 libkernel 的桩函数与内核交互
+- AISafeOS64 调用号定义在 include/kernel/syscall.h
+- Linux 标准调用号在 musl include/bits/syscall.h
+- 映射策略:
+  - 直接映射: getpid→SYS_THREAD_GET_ID, _exit→SYS_THREAD_EXIT
+  - IPC 路由: read/write/open→IPC→FS 服务
+  - ENOSYS 桩: 暂未实现的功能
 
-## Step 1: RED - 编写测试
-- 在 tests/ 下创建 test_musl_<module>.c
-- 编写测试覆盖：<正常路径、边界条件、错误处理>
-- 编译运行确认测试失败
+## 任务
+<具体任务描述>
 
-## Step 2: GREEN - 最小实现
-- 在 lib/musl/src/<module>/ 下编写实现
-- 只实现让测试通过的最小代码
-- 编译运行确认测试通过
-
-## Step 3: REFACTOR - 重构
-- 在测试保护下优化代码
-- 确保代码风格一致
-- 确认所有测试仍然通过
-
-代码规范: 4空格缩进, Allman括号, 中文注释
-构建系统: CMake
-测试框架: Unity 风格 TEST_ASSERT_*
+## 代码规范
+- 适配层: MISRA C:2012, 4空格缩进, Allman括号, 中文注释
+- 不修改 musl upstream 源码
+- 所有适配通过 arch/ 和 src/ 覆盖机制实现
 ```
 
 ### 用户态服务迁移规则
 
-**新代码**：所有新的用户态代码必须使用 AISafe-libc 接口（`#include <stdio.h>` 等），禁止直接 `#include <kernel/syscall.h>`。
+**新代码**：使用标准 musl 头文件（`#include <stdio.h>` 等），编译时链接 musl 静态库。
 
-**现有代码**：逐步迁移，不强制一次性重构。迁移优先级：
-1. init 服务（最简单，依赖最少）
-2. path 服务（功能单一）
-3. mem 服务
-4. proc 服务
-5. fs 服务
-6. net 服务
-7. security 服务
-8. vmm 服务
-9. dev 服务
+**现有代码**：Phase 3 统一迁移。迁移期间旧代码可继续使用 `lib/musl_legacy/`。
 
 ## 注意事项
 
