@@ -1,5 +1,51 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-11 AISafe-libc Phase 2 — POSIX 文件 I/O 完成 ✅ (19:55)
+
+**commit**: `493cb2d` feat(lib): AISafe-libc Phase 2 — POSIX 文件 I/O (fcntl/unistd/sys_stat)
+
+### 新增头文件 (3 个, 470 行)
+- lib/musl/include/fcntl.h — O_* flags, mode_t, permission bits, F_* commands
+- lib/musl/include/unistd.h — STD*_FILENO, SEEK_*, read/write/close/lseek/getpid/_exit/sleep/pipe/dup/isatty
+- lib/musl/include/sys/stat.h — struct stat, stat/fstat/lstat/mkdir/chmod, S_IS* type macros
+
+### 新增源文件 (15 个)
+**fcntl/ (4)**: open.c (IPC→FS), openat.c, creat.c, fcntl.c
+**unistd/ (11)**: getpid.c (→SYS_THREAD_GET_ID), write.c (STDOUT→SYS_DEBUG_PRINT), _exit.c (→SYS_THREAD_EXIT), read/close/lseek/pipe/dup/sleep/usleep/isatty/getppid/pathconf
+**sys_stat/ (3)**: stat.c (fstat 对 STDIN 返回 S_IFCHR), mkdir.c, chmod.c
+**internal/ (1)**: syscall_host.c — 宿主机测试用 syscall 桩函数模拟
+
+### 更新
+- aisafe/syscall.h: 补全所有 33 个内核系统调用号 + syscall5 声明 + stdint.h
+- sys/types.h: 补充 dev_t/ino_t/nlink_t/time_t/blksize_t/blkcnt_t/mode_t
+
+### 代码量
+- Phase 2 新增: 1,308 行 (头文件 470 + 源文件 537 + 测试 210 + CMake 91)
+- Phase 1+2 总计: ~5,295 行
+
+### 测试结果
+| 测试文件 | 通过 | 失败 | 总计 |
+|----------|------|------|------|
+| test_musl_string | 68 | 0 | 68 |
+| test_musl_stdio | 86 | 0 | 86 |
+| test_musl_stdlib | 39 | 0 | 39 |
+| test_musl_posix | 54 | 0 | 54 |
+| **合计** | **247** | **0** | **247** |
+
+### 实现策略
+1. **直接映射内核**: getpid→SYS_THREAD_GET_ID, _exit→SYS_THREAD_EXIT, write(STDOUT)→SYS_DEBUG_PRINT
+2. **ENOSYS 桩**: fork/execve/pipe/dup/open/read/close/lseek/stat/mkdir（等待 FS IPC 对接）
+3. **fstat 特殊**: fd 0-2 返回 S_IFCHR 字符设备信息（终端模拟）
+4. **isatty**: fd 0-2 返回 1（串口终端）
+5. **宿主机测试**: 不链接 musl string 实现（避免覆盖 glibc memset 导致栈损坏）
+
+### 待完成
+- Phase 3: signal.h / time.h / sys/mman.h / sys/wait.h
+- FS IPC 对接: open/read/write/close/lseek/stat 通过 IPC 消息发送到 FS 服务
+- 用户态服务迁移: init → path → mem → proc → fs → net
+
+---
+
 ## 2026-04-11 AISafe-libc (musl libc 子集) Phase 1 完成 ✅ (18:40)
 
 **commit**: `6247987` feat(lib): AISafe-libc Phase 1 — musl libc 子集 string/stdio/stdlib/errno
