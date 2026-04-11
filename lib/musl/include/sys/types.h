@@ -50,6 +50,18 @@ typedef unsigned int         gid_t;
 typedef long                 off_t;
 
 /* ========================================================================
+ * 文件系统相关类型
+ * ======================================================================== */
+
+typedef unsigned long        dev_t;       /**< @brief 设备号 */
+typedef unsigned long        ino_t;       /**< @brief inode 号 */
+typedef unsigned int         nlink_t;     /**< @brief 硬链接数 */
+typedef long                 time_t;      /**< @brief 时间（秒） */
+typedef long                 blksize_t;   /**< @brief 块大小 */
+typedef long                 blkcnt_t;    /**< @brief 块计数 */
+typedef unsigned int         mode_t;      /**< @brief 文件权限/类型 */
+
+/* ========================================================================
  * NULL 定义
  * ======================================================================== */
 

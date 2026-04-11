@@ -191,6 +191,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_musl_stdlib PRIVATE ${MUSL_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
     target_compile_options(test_musl_stdlib PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_musl_stdlib COMMAND test_musl_stdlib)
+
+    # ==============================================================================
+    # AISafe-libc Phase 2: POSIX 文件 I/O 测试
+    # ==============================================================================
+
+    # test_musl_posix — 仅测试头文件常量和类型定义（不链接 musl 源文件）
+    add_executable(test_musl_posix tests/test_musl_posix.c)
+    target_include_directories(test_musl_posix PRIVATE ${MUSL_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_musl_posix PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_musl_posix COMMAND test_musl_posix)
 endif()
 
 # ==============================================================================
