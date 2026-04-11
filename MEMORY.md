@@ -1,5 +1,134 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-11 AISafe-libc (musl libc 子集) Phase 1 完成 ✅ (18:40)
+
+**commit**: `6247987` feat(lib): AISafe-libc Phase 1 — musl libc 子集 string/stdio/stdlib/errno
+
+### 架构
+```
+┌──────────────────────────────────────────┐
+│  用户态服务 (fs/proc/mem/net/security/...) │
+├──────────────────────────────────────────┤
+│  AISafe-libc (musl libc 子集)              │ ← 新增层
+│    string / stdio / stdlib / errno         │
+├──────────────────────────────────────────┤
+│  libkernel (syscall 桩函数)                 │ ← 现有
+├──────────────────────────────────────────┤
+│  内核 (SVC 分发)                            │
+└──────────────────────────────────────────┘
+```
+
+### 新增文件（36 个）
+
+**头文件 (7 个)**:
+- lib/musl/include/sys/types.h — size_t, ssize_t, pid_t, NULL
+- lib/musl/include/string.h — 15 个 string 函数声明
+- lib/musl/include/stdio.h — sprintf/snprintf/puts/putchar + vsnprintf
+- lib/musl/include/stdlib.h — atoi/strtol/strtoul/malloc/free/calloc/realloc/exit/abort/atexit
+- lib/musl/include/errno.h — errno 宏 + POSIX 错误码
+- lib/musl/include/aisafe/syscall.h — 系统调用号映射
+
+**源文件 (29 个)**:
+- string/ (15): memcpy, memset, memmove, memcmp, memchr, strlen, strcmp, strncmp, strcpy, strncpy, strcat, strncat, strchr, strrchr, strstr
+- stdio/ (5): vsnprintf (514行核心引擎), sprintf, snprintf, puts, putchar
+- stdlib/ (9): atoi, strtol, strtoul, malloc (bump allocator), calloc, realloc, free, exit, abort, atexit
+- errno/ (1): __errno_location()
+
+### 代码量
+- 头文件: 577 行
+- 源文件: 2,124 行
+- 测试文件: 1,286 行
+- 总计: ~3,987 行
+
+### 测试结果
+| 测试文件 | 通过 | 失败 | 总计 |
+|----------|------|------|------|
+| test_musl_string | 68 | 0 | 68 |
+| test_musl_stdio | 86 | 0 | 86 |
+| test_musl_stdlib | 39 | 0 | 39 |
+| **合计** | **193** | **0** | **193** |
+
+### 格式化引擎能力 (vsnprintf)
+- %d, %u, %ld, %lu, %x, %X, %p, %s, %c, %%
+- 宽度 (%10d), 精度 (%.5d), 左对齐 (%-10d), 前导零 (%08d)
+- 回调函数架构（支持缓冲区和 size 限制）
+
+### malloc 实现
+- Bump allocator: 64KB 静态内存池
+- 16 字节对齐
+- 不支持 free 回收（Phase 2 可升级为 slab allocator）
+
+### 修复的编译问题
+1. vsnprintf.c: 添加 `#include <stdarg.h>` 和 `#include <stdint.h>`
+2. sprintf.c / snprintf.c: 添加 `#include <stdarg.h>`
+3. stdio.h: 添加 vsnprintf 声明和 `#include <stdarg.h>`
+4. exit.c: 添加 x86_64 和通用平台条件编译（ARM64 汇编仅在 aarch64 编译）
+5. strtol.c / strtoul.c: 添加 `#include <limits.h>`
+6. test_musl_string.c: 修复 strncmp 测试用例（"Hello" > "Helium" 在第4字符）
+
+### CMakeLists.txt 集成
+- 新增 MUSL_STRING_SOURCES / MUSL_STDIO_SOURCES / MUSL_STDLIB_SOURCES / MUSL_ERRNO_SOURCES
+- 三个 musl 测试可执行文件，独立的编译选项（-Wno-error）
+
+### AGENTS.md 更新
+- 添加完整的 AISafe-libc 开发规则：架构设计、目录结构、4阶段优先级、TDD 模板、服务迁移规则
+
+### 后续计划
+- Phase 2: POSIX 文件 I/O (unistd.h / fcntl.h)
+- Phase 3: 系统接口 (signal.h / time.h / sys/mman.h)
+- Phase 4: 高级功能 (math.h / setjmp.h / assert.h)
+- 用户态服务逐步迁移到 AISafe-libc 接口
+
+---
+
+## 2026-04-09 MISRA C:2012 全量扫描 + VirtIO Block 驱动开发
+
+### MISRA C:2012 全量扫描 ✅ (08:26)
+
+**工具**: cppcheck 2.13.0 + MISRA addon
+**范围**: kernel/ 全部 41 个源文件
+
+**结果**:
+- MISRA 违规总数: **1,382** (42 条规则)
+- Top 3: Rule 15.5 (813, 多返回点), Rule 2.5 (129, 未使用宏), Rule 11.4 (98, 整数↔指针转换)
+- 按优先级: 🔴 类型安全 206 | 🟡 代码结构 931 | 🟢 风格 232
+- 完整报告: `build/misra_report.md`
+
+### VirtIO Block 驱动开发 🔧 (进行中)
+
+**文件**: `kernel/driver/drv_virtio_blk.c` (完整重写, ~900行)
+
+**已实现**:
+- ✅ VirtIO MMIO 寄存器操作
+- ✅ VirtQueue 环形缓冲区管理 (描述符链, available/used ring)
+- ✅ 设备扫描 (32 slot 自动发现)
+- ✅ Legacy (v1) PFN 模式支持
+- ✅ 同步块读写 (轮询模式)
+- ✅ 描述符链构建: hdr → data → resp
+- ✅ 容量读取 (8192 sectors = 4MB disk.img)
+- ✅ probe 成功 (probe=3)
+
+**未解决**:
+- ❌ virtqueue 提交请求后设备无响应 (poll timeout ret=110)
+- 根因: QEMU virt 平台 virtio-mmio Legacy 模式 QUEUE_PFN 设置后设备不处理请求
+- 可能原因: PFN 地址格式/对齐问题, 描述符链 DMA 地址
+
+**关键发现**:
+1. QEMU virt 平台 virtio-mmio 基地址: `0x0A000000`, 每个 slot 0x200
+2. virtio-blk-device 被分配到 **slot=31** (地址 0x0A003C00), 非固定 slot 0
+3. VirtIO MMIO version=1 (Legacy), 必须用 QUEUE_PFN(0x040) 而非 DESC_LOW/HIGH(0x080)
+4. 设备 device_id 寄存器有时序问题: probe 时为 0, 扫描时为 2
+
+**QEMU 地址映射 (from virt.c)**:
+```
+[VIRT_MMIO] = { 0x0A000000, 0x00000200 } * 32 slots
+[VIRT_MMIO] IRQ: SPI 16..47 (GIC 48..79)
+```
+
+text = ~55,800 bytes (54.5KB)
+
+---
+
 ## 2026-04-08 多服务并发 + 消息协议 + 服务注册表 ✅ (20:30)
 
 **commit**: `30db837` feat(el0): 多服务并发 — FS/Proc/Mem 三个 EL0 服务 + 服务注册表 + 消息协议 + Client 端到端验证
@@ -720,15 +849,42 @@ text = 22,470 bytes (21.9KB), bss = 93,680 bytes
 
 ### 待完成 ⏳
 
-- [ ] MISRA C:2012 静态分析全量扫描
-- [ ] 安全认证文档 (ISO 26262, IEC 61508)
-- [ ] virtio-blk 实际块读写
+**P0 — 功能缺陷（阻塞后续开发）**
+- [ ] virtio-blk Legacy MMIO virtqueue 调试 — 设备 probe 成功(容量读取OK)，但 virtqueue 提交请求后设备无响应(轮询超时 ret=110)
+  - 根因: QEMU virt 平台 virtio-mmio 是 Legacy(v1) 模式，使用 QUEUE_PFN(0x040) 而非 DESC_LOW/HIGH(0x080)
+  - 已实现 Legacy PFN 模式支持，但设备仍未处理请求
+  - 需要进一步调试: 验证 PFN 是否被设备接受、描述符链格式是否正确
+
+**P1 — 安全认证（阻塞 ASIL-D / SIL-4 认证）**
+- [ ] MISRA C:2012 零偏差修复 — 全量扫描已完成(1,382 violations, 42 rules)，需修复
+  - Phase 1: 类型安全 (206 violations) — Rule 11.3/11.4/11.5/10.8
+  - Phase 2: 单返回点重构 (813 violations) — Rule 15.5
+  - Phase 3: 代码风格清理 (232 violations) — Rule 2.5/8.9/2.7
+  - 合理偏差需记录到 MISRA Deviation Permit 文档
+- [ ] 安全认证文档 (ISO 26262 ASIL-D, IEC 61508 SIL-4)
+
+**P2 — 功能完善**
 - [ ] virtio-net 驱动适配
 - [ ] cspace_from_root 性能优化 (O(n)→O(1))
-- [ ] text 段优化 (51KB → <50KB)
+- [ ] text 段优化 (55.8KB → <50KB)
+- [ ] entry.c 移除调试扫描代码 (virtio-mmio slot 扫描)
+- [ ] drv_virtio_blk.c 移除调试输出
 
 ### 内核代码量
-- **text**: 51,432 bytes (50.2KB)
+- **text**: ~55,800 bytes (54.5KB)
 
 ### HAL 接口数量
 - **35 个** HAL 接口
+
+### QEMU 启动验证命令
+```bash
+# 带 virtio-blk 设备
+qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 4 -m 1G \
+  -kernel build/kernel/aisafe64.elf.elf -nographic -serial mon:stdio \
+  -drive file=build/disk.img,if=none,id=hd0,format=raw \
+  -device virtio-blk-device,drive=hd0
+
+# 不带 virtio-blk
+qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 4 -m 1G \
+  -kernel build/kernel/aisafe64.elf.elf -nographic -serial mon:stdio
+```
