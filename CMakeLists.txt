@@ -125,6 +125,72 @@ if(NOT CMAKE_CROSSCOMPILING)
         target_link_libraries(${test_name} PRIVATE m)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
+
+    # ==============================================================================
+    # AISafe-libc 测试（musl libc 子集）
+    # ==============================================================================
+
+    # AISafe-libc 头文件目录
+    set(MUSL_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/lib/musl/include)
+
+    # AISafe-libc 源文件
+    set(MUSL_STRING_SOURCES
+        lib/musl/src/string/memcpy.c
+        lib/musl/src/string/memset.c
+        lib/musl/src/string/memmove.c
+        lib/musl/src/string/memcmp.c
+        lib/musl/src/string/memchr.c
+        lib/musl/src/string/strlen.c
+        lib/musl/src/string/strcmp.c
+        lib/musl/src/string/strncmp.c
+        lib/musl/src/string/strcpy.c
+        lib/musl/src/string/strncpy.c
+        lib/musl/src/string/strcat.c
+        lib/musl/src/string/strncat.c
+        lib/musl/src/string/strchr.c
+        lib/musl/src/string/strrchr.c
+        lib/musl/src/string/strstr.c
+    )
+
+    set(MUSL_STDIO_SOURCES
+        lib/musl/src/stdio/vsnprintf.c
+        lib/musl/src/stdio/sprintf.c
+        lib/musl/src/stdio/snprintf.c
+    )
+
+    set(MUSL_STDLIB_SOURCES
+        lib/musl/src/stdlib/atoi.c
+        lib/musl/src/stdlib/strtol.c
+        lib/musl/src/stdlib/strtoul.c
+        lib/musl/src/stdlib/malloc.c
+        lib/musl/src/stdlib/calloc.c
+        lib/musl/src/stdlib/realloc.c
+        lib/musl/src/stdlib/exit.c
+        lib/musl/src/stdlib/abort.c
+        lib/musl/src/stdlib/atexit.c
+    )
+
+    set(MUSL_ERRNO_SOURCES
+        lib/musl/src/errno/errno.c
+    )
+
+    # test_musl_string
+    add_executable(test_musl_string tests/test_musl_string.c ${MUSL_STRING_SOURCES} ${MUSL_ERRNO_SOURCES})
+    target_include_directories(test_musl_string PRIVATE ${MUSL_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_musl_string PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_musl_string COMMAND test_musl_string)
+
+    # test_musl_stdio
+    add_executable(test_musl_stdio tests/test_musl_stdio.c ${MUSL_STRING_SOURCES} ${MUSL_STDIO_SOURCES} ${MUSL_ERRNO_SOURCES})
+    target_include_directories(test_musl_stdio PRIVATE ${MUSL_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_musl_stdio PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-error)
+    add_test(NAME test_musl_stdio COMMAND test_musl_stdio)
+
+    # test_musl_stdlib
+    add_executable(test_musl_stdlib tests/test_musl_stdlib.c ${MUSL_STRING_SOURCES} ${MUSL_STDLIB_SOURCES} ${MUSL_ERRNO_SOURCES})
+    target_include_directories(test_musl_stdlib PRIVATE ${MUSL_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_musl_stdlib PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_musl_stdlib COMMAND test_musl_stdlib)
 endif()
 
 # ==============================================================================

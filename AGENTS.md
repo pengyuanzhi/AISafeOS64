@@ -303,6 +303,163 @@ void hal_set_asid(uint16_t asid);  /* 替代直接操作 TTBR 寄存器 */
 5. 检查 MISRA C:2012 合规性
 ```
 
+## 强制开发规则：用户态 musl C 库（AISafe-libc）
+
+**所有用户态服务必须通过 AISafe-libc（基于 musl libc 接口子集）进行系统调用，禁止直接使用 syscall.h 桩函数。**
+
+### 为什么需要 musl libc 子集
+- 用户态服务（fs/proc/mem/net/security/vmm/path/init/dev）目前直接使用 syscall.h 底层桩函数
+- 引入 C 库层可提供 POSIX 兼容接口（open/read/write/close/malloc/printf 等）
+- 便于后续移植现有软件和库
+- 符合标准微内核架构：内核→libc→用户态服务
+
+### AISafe-libc 架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│  用户态服务 (fs/proc/mem/net/security/vmm/...)       │
+├─────────────────────────────────────────────────────┤
+│  AISafe-libc (musl libc 子集)                       │  ← POSIX 接口层
+│    ├── stdio: printf/sprintf/snputs/puts             │
+│    ├── stdlib: malloc/free/abort/exit/atexit         │
+│    ├── string: memcpy/memset/strcmp/strlen/...       │
+│    ├── unistd: read/write/close/lseek/getpid/...     │
+│    ├── fcntl: open/openat/fcntl                      │
+│    ├── errno: __errno_location / errno               │
+│    ├── signal: kill/raise/signal                     │
+│    ├── time: clock_gettime/nanosleep                 │
+│    └── sys/: mmap/munmap/mprotect/...                │
+├─────────────────────────────────────────────────────┤
+│  libkernel (syscall 桩函数)                           │  ← 现有 syscall.c
+├─────────────────────────────────────────────────────┤
+│  内核 (SVC 系统调用分发)                              │
+└─────────────────────────────────────────────────────┘
+```
+
+### AISafe-libc 目录结构
+
+```
+lib/
+├── musl/                     # musl libc 子集
+│   ├── include/              # C 库公共头文件
+│   │   ├── stdio.h           # printf/sprintf/...
+│   │   ├── stdlib.h          # malloc/free/exit/...
+│   │   ├── string.h          # memcpy/memset/strcmp/...
+│   │   ├── unistd.h          # read/write/close/...
+│   │   ├── fcntl.h           # open/openat/...
+│   │   ├── errno.h           # errno / __errno_location
+│   │   ├── signal.h          # signal/kill/...
+│   │   ├── time.h            # clock_gettime/...
+│   │   ├── sys/              # 系统调用相关头文件
+│   │   │   ├── mmap.h        # mmap/munmap/mprotect
+│   │   │   └── types.h       # size_t/ssize_t/...
+│   │   └── aisafe/           # AISafe 扩展
+│   │       └── syscall.h     # 与内核 syscall.h 对应
+│   ├── src/                  # C 库实现
+│   │   ├── stdio/            # printf.c, sprintf.c, ...
+│   │   ├── stdlib/           # malloc.c, exit.c, ...
+│   │   ├── string/           # memcpy.c, memset.c, ...
+│   │   ├── unistd/           # read.c, write.c, ...
+│   │   ├── fcntl/            # open.c, ...
+│   │   ├── errno/            # errno.c
+│   │   ├── signal/           # signal.c
+│   │   ├── time/             # clock_gettime.c
+│   │   └── internal/         # 内部支持函数
+│   │       ├── syscall_dispatch.c  # 统一系统调用入口
+│   │       └── locking.c           # 内部锁支持
+│   ├── arch/                 # 架构相关
+│   │   └── aarch64/          # ARM64 特定实现
+│   │       ├── syscall.S     # SVC 入口（汇编）
+│   │       └── setjmp.S      # setjmp/longjmp
+│   └── CMakeLists.txt        # 构建配置
+├── libkernel/                # 现有内核系统调用桩（保持不变）
+│   └── syscall.c
+└── kernel_string.c           # 现有内核字符串库（保持不变）
+```
+
+### 开发优先级和阶段
+
+**Phase 1: 基础 C 库核心（最高优先级）**
+- [ ] `<string.h>`: memcpy, memset, memmove, memcmp, strlen, strcmp, strncmp, strcpy, strncpy, strcat, strncat, strchr, strrchr, strstr
+- [ ] `<stdlib.h>`: abort, exit, atexit, atoi, atol, strtol, strtoul, malloc, free, calloc, realloc
+- [ ] `<stdio.h>`: printf, sprintf, snprintf, puts, putchar
+- [ ] `<errno.h>`: errno 变量, __errno_location()
+- [ ] `<aisafe/syscall.h>`: 统一系统调用入口，映射到内核 syscall 号
+
+**Phase 2: POSIX 文件 I/O（高优先级）**
+- [ ] `<unistd.h>`: read, write, close, lseek, getpid, getppid, fork, exec, _exit
+- [ ] `<fcntl.h>`: open, openat, fcntl, creat
+- [ ] `<sys/stat.h>`: stat, fstat, lstat, mkdir
+
+**Phase 3: 系统和进程接口（中优先级）**
+- [ ] `<signal.h>`: signal, kill, raise, sigaction
+- [ ] `<time.h>`: clock_gettime, nanosleep, time
+- [ ] `<sys/mman.h>`: mmap, munmap, mprotect
+- [ ] `<sys/wait.h>`: waitpid, wait
+
+**Phase 4: 高级功能（低优先级）**
+- [ ] `<math.h>`: 基础数学函数
+- [ ] `<setjmp.h>`: setjmp, longjmp
+- [ ] `<assert.h>`: assert 宏
+- [ ] `<ctype.h>`: isalpha, isdigit, ...
+
+### 代码规范（AISafe-libc 专用）
+- 遵循 MISRA C:2012 基本规则（用户态可适度放宽）
+- 4 空格缩进，Allman 括号风格
+- 中文 Doxygen 注释（公共 API）
+- 所有函数通过 `aisafe_syscall()` 统一入口调用内核
+- 线程安全：errno 使用 thread-local 或 per-thread 存储
+- 内存分配器：简单 bump allocator（Phase 1）→ slab allocator（Phase 2）
+
+### 给 Claude Code 的 Prompt 模板
+
+```
+使用 TDD 方法开发 AISafe-libc <模块名>：
+
+## 背景
+AISafeOS64 是 64 位微内核 RTOS，用户态服务需要 C 库支持。
+当前已有 libkernel/syscall.c 提供底层 SVC 桩函数。
+
+## 系统调用映射
+- 内核调用号定义在 include/kernel/syscall.h
+- 桩函数在 lib/libkernel/syscall.c
+- libc 通过 libkernel 的桩函数与内核交互
+
+## Step 1: RED - 编写测试
+- 在 tests/ 下创建 test_musl_<module>.c
+- 编写测试覆盖：<正常路径、边界条件、错误处理>
+- 编译运行确认测试失败
+
+## Step 2: GREEN - 最小实现
+- 在 lib/musl/src/<module>/ 下编写实现
+- 只实现让测试通过的最小代码
+- 编译运行确认测试通过
+
+## Step 3: REFACTOR - 重构
+- 在测试保护下优化代码
+- 确保代码风格一致
+- 确认所有测试仍然通过
+
+代码规范: 4空格缩进, Allman括号, 中文注释
+构建系统: CMake
+测试框架: Unity 风格 TEST_ASSERT_*
+```
+
+### 用户态服务迁移规则
+
+**新代码**：所有新的用户态代码必须使用 AISafe-libc 接口（`#include <stdio.h>` 等），禁止直接 `#include <kernel/syscall.h>`。
+
+**现有代码**：逐步迁移，不强制一次性重构。迁移优先级：
+1. init 服务（最简单，依赖最少）
+2. path 服务（功能单一）
+3. mem 服务
+4. proc 服务
+5. fs 服务
+6. net 服务
+7. security 服务
+8. vmm 服务
+9. dev 服务
+
 ## 注意事项
 
 - 操作系统开发需要特别关注安全性和稳定性
