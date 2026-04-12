@@ -25,6 +25,32 @@
 #include <stddef.h>
 
 /* ========================================================================
+ * DMA 屏障：ARMv8 要求 DSB（而非 DMB）保证 cache 维护操作完成
+ * dc cvac 之后必须使用 dsb ish 才能确保数据已刷到 PoC
+ * ========================================================================
+
+ */
+#define virtio_dsb()   __asm__ volatile("dsb ish" ::: "memory")
+
+#if CONFIG_DEBUG_VERBOSE
+/**
+ * @brief 调试用十六进制输出
+ */
+static void blk_dbg_hex(uint64_t value)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int32_t i;
+    hal_uart_putc(0x09000000ULL, '0');
+    hal_uart_putc(0x09000000ULL, 'x');
+    for (i = 60; i >= 0; i -= 4)
+    {
+        hal_uart_putc(0x09000000ULL,
+                      (uint8_t)hex[(value >> (uint32_t)i) & 0xFULL]);
+    }
+}
+#endif
+
+/* ========================================================================
  * VirtIO MMIO 寄存器偏移
  * ======================================================================== */
 
@@ -439,7 +465,7 @@ static void virtq_write_mmio_regs(virtio_blk_priv_t *priv)
      * 确保设备看到初始化后的 ring 状态 */
     hal_dcache_clean((uint64_t)(uintptr_t)priv->vq_mem,
                      (uint64_t)VIRTQ_TOTAL_SIZE);
-    hal_dmb_ish();
+    virtio_dsb();
 
     /* 检测 VirtIO MMIO 版本 */
     version = mmio_read32(priv->mmio_base, VIRTIO_MMIO_VERSION);
@@ -558,6 +584,52 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     priv->req_buf.hdr.sector = sector;
     priv->req_buf.resp.status = 0xFFU;
 
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] submit type=");
+    blk_dbg_hex((uint64_t)req_type);
+    hal_uart_puts(0x09000000ULL, " sector=");
+    blk_dbg_hex(sector);
+    hal_uart_puts(0x09000000ULL, " len=");
+    blk_dbg_hex((uint64_t)data_len);
+    hal_uart_puts(0x09000000ULL, "\n");
+
+    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    blk_dbg_hex((uint64_t)desc_hdr);
+    hal_uart_puts(0x09000000ULL, "] hdr  addr=");
+    blk_dbg_hex(desc[desc_hdr].addr);
+    hal_uart_puts(0x09000000ULL, " len=");
+    blk_dbg_hex((uint64_t)desc[desc_hdr].len);
+    hal_uart_puts(0x09000000ULL, " fl=");
+    blk_dbg_hex((uint64_t)desc[desc_hdr].flags);
+    hal_uart_puts(0x09000000ULL, " nxt=");
+    blk_dbg_hex((uint64_t)desc[desc_hdr].next);
+    hal_uart_puts(0x09000000ULL, "\n");
+
+    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    blk_dbg_hex((uint64_t)desc_data);
+    hal_uart_puts(0x09000000ULL, "] data addr=");
+    blk_dbg_hex(desc[desc_data].addr);
+    hal_uart_puts(0x09000000ULL, " len=");
+    blk_dbg_hex((uint64_t)desc[desc_data].len);
+    hal_uart_puts(0x09000000ULL, " fl=");
+    blk_dbg_hex((uint64_t)desc[desc_data].flags);
+    hal_uart_puts(0x09000000ULL, "\n");
+
+    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    blk_dbg_hex((uint64_t)desc_resp);
+    hal_uart_puts(0x09000000ULL, "] resp addr=");
+    blk_dbg_hex(desc[desc_resp].addr);
+    hal_uart_puts(0x09000000ULL, " fl=");
+    blk_dbg_hex((uint64_t)desc[desc_resp].flags);
+    hal_uart_puts(0x09000000ULL, "\n");
+
+    hal_uart_puts(0x09000000ULL, "[BLK]   req_buf=");
+    blk_dbg_hex((uint64_t)(uintptr_t)&priv->req_buf);
+    hal_uart_puts(0x09000000ULL, " desc_tbl=");
+    blk_dbg_hex((uint64_t)(uintptr_t)priv->desc_table);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
     /* DMA 一致性：清理描述符表，使设备可见 */
     hal_dcache_clean((uint64_t)(uintptr_t)priv->desc_table,
                      (uint64_t)VIRTQ_DESC_TABLE_SIZE);
@@ -566,7 +638,8 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     hal_dcache_clean((uint64_t)(uintptr_t)&priv->req_buf,
                      (uint64_t)sizeof(priv->req_buf));
 
-    hal_dmb_ish();
+    /* ARMv8: dc cvac 完成需要 dsb，dmb 不足以排序 cache 维护 */
+    virtio_dsb();
 
     /* 添加到 Available Ring */
     avail_idx = priv->avail_ring->idx % priv->vq_state.queue_size;
@@ -579,7 +652,18 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     hal_dcache_clean((uint64_t)(uintptr_t)priv->avail_ring,
                      (uint64_t)VIRTQ_AVAIL_RING_SIZE);
 
-    hal_dmb_ish();
+    /* 确保 avail ring 刷到内存后再 kick */
+    virtio_dsb();
+
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK]   avail_idx=");
+    blk_dbg_hex((uint64_t)avail_idx);
+    hal_uart_puts(0x09000000ULL, " entry=");
+    blk_dbg_hex((uint64_t)desc_hdr);
+    hal_uart_puts(0x09000000ULL, " ring_idx=");
+    blk_dbg_hex((uint64_t)priv->avail_ring->idx);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
 
     /* 通知设备（Kick queue 0） */
     mmio_write32(priv->mmio_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0U);
@@ -602,12 +686,21 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
 
     timeout = 0U;
 
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] poll start last_used=");
+    blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
+    hal_uart_puts(0x09000000ULL, " used_ring@");
+    blk_dbg_hex((uint64_t)(uintptr_t)priv->used_ring);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
     while (timeout < VIRTQ_POLL_TIMEOUT)
     {
         /* DMA 一致性：使 Used Ring 头部对 CPU 可见 */
         hal_dcache_invalidate((uint64_t)(uintptr_t)priv->used_ring,
                               (uint64_t)sizeof(virtq_used_hdr_t));
-        hal_dmb_ishld();
+        /* ARMv8: dc ivac 完成需要 dsb，确保 invalidate 生效后再读 */
+        virtio_dsb();
 
         if (priv->vq_state.last_used_idx != priv->used_ring->idx)
         {
@@ -618,8 +711,17 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
             hal_dcache_invalidate(
                 (uint64_t)(uintptr_t)&priv->used_ring_entries[used_idx],
                 (uint64_t)sizeof(virtq_used_elem_t));
+            virtio_dsb();
 
             desc_id = priv->used_ring_entries[used_idx].id;
+
+#if CONFIG_DEBUG_VERBOSE
+            hal_uart_puts(0x09000000ULL, "[BLK] poll done used_idx=");
+            blk_dbg_hex((uint64_t)used_idx);
+            hal_uart_puts(0x09000000ULL, " desc_id=");
+            blk_dbg_hex((uint64_t)desc_id);
+            hal_uart_puts(0x09000000ULL, "\n");
+#endif
 
             /* 释放描述符链 */
             virtq_free_chain(priv, (uint16_t)desc_id);
@@ -630,6 +732,7 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
             /* DMA 一致性：使响应数据和读缓冲区对 CPU 可见 */
             hal_dcache_invalidate((uint64_t)(uintptr_t)&priv->req_buf,
                                   (uint64_t)sizeof(priv->req_buf));
+            virtio_dsb();
 
             /* 检查响应状态 */
             if (priv->req_buf.resp.status == VIRTIO_BLK_S_OK)
@@ -638,12 +741,52 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
             }
             else
             {
+#if CONFIG_DEBUG_VERBOSE
+                hal_uart_puts(0x09000000ULL, "[BLK] resp status=");
+                blk_dbg_hex((uint64_t)priv->req_buf.resp.status);
+                hal_uart_puts(0x09000000ULL, "\n");
+#endif
                 return -5; /* EIO */
             }
         }
 
         timeout++;
+
+        /* QEMU TCG: 轮询间隔读取 MMIO 寄存器，强制 QEMU 主循环
+         * 执行 BH（Bottom Half），完成异步 I/O。
+         * VirtIO Block 的 WRITE 在 QEMU 中是异步提交的，
+         * 其完成回调作为 BH 调度，仅在主循环中执行。
+         * 纯 RAM 轮询（无 MMIO）不会让出 CPU 给主循环。
+         * 每 4096 次迭代读取一次中断状态寄存器即可。 */
+        if ((timeout & 0xFFFU) == 0U)
+        {
+            (void)mmio_read32(priv->mmio_base, VIRTIO_MMIO_INTERRUPT_STATUS);
+        }
+
+#if CONFIG_DEBUG_VERBOSE
+        /* 每 200000 次轮询输出一次状态 */
+        if ((timeout & 0x30FFFU) == 0x30FFFU)
+        {
+            hal_uart_puts(0x09000000ULL, "[BLK] poll t=");
+            blk_dbg_hex((uint64_t)timeout);
+            hal_uart_puts(0x09000000ULL, " used_idx=");
+            blk_dbg_hex((uint64_t)priv->used_ring->idx);
+            hal_uart_puts(0x09000000ULL, " last=");
+            blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
+            hal_uart_puts(0x09000000ULL, "\n");
+        }
+#endif
     }
+
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] poll TIMEOUT used_ring.idx=");
+    blk_dbg_hex((uint64_t)priv->used_ring->idx);
+    hal_uart_puts(0x09000000ULL, " last_used=");
+    blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
+    hal_uart_puts(0x09000000ULL, " used_flags=");
+    blk_dbg_hex((uint64_t)priv->used_ring->flags);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
 
     return -110; /* ETIMEDOUT */
 }
