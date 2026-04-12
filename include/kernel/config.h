@@ -449,4 +449,42 @@ _Static_assert(
 
 /** @} */
 
+/* ========================================================================
+ * 调试配置
+ * ======================================================================== */
+
+/**
+ * @brief 启用调试模式
+ *
+ * @details 开启后包含：
+ *          - kernel_main 中的端到端测试代码
+ *          - virtio-mmio slot 扫描代码
+ *          - 能力系统/SMP/驱动测试函数
+ *
+ *          关闭后可节省约 8KB text 段空间。
+ *
+ * @note 生产构建应关闭此选项
+ */
+#ifndef CONFIG_DEBUG
+#define CONFIG_DEBUG    0
+#endif
+
+/**
+ * @brief 启用详细调试输出
+ *
+ * @details 开启后包含：
+ *          - kernel_main 中的详细 UART 启动信息（内存布局、编译器版本等）
+ *          - 驱动中的详细状态跟踪输出
+ *          - 异常处理中的寄存器 hex dump
+ *
+ *          关闭后仅保留关键里程碑日志（[k] 开头的简短标记）和错误信息。
+ *          节省约 3KB text 段空间（主要是 rodata 字符串常量）。
+ *
+ * @note 需要在 CONFIG_DEBUG=1 时才有意义
+ * @note 生产构建应关闭此选项
+ */
+#ifndef CONFIG_DEBUG_VERBOSE
+#define CONFIG_DEBUG_VERBOSE    0
+#endif
+
 #endif /* KERNEL_CONFIG_H */

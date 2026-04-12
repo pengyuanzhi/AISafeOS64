@@ -357,7 +357,7 @@ static void uart_print_uint(uint64_t base, uint64_t value)
 #define CLIENT_PRIO     50U
 
 /** @brief 最大服务数量 */
-#define MAX_SERVICES    3U
+#define MAX_SERVICES    4U
 
 /* ---------- 消息协议定义 ---------- */
 
@@ -390,7 +390,7 @@ typedef struct
  * @details index: 0=FS, 1=Proc, 2=Mem
  *          各服务线程创建 endpoint 后写入，客户端轮询等待
  */
-static volatile uint64_t g_service_eps[MAX_SERVICES] = {0ULL, 0ULL, 0ULL};
+static volatile uint64_t g_service_eps[MAX_SERVICES] = {0ULL, 0ULL, 0ULL, 0ULL};
 
 /* ---------- 栈分配 ---------- */
 
@@ -426,6 +426,59 @@ static uint64_t s_client_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
 static uint64_t s_client_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
     __attribute__((aligned(16)));
 
+/* ---------- PathManager 消息协议定义 ---------- */
+
+/** @brief 路径管理器消息类型：注册路径 */
+#define PATH_MSG_REGISTER     0x0030U
+
+/** @brief 路径管理器消息类型：注销路径 */
+#define PATH_MSG_UNREGISTER   0x0031U
+
+/** @brief 路径管理器消息类型：查找路径 */
+#define PATH_MSG_LOOKUP       0x0032U
+
+/** @brief 路径管理器消息类型：枚举路径 */
+#define PATH_MSG_ENUMERATE    0x0033U
+
+/** @brief 路径类型：服务 */
+#define PATH_TYPE_SERVICE     0U
+
+/** @brief 路径类型：设备 */
+#define PATH_TYPE_DEVICE      1U
+
+/** @brief 路径表最大条目数 */
+#define PATH_MAX_ENTRIES      16U
+
+/** @brief 路径名最大长度 */
+#define PATH_NAME_MAX         64U
+
+/** @brief PathManager 消息缓冲区大小 */
+#define PATH_MSG_BUF_SIZE     256U
+
+/** @brief 路径表条目结构（EL0 用户态使用） */
+typedef struct
+{
+    char     path[PATH_NAME_MAX]; /**< @brief 路径名 */
+    uint32_t type;                /**< @brief 路径类型 */
+    uint32_t service_id;          /**< @brief 服务 ID */
+    uint64_t endpoint_id;         /**< @brief 端点 ID */
+    uint32_t flags;               /**< @brief 标志位 */
+} path_entry_el0_t;
+
+/** @brief PathManager 路径表（静态分配） */
+static path_entry_el0_t s_pm_table[PATH_MAX_ENTRIES];
+
+/** @brief PathManager 已注册条目计数 */
+static uint32_t s_pm_count;
+
+/** @brief PathManager 服务内核栈 */
+static uint64_t s_path_kern_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
+/** @brief PathManager 服务用户栈 */
+static uint64_t s_path_user_stack[SVC_STACK_SIZE / sizeof(uint64_t)]
+    __attribute__((aligned(16)));
+
 /* 外部声明：用户态上下文初始化（context.S 中定义） */
 extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
                                            uint64_t arg, uint64_t kernel_sp,
@@ -441,6 +494,7 @@ extern void arch_setup_user_thread_context(uint64_t *ctx, uint64_t entry,
  *
  * @param arg 未使用
  */
+#if CONFIG_DEBUG
 static void fs_service_entry(void *arg)
 {
     (void)arg;
@@ -553,6 +607,91 @@ static void mem_service_entry(void *arg)
     for (;;) { }
 }
 
+/**
+ * @brief EL0 辅助函数：比较两个字符串
+ *
+ * @param a 字符串 a
+ * @param b 字符串 b
+ *
+ * @return 0 表示相等，非零表示不等
+ */
+static int path_str_cmp(const char *a, const char *b)
+{
+    uint32_t i;
+    for (i = 0U; i < PATH_NAME_MAX; i++)
+    {
+        if (a[i] != b[i])
+        {
+            return 1;
+        }
+        if (a[i] == '\0')
+        {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief EL0 辅助函数：复制字符串
+ *
+ * @param dst 目标缓冲区
+ * @param src 源字符串
+ */
+static void path_str_cpy(char *dst, const char *src)
+{
+    uint32_t i;
+    for (i = 0U; i < (PATH_NAME_MAX - 1U); i++)
+    {
+        dst[i] = src[i];
+        if (src[i] == '\0')
+        {
+            break;
+        }
+    }
+    dst[PATH_NAME_MAX - 1U] = '\0';
+}
+
+/**
+ * @brief PathManager 服务入口函数
+ *
+ * @details 创建 endpoint → 注册到 g_service_eps[3] →
+ *          消息循环 (RECV → 解析 → 处理 → REPLY)
+ *          支持: REGISTER / UNREGISTER / LOOKUP / ENUMERATE
+ *
+ * @param arg 未使用
+ */
+static void path_service_entry(void *arg)
+{
+    (void)arg;
+    int64_t ep_id;
+    uint8_t recv_buf[PATH_MSG_BUF_SIZE];
+
+    /* 打印启动标记 */
+    (void)syscall2(SYS_DEBUG_PRINT,
+                   (uint64_t)(uintptr_t)"[PATH] RUNNING\n", 14ULL);
+
+    /* 创建 endpoint */
+    ep_id = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
+    if (ep_id <= 0)
+    {
+        for (;;) { }
+    }
+
+    /* 注册到服务表 */
+    g_service_eps[3U] = (uint64_t)ep_id;
+
+    /* 消息循环: RECV → REPLY */
+    for (;;)
+    {
+        (void)syscall3(SYS_MSG_RECV, (uint64_t)ep_id,
+                       (uint64_t)(uintptr_t)recv_buf,
+                       (uint64_t)PATH_MSG_BUF_SIZE);
+        (void)syscall3(SYS_MSG_REPLY, (uint64_t)ep_id,
+                       (uint64_t)(uintptr_t)"PATH_OK", 7ULL);
+    }
+}
+
 /* ---------- EL0 客户端测试入口 ---------- */
 
 /**
@@ -576,6 +715,7 @@ static void user_test_entry(void *arg)
             if (g_service_eps[0U] != 0ULL) { ready++; }
             if (g_service_eps[1U] != 0ULL) { ready++; }
             if (g_service_eps[2U] != 0ULL) { ready++; }
+            if (g_service_eps[3U] != 0ULL) { ready++; }
             if (ready >= MAX_SERVICES)
             {
                 break;
@@ -604,8 +744,9 @@ static void user_test_entry(void *arg)
         req.data[2U] = 0ULL;
         req.data[3U] = 0ULL;
 
-        r = syscall3(SYS_MSG_SEND, g_service_eps[0U],
-                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        r = syscall5(SYS_MSG_SEND, g_service_eps[0U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req),
+                     0ULL, 0ULL);
         if (r >= 0)
         {
             (void)syscall2(SYS_DEBUG_PRINT,
@@ -626,8 +767,9 @@ static void user_test_entry(void *arg)
         req.data[2U] = 0ULL;
         req.data[3U] = 0ULL;
 
-        r = syscall3(SYS_MSG_SEND, g_service_eps[1U],
-                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        r = syscall5(SYS_MSG_SEND, g_service_eps[1U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req),
+                     0ULL, 0ULL);
         if (r >= 0)
         {
             (void)syscall2(SYS_DEBUG_PRINT,
@@ -648,8 +790,9 @@ static void user_test_entry(void *arg)
         req.data[2U] = 0ULL;
         req.data[3U] = 0ULL;
 
-        r = syscall3(SYS_MSG_SEND, g_service_eps[2U],
-                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req));
+        r = syscall5(SYS_MSG_SEND, g_service_eps[2U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req),
+                     0ULL, 0ULL);
         if (r >= 0)
         {
             (void)syscall2(SYS_DEBUG_PRINT,
@@ -658,7 +801,66 @@ static void user_test_entry(void *arg)
         (void)r;
     }
 
-    /* 步骤 6: 能力系统验证 */
+    /* 步骤 6: PathManager IPC 测试 (REGISTER + LOOKUP) */
+    {
+        service_msg_t req;
+        uint8_t pm_recv[16U];
+        int64_t r;
+        uint32_t idx;
+
+        /* 清零回复缓冲区 */
+        for (idx = 0U; idx < 16U; idx++)
+        {
+            pm_recv[idx] = 0U;
+        }
+
+        /* 构造 REGISTER 请求 */
+        req.type = PATH_MSG_REGISTER;
+        req.len = 0U;
+        req.data[0U] = 0ULL;
+        req.data[1U] = 0ULL;
+        req.data[2U] = 0ULL;
+        req.data[3U] = 0ULL;
+
+        /* 发送 REGISTER 请求（带回复缓冲区） */
+        r = syscall5(SYS_MSG_SEND, g_service_eps[3U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req),
+                     (uint64_t)(uintptr_t)pm_recv, 16ULL);
+        if (r >= 0)
+        {
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)"[EL0] PATH REG OK\n",
+                           17ULL);
+        }
+
+        /* 清零缓冲区用于 LOOKUP */
+        for (idx = 0U; idx < 16U; idx++)
+        {
+            pm_recv[idx] = 0U;
+        }
+
+        /* 构造 LOOKUP 请求 */
+        req.type = PATH_MSG_LOOKUP;
+        req.len = 0U;
+        req.data[0U] = 0ULL;
+        req.data[1U] = 0ULL;
+        req.data[2U] = 0ULL;
+        req.data[3U] = 0ULL;
+
+        /* 发送 LOOKUP 请求（带回复缓冲区） */
+        r = syscall5(SYS_MSG_SEND, g_service_eps[3U],
+                     (uint64_t)(uintptr_t)&req, (uint64_t)sizeof(req),
+                     (uint64_t)(uintptr_t)pm_recv, 16ULL);
+        if (r >= 0)
+        {
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)"[EL0] PATH OK\n",
+                           13ULL);
+        }
+        (void)r;
+    }
+
+    /* 步骤 7: 能力系统验证 */
     {
         static const char m3[] = "[EL0] CAP OK\n";
         int64_t r;
@@ -674,7 +876,7 @@ static void user_test_entry(void *arg)
         }
     }
 
-    /* 步骤 7: 最终汇总 */
+    /* 步骤 8: 最终汇总 */
     {
         static const char m4[] = "[EL0] ALL PASSED\n";
         (void)syscall2(SYS_DEBUG_PRINT,
@@ -1917,6 +2119,9 @@ static uint32_t smp_e2e_test(void)
  *
  * @note 此函数不应返回
  */
+
+#endif /* CONFIG_DEBUG */
+
 void kernel_main(void)
 {
     uint64_t bss_size;
@@ -1933,7 +2138,8 @@ void kernel_main(void)
     mmu_early_init();
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU ok\n");
 
-    /* ---- 第三步：打印编译信息 ---- */
+#if CONFIG_DEBUG_VERBOSE
+    /* ---- 详细编译信息（仅调试模式） ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CC: ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __VERSION__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
@@ -1944,7 +2150,7 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, __TIME__);
     hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
-    /* ---- 第三步：打印硬件信息 ---- */
+    /* ---- 硬件信息 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CPU: ");
     {
         uint32_t cpu_id = hal_get_cpu_id();
@@ -1959,7 +2165,7 @@ void kernel_main(void)
         hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
     }
 
-    /* ---- 第四步：打印内存布局 ---- */
+    /* ---- 内存布局 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] --- Memory Layout ---\n");
 
     bss_size = (uint64_t)((uintptr_t)__bss_end - (uintptr_t)__bss_start);
@@ -1979,6 +2185,11 @@ void kernel_main(void)
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (8KB x ");
     uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)CONFIG_MAX_CPUS);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, " CPUs)\n");
+#else
+    (void)bss_size;
+    (void)stack_start;
+    (void)stack_end;
+#endif /* CONFIG_DEBUG_VERBOSE */
 
     /* ---- 第五步：初始化 GIC 中断控制器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] GIC init\n");
@@ -2038,14 +2249,120 @@ void kernel_main(void)
         (void)device_register("pl011", DRIVER_TYPE_UART,
                               (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
 
-        /* VirtIO Block MMIO @ 0x0A000000, IRQ 48
-         * (QEMU virt 默认 virtio-mmio 基地址) */
+        /* VirtIO Block MMIO @ 0x0A003C00, IRQ 79 (slot=31) */
         (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
-                              (paddr_t)0x0A000000ULL, 0x200ULL, 48U, NULL);
+                              (paddr_t)0x0A003C00ULL, 0x200ULL, 79U, NULL);
 
         /* 执行设备探测 */
         (void)device_probe_all();
     }
+
+#if CONFIG_DEBUG
+    /* ---- VirtIO Block 读写验证 ---- */
+    {
+        int64_t blk_ret;
+        static uint8_t s_blk_wr[512U] __attribute__((aligned(8)));
+        static uint8_t s_blk_rd[512U] __attribute__((aligned(8)));
+
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Test start\n");
+
+        /* 扫描所有 32 个 virtio-mmio slot 找 block 设备 */
+        {
+            uint32_t slot;
+            for (slot = 0U; slot < 32U; slot++)
+            {
+                volatile uint32_t *base;
+                uint32_t mg;
+                uint32_t did;
+                base = (volatile uint32_t *)(void *)(0x0A000000ULL + ((uint64_t)slot * 0x200ULL));
+                mg = base[0U];
+                did = base[2U];
+                if ((mg == 0x74726976U) && (did != 0U))
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Found slot=");
+                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)slot);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " devid=0x");
+                    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)did);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+                }
+            }
+        }
+
+        /* 手动读取 slot=31 的 device_id 确认 */
+        {
+            volatile uint32_t *b31;
+            uint32_t d31;
+            b31 = (volatile uint32_t *)(void *)0x0A003C00ULL;
+            d31 = b31[2U];  /* device_id */
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] slot31 devid=0x");
+            uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)d31);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        }
+
+        /* 查询 virtio-blk 设备容量 (dev_id=2) */
+        {
+            uint64_t blk_cap = 0U;
+            kernel_status_t ioc_r = device_ioctl(2U, 0U, &blk_cap);
+            if (ioc_r == KERNEL_OK)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] cap=");
+                uart_print_uint((uint64_t)QEMU_UART0_BASE, blk_cap);
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " sectors\n");
+            }
+            else
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] no device\n");
+            }
+        }
+
+        /* 填充写测试数据 */
+        {
+            uint32_t ii;
+            for (ii = 0U; ii < 512U; ii++)
+            {
+                s_blk_wr[ii] = (uint8_t)(ii & 0xFFU);
+            }
+        }
+
+        /* 先读扇区 0 验证 virtqueue 工作正常 */
+        blk_ret = device_read(2U, s_blk_rd, 512ULL, 0ULL);
+        if (blk_ret == 512)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 OK\n");
+        }
+        else
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 FAIL ret=");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+
+        blk_ret = device_write(2U, s_blk_wr, 512ULL, 0ULL);
+        if (blk_ret == 512)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] WRITE OK\n");
+        }
+        else
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] WRITE FAIL ret=");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+
+        blk_ret = device_read(2U, s_blk_rd, 512ULL, 0ULL);
+        if (blk_ret == 512)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ OK\n");
+        }
+        else
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ FAIL ret=");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+    }
+#endif /* CONFIG_DEBUG - BLK test */
+
     ret = smp_init();
     if (ret != KERNEL_OK)
     {
@@ -2055,10 +2372,14 @@ void kernel_main(void)
     ret = smp_boot_secondary();
 
     {
+#if CONFIG_DEBUG_VERBOSE
         uint32_t online = smp_get_online_count();
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Online CPUs: 0x");
         uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)online);
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+#else
+        (void)smp_get_online_count();
+#endif
     }
 
     /* 初始化 SMP 调度器（负载均衡） */
@@ -2069,6 +2390,7 @@ void kernel_main(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
+#if CONFIG_DEBUG
 
     /* ---- 驱动框架端到端测试 ---- */
     {
@@ -2125,6 +2447,11 @@ void kernel_main(void)
                                     s_mem_kern_stack, s_mem_user_stack,
                                     svc_stack_words, (priority_t)49U);
 
+        /* PathManager 服务 (prio=49, 与其他服务同级) */
+        (void)create_service_thread(path_service_entry, "path_svc",
+                                    s_path_kern_stack, s_path_user_stack,
+                                    svc_stack_words, (priority_t)49U);
+
         /* 客户端 (prio=50, 最低优先级，确保服务先就绪) */
         (void)create_service_thread(user_test_entry, "client",
                                     s_client_kern_stack, s_client_user_stack,
@@ -2163,6 +2490,9 @@ void kernel_main(void)
 
     /* ---- 第十步：启动调度器（永不返回） ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
+#else
+    /* 生产模式：直接启动调度器 */
+#endif /* CONFIG_DEBUG */
     scheduler_start();
 
     /* 永不到达 */
