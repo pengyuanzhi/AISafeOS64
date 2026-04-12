@@ -251,13 +251,15 @@ static void dispatch_ipc(syscall_frame_t *frame)
 
         case SYS_MSG_SEND:
         {
-            /* x0=ep_id, x1=send_buf, x2=send_size */
+            /* x0=ep_id, x1=send_buf, x2=send_size, x3=recv_buf, x4=recv_size */
             kobj_id_t ep_id = (kobj_id_t)frame->x0;
             ipc_msg_tag_t tag;
             tag.value = 0ULL;
             const void *send_buf = (const void *)(uintptr_t)frame->x1;
             uint32_t send_size = (uint32_t)frame->x2;
-            ret = ipc_msg_send(ep_id, tag, send_buf, send_size, NULL, 0U);
+            void *recv_buf = (void *)(uintptr_t)frame->x3;
+            uint32_t recv_size = (uint32_t)frame->x4;
+            ret = ipc_msg_send(ep_id, tag, send_buf, send_size, recv_buf, recv_size);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }

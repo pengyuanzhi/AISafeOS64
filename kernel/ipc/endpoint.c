@@ -109,6 +109,10 @@ static void free_endpoint_index(uint32_t idx)
 /**
  * @brief 通过 ID 获取端点指针
  *
+ * @details 验证 ep_id 中的 generation 与端点结构体中的 generation 匹配，
+ *          防止端点销毁后重建导致 use-after-free。
+ *          ID 编码：高 16 位为 generation，低 16 位为索引。
+ *
  * @param ep_id 端点 ID
  *
  * @return 端点指针，无效返回 NULL
@@ -116,6 +120,8 @@ static void free_endpoint_index(uint32_t idx)
 static ipc_endpoint_t *get_endpoint(kobj_id_t ep_id)
 {
     uint32_t idx;
+    uint16_t gen;
+    ipc_endpoint_t *ep;
 
     if (ep_id == KOBJ_ID_INVALID)
     {
@@ -129,7 +135,18 @@ static ipc_endpoint_t *get_endpoint(kobj_id_t ep_id)
         return NULL;
     }
 
-    return &s_endpoints[idx];
+    /* ID 的高 16 位为 generation */
+    gen = (uint16_t)((ep_id >> 16U) & 0xFFFFU);
+
+    ep = &s_endpoints[idx];
+
+    /* 验证 generation 匹配 */
+    if (ep->generation != gen)
+    {
+        return NULL;
+    }
+
+    return ep;
 }
 
 /**
@@ -169,6 +186,14 @@ kernel_status_t ipc_endpoint_subsys_init(void)
         s_endpoints[i].node.next = &s_endpoints[i].node;
         s_endpoints[i].node.prev = &s_endpoints[i].node;
         ticket_lock_init(&s_endpoints[i].lock);
+        s_endpoints[i].recv_buf = NULL;
+        s_endpoints[i].recv_size = 0U;
+        s_endpoints[i].send_buf = NULL;
+        s_endpoints[i].send_size = 0U;
+        s_endpoints[i].sender_recv_buf = NULL;
+        s_endpoints[i].sender_recv_size = 0U;
+        s_endpoints[i].saved_tag.value = 0ULL;
+        s_endpoints[i].generation = 0U;
     }
 
     /* 初始化活跃链表 */
@@ -205,8 +230,15 @@ kernel_status_t ipc_endpoint_create(thread_id_t owner_tid, kobj_id_t *ep_id)
 
     ep = &s_endpoints[(uint32_t)idx];
 
-    /* 生成端点 ID：高 16 位为版本号（简单递增），低 16 位为索引 */
-    ep->id = (kobj_id_t)((uint32_t)idx | ((uint32_t)idx << 16U));
+    /* 递增 generation（跳过 0 以避免与初始化值冲突） */
+    ep->generation++;
+    if (ep->generation == 0U)
+    {
+        ep->generation = 1U;
+    }
+
+    /* 生成端点 ID：高 16 位为 generation，低 16 位为索引 */
+    ep->id = (kobj_id_t)(((uint32_t)ep->generation << 16U) | (uint32_t)idx);
     ep->state = IPC_EP_PENDING;
     ep->owner_tid = owner_tid;
     ep->sender_tid = THREAD_ID_INVALID;
@@ -267,7 +299,8 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
         /* 在完整实现中，需要通过 first 找到对应的 KThread */
     }
 
-    /* 标记为空闲 */
+    /* 标记为空闲，递增 generation 使旧 ID 失效 */
+    ep->generation++;
     ep->id = KOBJ_ID_INVALID;
     ep->state = IPC_EP_IDLE;
     ep->owner_tid = THREAD_ID_INVALID;
@@ -292,11 +325,6 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
                               void *recv_buf,
                               uint32_t recv_size)
 {
-    /* 标记未使用参数（完整 IPC 实现中使用） */
-    (void)tag;
-    (void)recv_buf;
-    (void)recv_size;
-
     ipc_endpoint_t *ep;
     KThread_t *current;
     uint32_t irq_state;
@@ -329,21 +357,36 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
         /* 保存发送方 tid，供 ipc_msg_reply 唤醒 */
         ep->sender_tid = current->tid;
 
-        /* 如果有内联数据，通过寄存器/共享结构传递 */
-        if ((send_buf != NULL) && (send_size <= sizeof(uint64_t) * CONFIG_IPC_REG_MSG_WORDS))
+        /* 拷贝消息载荷到接收方缓冲区 */
+        if ((send_buf != NULL) && (send_size > 0U) &&
+            (ep->recv_buf != NULL) && (ep->recv_size > 0U))
         {
-            /* 内联数据通过共享内存拷贝 */
-            /* 在完整实现中，这里使用寄存器传递 */
+            uint32_t copy_size = send_size;
+            if (copy_size > ep->recv_size)
+            {
+                copy_size = ep->recv_size;
+            }
+            (void)memcpy(ep->recv_buf, send_buf, (size_t)copy_size);
         }
+
+        /* 保存 tag 供接收方获取 */
+        ep->saved_tag = tag;
+
+        /* 保存发送方回复缓冲区信息 */
+        ep->sender_recv_buf = recv_buf;
+        ep->sender_recv_size = recv_size;
 
         /* 唤醒接收线程 */
         if (ep->owner_tid != THREAD_ID_INVALID)
         {
-            KThread_t *receiver = &g_scheduler.thread_table[ep->owner_tid];
-            if (receiver->state == KTHREAD_STATE_BLOCKED)
+            if (ep->owner_tid < CONFIG_MAX_THREADS)
             {
-                receiver->state = KTHREAD_STATE_READY;
-                scheduler_enqueue(receiver);
+                KThread_t *receiver = &g_scheduler.thread_table[ep->owner_tid];
+                if (receiver->state == KTHREAD_STATE_BLOCKED)
+                {
+                    receiver->state = KTHREAD_STATE_READY;
+                    scheduler_enqueue(receiver);
+                }
             }
         }
 
@@ -357,11 +400,15 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
         return KERNEL_OK;
     }
 
-    /* 慢速路径：将消息加入待处理队列 */
-    /* 在完整实现中，需要构造消息节点并挂入 pending_list */
-
-    /* 保存发送方 tid */
+    /* 慢速路径：接收者尚未调用 RECV，保存发送方信息并阻塞 */
+    ep->state = IPC_EP_PENDING;
     ep->sender_tid = current->tid;
+
+    /* 保存发送方缓冲区信息，供后续 RECV → REPLY 使用 */
+    ep->send_buf = send_buf;
+    ep->send_size = send_size;
+    ep->sender_recv_buf = recv_buf;
+    ep->sender_recv_size = recv_size;
 
     /* 阻塞发送方线程 */
     current->state = KTHREAD_STATE_BLOCKED;
@@ -383,8 +430,6 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
                                  uint32_t recv_size)
 {
     /* 标记未使用参数（完整 IPC 实现中使用） */
-    (void)recv_buf;
-    (void)recv_size;
 
     ipc_endpoint_t *ep;
     KThread_t *current;
@@ -392,11 +437,6 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
 
     ep = get_endpoint(ep_id);
     if (!endpoint_is_valid(ep))
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    if (tag == NULL)
     {
         return -(int32_t)EINVAL;
     }
@@ -409,31 +449,51 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
 
-    /* 检查是否有待处理消息 */
-    if (ep->pending_list.next != &ep->pending_list)
+    /* 保存接收方缓冲区信息 */
+    ep->recv_buf = recv_buf;
+    ep->recv_size = recv_size;
+
+    /* 检查是否有发送方已阻塞等待（慢速路径 send 已保存 sender 信息）
+     * 条件：state == PENDING 且 sender_tid 有效（排除 EP_CREATE 后的初始状态） */
+    if ((ep->state == IPC_EP_PENDING) && (ep->sender_tid != THREAD_ID_INVALID))
     {
-        /* 有消息：取出第一条 */
-        struct list_head *first = ep->pending_list.next;
-        first->prev->next = first->next;
-        first->next->prev = first->prev;
-        first->next = first;
-        first->prev = first;
+        /* 有发送方在等待：拷贝消息载荷到接收方缓冲区 */
+        if ((ep->send_buf != NULL) && (ep->send_size > 0U) &&
+            (recv_buf != NULL) && (recv_size > 0U))
+        {
+            uint32_t copy_size = ep->send_size;
+            if (copy_size > recv_size)
+            {
+                copy_size = recv_size;
+            }
+            (void)memcpy(recv_buf, ep->send_buf, (size_t)copy_size);
+        }
 
-        /* 在完整实现中，从消息节点提取 tag 和数据 */
+        /* 填充 tag 输出参数 */
+        if (tag != NULL)
+        {
+            *tag = ep->saved_tag;
+        }
 
+        /* 直接进入回复阶段 */
         ep->state = IPC_EP_REPLYING;
         ticket_lock_release_irqrestore(&ep->lock, irq_state);
         return KERNEL_OK;
     }
 
-    /* 无消息：阻塞等待 */
+    /* 无发送方等待：阻塞等待 */
     ep->state = IPC_EP_RECEIVING;
     current->state = KTHREAD_STATE_BLOCKED;
     barrier();
     ticket_lock_release_irqrestore(&ep->lock, irq_state);
     schedule();
 
-    /* 被唤醒后，消息已就绪 */
+    /* 被唤醒后（发送方已完成 memcpy 到 recv_buf），填充 tag */
+    if (tag != NULL)
+    {
+        *tag = ep->saved_tag;
+    }
+
     return KERNEL_OK;
 }
 
@@ -473,14 +533,20 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
     /* 恢复端点状态 */
     ep->state = IPC_EP_PENDING;
 
-    /* 如果回复缓冲区有数据 */
-    if ((reply_buf != NULL) && (reply_size > 0U))
+    /* 如果回复缓冲区有数据，拷贝到发送方的回复缓冲区 */
+    if ((reply_buf != NULL) && (reply_size > 0U) &&
+        (ep->sender_recv_buf != NULL) && (ep->sender_recv_size > 0U))
     {
-        /* 回复数据传递 - 完整实现需要写入发送方的 recv_buf */
+        uint32_t copy_size = reply_size;
+        if (copy_size > ep->sender_recv_size)
+        {
+            copy_size = ep->sender_recv_size;
+        }
+        (void)memcpy(ep->sender_recv_buf, reply_buf, (size_t)copy_size);
     }
 
     /* 唤醒发送方线程 */
-    if (ep->sender_tid != THREAD_ID_INVALID)
+    if ((ep->sender_tid != THREAD_ID_INVALID) && (ep->sender_tid < CONFIG_MAX_THREADS))
     {
         KThread_t *sender = &g_scheduler.thread_table[ep->sender_tid];
         if (sender->state == KTHREAD_STATE_BLOCKED)

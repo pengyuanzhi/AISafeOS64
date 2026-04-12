@@ -263,21 +263,26 @@ int sys_connect_detach(uint32_t conn_id)
  *          此调用为同步阻塞操作：发送线程将被阻塞，
  *          直到服务端处理完消息并通过 sys_msg_reply() 回复。
  *
- * @param conn_id 连接 ID
- * @param msg     消息缓冲区指针
- * @param size    消息大小（字节）
+ * @param conn_id   连接/端点 ID
+ * @param send_buf  发送消息缓冲区指针
+ * @param send_size 发送消息大小（字节）
+ * @param recv_buf  接收回复缓冲区指针（可为 NULL）
+ * @param recv_size 接收回复缓冲区大小（字节）
  *
  * @return 成功返回 0，失败返回负错误码
  *
  * @retval 0  消息发送成功且收到回复
  * @retval <0 消息发送失败，返回负 POSIX 错误码
  */
-int sys_msg_send(uint32_t conn_id, void *msg, uint64_t size)
+int sys_msg_send(uint32_t conn_id, const void *send_buf, uint64_t send_size,
+                 void *recv_buf, uint64_t recv_size)
 {
-    return (int)syscall3(SYS_MSG_SEND,
+    return (int)syscall5(SYS_MSG_SEND,
                          (uint64_t)conn_id,
-                         (uint64_t)(uintptr_t)msg,
-                         size);
+                         (uint64_t)(uintptr_t)send_buf,
+                         send_size,
+                         (uint64_t)(uintptr_t)recv_buf,
+                         recv_size);
 }
 
 /**

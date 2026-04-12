@@ -370,4 +370,27 @@ static inline int64_t syscall3(uint32_t syscall_nr, uint64_t arg0,
     return ret;
 }
 
+static inline int64_t syscall5(uint32_t syscall_nr, uint64_t arg0,
+                                uint64_t arg1, uint64_t arg2,
+                                uint64_t arg3, uint64_t arg4)
+{
+    int64_t ret;
+    __asm__ volatile(
+        "mov x8, %[nr]\n"
+        "mov x0, %[a0]\n"
+        "mov x1, %[a1]\n"
+        "mov x2, %[a2]\n"
+        "mov x3, %[a3]\n"
+        "mov x4, %[a4]\n"
+        "svc #0\n"
+        "mov %[ret], x0\n"
+        : [ret] "=r"(ret)
+        : [nr] "r"((uint64_t)syscall_nr),
+          [a0] "r"(arg0), [a1] "r"(arg1), [a2] "r"(arg2),
+          [a3] "r"(arg3), [a4] "r"(arg4)
+        : "x0", "x1", "x2", "x3", "x4", "x8", "memory"
+    );
+    return ret;
+}
+
 #endif /* KERNEL_SYSCALL_H */

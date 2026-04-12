@@ -200,6 +200,14 @@ typedef struct
     struct list_head    pending_list;   /**< @brief 待处理消息队列 */
     struct list_head    node;           /**< @brief 全局端点链表节点 */
     TicketLock_t        lock;           /**< @brief 端点自旋锁 */
+    void               *recv_buf;       /**< @brief 接收方缓冲区指针（RECV 时保存） */
+    uint32_t            recv_size;      /**< @brief 接收方缓冲区大小 */
+    const void         *send_buf;       /**< @brief 发送方缓冲区指针（SEND 时保存） */
+    uint32_t            send_size;      /**< @brief 发送方数据大小 */
+    void               *sender_recv_buf; /**< @brief 发送方回复缓冲区指针 */
+    uint32_t            sender_recv_size; /**< @brief 发送方回复缓冲区大小 */
+    ipc_msg_tag_t       saved_tag;       /**< @brief 保存的消息标签（Send→Receive 传递） */
+    uint16_t            generation;       /**< @brief 端点 ID 世代号（防 use-after-free） */
 } ipc_endpoint_t;
 
 /* ========================================================================
