@@ -88,6 +88,8 @@ set(MUSL_MODULES
     multibyte
     search
     sched
+    math
+    locale
 )
 
 # 收集模块基础 .c 文件

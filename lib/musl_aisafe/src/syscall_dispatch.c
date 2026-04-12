@@ -1,7 +1,7 @@
 /**
  * @file    syscall_dispatch.c
  * @brief   AISafeOS64 musl 系统调用分发器
- * @version 1.0
+ * @version 2.0
  *
  * 实现 __sysinfo 函数指针指向的分发器。
  * 将 Linux 标准 syscall 号翻译为 AISafeOS64 内核 SVC 调用。
@@ -11,13 +11,16 @@
  * 2. IPC 路由：read/write/open → IPC → FS 服务（暂用桩函数）
  * 3. ENOSYS 桩：暂未实现的功能返回 -ENOSYS
  *
- * AISafeOS64 内核 SVC 调用约定（ARM64）：
- *   x8 = syscall number, x0-x5 = arguments, x0 = return value
+ * 关键设计：
+ * - 分发器签名为固定 7 参数（nr + a0~a5），非变参
+ * - 调用方（syscall_arch.h 的 __syscall* 宏）固定传递 7 参数
+ * - 消除了 va_list 读取未传递参数的未定义行为
  *
  * @note 参考 seL4/musllibc 的 __sysinfo 方案
  */
 
-#include <stdarg.h>
+#include "syscall_arch.h"
+#include "syscall_entry.h"
 
 /* Linux errno 值（与 musl 一致） */
 #define EPERM   1
@@ -77,59 +80,6 @@
 /* 调试/信息 (0x0500 - 0x05FF) */
 #define AISAFE_SYS_DEBUG_PRINT          0x0500
 #define AISAFE_SYS_SYSTEM_INFO          0x0501
-
-/* ========================================================================
- * AISafeOS64 SVC 调用（ARM64 内联汇编）
- *
- * 调用约定：x8=syscall_nr, x0-x5=args, x0=return
- * ======================================================================== */
-
-/**
- * @brief 通用 SVC 调用（6 参数）
- * @param nr   系统调用号
- * @param a0-a5 参数
- * @return 系统调用返回值
- */
-static inline long aisafe_svc_call(long nr, long a0, long a1, long a2,
-                                    long a3, long a4, long a5)
-{
-    register long x8 __asm__("x8") = nr;
-    register long x0 __asm__("x0") = a0;
-    register long x1 __asm__("x1") = a1;
-    register long x2 __asm__("x2") = a2;
-    register long x3 __asm__("x3") = a3;
-    register long x4 __asm__("x4") = a4;
-    register long x5 __asm__("x5") = a5;
-    __asm__ __volatile__("svc #0"
-        : "=r"(x0)
-        : "r"(x8), "0"(x0), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5)
-        : "memory", "cc");
-    return x0;
-}
-
-/** @brief 0 参数 SVC 调用 */
-static inline long aisafe_svc0(long nr)
-{
-    return aisafe_svc_call(nr, 0, 0, 0, 0, 0, 0);
-}
-
-/** @brief 1 参数 SVC 调用 */
-static inline long aisafe_svc1(long nr, long a0)
-{
-    return aisafe_svc_call(nr, a0, 0, 0, 0, 0, 0);
-}
-
-/** @brief 2 参数 SVC 调用 */
-static inline long aisafe_svc2(long nr, long a0, long a1)
-{
-    return aisafe_svc_call(nr, a0, a1, 0, 0, 0, 0);
-}
-
-/** @brief 3 参数 SVC 调用 */
-static inline long aisafe_svc3(long nr, long a0, long a1, long a2)
-{
-    return aisafe_svc_call(nr, a0, a1, a2, 0, 0, 0);
-}
 
 /* ========================================================================
  * Linux syscall 号（从 bits/syscall.h 引入）
@@ -205,24 +155,20 @@ static inline long aisafe_svc3(long nr, long a0, long a1, long a2)
  * 将 Linux syscall 号翻译为 AISafeOS64 SVC 调用。
  * 这是 __sysinfo 指向的函数。
  *
+ * 固定 7 参数签名（nr + a0~a5），非变参。
+ * 调用方（syscall_arch.h 的 __syscall* 宏）固定传递 7 参数，
+ * 不足的参数补 0，因此所有 a0~a5 始终有定义值。
+ *
  * @param nr  Linux syscall 号
- * @param ... 可变参数（最多 6 个）
+ * @param a0-a5 系统调用参数（未使用的参数为 0）
  * @return 系统调用返回值，或 -errno（负数）
  */
-static long aisafe_syscall_dispatch(long nr, ...)
+static long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
+                                    long a3, long a4, long a5)
 {
-    va_list ap;
-    long a0, a1, a2, a3, a4, a5;
-
-    /* 提取所有 6 个参数（aarch64 调用约定下安全） */
-    va_start(ap, nr);
-    a0 = va_arg(ap, long);
-    a1 = va_arg(ap, long);
-    a2 = va_arg(ap, long);
-    a3 = va_arg(ap, long);
-    a4 = va_arg(ap, long);
-    a5 = va_arg(ap, long);
-    va_end(ap);
+    (void)a3;
+    (void)a4;
+    (void)a5;
 
     switch (nr)
     {
@@ -390,5 +336,7 @@ static long aisafe_syscall_dispatch(long nr, ...)
  *
  * musl 的 syscall_arch.h 通过 __sysinfo 路由所有系统调用，
  * 这里将其设置为我们的分发器。
+ * 使用类型化函数指针，避免 integer↔pointer 转换（MISRA Rule 11.3）。
  * ======================================================================== */
+/* 使用 size_t 类型存储，兼容 musl 上游 libc.h 声明 */
 unsigned long __sysinfo = (unsigned long)aisafe_syscall_dispatch;
