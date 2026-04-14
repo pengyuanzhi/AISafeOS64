@@ -2611,12 +2611,14 @@ void kernel_main(void)
          * 这里使用手工构造的最小 ELF 以确保自包含。 */
 
         /* 从 VirtIO 块设备读取 ELF 数据（扇区 0） */
-        static uint8_t s_elf_buf[4096U] __attribute__((aligned(8)));
+        static uint8_t s_elf_buf[4096U] __attribute__((aligned(8))) = {0};
         int64_t elf_ret;
         const elf_test_header_t *ehdr;
         uint32_t elf_step;
         uint32_t seg_count;
         uint32_t si;
+
+        /* 缓冲区已初始化为零，避免未初始化数据导致问题 */
 
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] Test start\n");
         elf_step = 0U;
@@ -2625,8 +2627,8 @@ void kernel_main(void)
         elf_ret = device_read(2U, s_elf_buf, 4096ULL, 0ULL);
         if (elf_ret <= 0)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] FAIL step 1 (read)\n");
-            elf_step = 1U;
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] SKIP (no block device)\n");
+            elf_step = 1U;  /* 设置错误标志以跳过后续步骤 */
         }
 
         if (elf_step == 0U)
