@@ -20,6 +20,8 @@
 
 #include <kernel/driver.h>
 #include <kernel/config.h>
+#include <kernel/gic.h>
+#include <kernel/interrupt.h>
 #include <hal.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -31,6 +33,15 @@
 
  */
 #define virtio_dsb()   __asm__ volatile("dsb ish" ::: "memory")
+
+/**
+ * @brief WFI 指令：让出 CPU 给 QEMU 主循环处理异步 I/O
+ *
+ * @details QEMU TCG 模式下，WRITE 操作通过 blk_aio_pwritev 异步提交，
+ *          完成回调作为 BH 调度。WFI 使 cpu_exec 退出，让主循环运行 BH，
+ *          更新 used ring 后通过 GIC 中断唤醒 CPU。
+ */
+#define virtio_wfi()   __asm__ volatile("wfi" ::: "memory")
 
 #if CONFIG_DEBUG_VERBOSE
 /**
@@ -109,6 +120,9 @@ static void blk_dbg_hex(uint64_t value)
 #define VIRTIO_BLK_S_IOERR          1U            /**< @brief I/O 错误 */
 #define VIRTIO_BLK_S_UNSUPP         2U            /**< @brief 不支持 */
 
+/** @brief QEMU virt 平台 VirtIO MMIO SPI 中断号基址（slot 0 = IRQ 48） */
+#define VIRTIO_MMIO_IRQ_BASE        48U
+
 /* ========================================================================
  * VirtQueue 数据结构（内核内嵌）
  * ======================================================================== */
@@ -124,6 +138,10 @@ static void blk_dbg_hex(uint64_t value)
 
 /** @brief 轮询超时计数 */
 #define VIRTQ_POLL_TIMEOUT          1000000U
+
+/** @brief MTTCG 模式下 MMIO 探针会持续持有 BQL，阻止 QEMU 主循环处理
+ *         VirtIO BH。设为 0 直接进入 WFI 模式，立即释放 BQL */
+#define VIRTQ_YIELD_THRESH          0U
 
 /**
  * @brief VirtQueue 描述符（16 字节）
@@ -674,6 +692,24 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
 /**
  * @brief 轮询 Used Ring 等待请求完成
  *
+ * @details 使用 WFI 模式等待 VirtIO 设备完成请求。
+ *          QEMU TCG 单线程模式下，WRITE 通过 blk_aio_pwritev 异步提交，
+ *          完成 BH 仅在 cpu_exec() 返回 EXCP_HLT（WFI）后才能运行。
+ *
+ *          关键约束：QEMU helper_wfi() 通过 arm_cpu_exec_interrupt() 判断
+ *          是否有挂起中断。若 PSTATE.I 置位（IRQ 屏蔽），QEMU 认为"无挂起
+ *          中断"而永久停机。因此必须在轮询前临时使能 IRQ，使 GIC SPI 可被
+ *          WFI 感知，轮询结束后恢复屏蔽。
+ *
+ *          工作流程：
+ *          1. 临时使能 IRQ（清除 PSTATE.I）
+ *          2. 检查 used ring 是否有新完成项
+ *          3. 若无，执行 WFI 暂停 CPU
+ *          4. QEMU 主循环运行 VirtIO BH，更新 used ring，
+ *             通过 GIC SPI 唤醒 CPU
+ *          5. CPU 唤醒后回到步骤 2
+ *          6. 完成后恢复 IRQ 屏蔽
+ *
  * @param priv 驱动私有数据指针
  *
  * @return KERNEL_OK 成功，负数超时或 I/O 错误
@@ -683,6 +719,8 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     uint32_t timeout;
     uint16_t used_idx;
     uint32_t desc_id;
+
+    uint32_t saved_irq_state;
 
     timeout = 0U;
 
@@ -694,12 +732,24 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     hal_uart_puts(0x09000000ULL, "\n");
 #endif
 
+    /*
+     * 保存 IRQ 状态并临时使能 IRQ（清除 PSTATE.I）
+     *
+     * QEMU TCG 的 helper_wfi() 通过 arm_cpu_exec_interrupt() 判断
+     * 是否有挂起中断。当 PSTATE.I 置位时，QEMU 判定"无挂起中断"，
+     * WFI 永久停机。必须清除 PSTATE.I 使 GIC VirtIO SPI 可被感知。
+     *
+     * 此时内核定时器尚未重武装（CNTP_CTL_EL0.ENABLE=0），
+     * 且 GIC 仅使能了 VirtIO BLK SPI，因此仅 VirtIO 中断会触发。
+     */
+    saved_irq_state = hal_irq_saved_state();
+    hal_irq_enable();
+
     while (timeout < VIRTQ_POLL_TIMEOUT)
     {
         /* DMA 一致性：使 Used Ring 头部对 CPU 可见 */
         hal_dcache_invalidate((uint64_t)(uintptr_t)priv->used_ring,
                               (uint64_t)sizeof(virtq_used_hdr_t));
-        /* ARMv8: dc ivac 完成需要 dsb，确保 invalidate 生效后再读 */
         virtio_dsb();
 
         if (priv->vq_state.last_used_idx != priv->used_ring->idx)
@@ -737,6 +787,7 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
             /* 检查响应状态 */
             if (priv->req_buf.resp.status == VIRTIO_BLK_S_OK)
             {
+                hal_irq_restore(saved_irq_state);
                 return KERNEL_OK;
             }
             else
@@ -746,28 +797,48 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
                 blk_dbg_hex((uint64_t)priv->req_buf.resp.status);
                 hal_uart_puts(0x09000000ULL, "\n");
 #endif
+                hal_irq_restore(saved_irq_state);
                 return -5; /* EIO */
             }
         }
 
-        timeout++;
-
-        /* QEMU TCG: 轮询间隔读取 MMIO 寄存器，强制 QEMU 主循环
-         * 执行 BH（Bottom Half），完成异步 I/O。
-         * VirtIO Block 的 WRITE 在 QEMU 中是异步提交的，
-         * 其完成回调作为 BH 调度，仅在主循环中执行。
-         * 纯 RAM 轮询（无 MMIO）不会让出 CPU 给主循环。
-         * 每 4096 次迭代读取一次中断状态寄存器即可。 */
-        if ((timeout & 0xFFFU) == 0U)
+        /*
+         * 混合等待策略：
+         *
+         * 阶段 1（前 YIELD_THRESH 次）：MMIO 探针
+         *   读取 VirtIO MMIO 中断状态寄存器，强制 QEMU 退出当前
+         *   翻译块（Translation Block）并经过 MMIO helper 路径。
+         *   在 helper 路径中，QEMU 获取/释放 BQL，给主循环线程
+         *   机会处理挂起的 VirtIO 写完成 BH（bottom half）。
+         *   READ 操作通常同步完成（在 MMIO kick 处理中），
+         *   WRITE 操作异步完成（需要 BH 回调更新 used ring）。
+         *
+         * 阶段 2（YIELD_THRESH 之后）：WFI
+         *   如果 MMIO 探针未能等到完成（可能是 WRITE 完成极慢），
+         *   切换到 WFI 让出 CPU，QEMU cpu_exec 返回 EXCP_HALTED，
+         *   MTTCG 线程重新获取 BQL 并处理事件，主循环处理 BH，
+         *   BH 完成后通过 GIC SPI 唤醒 WFI。
+         *
+         * 前置条件：PSTATE.I 已由 hal_irq_enable() 清零。
+         */
+        if (timeout < VIRTQ_YIELD_THRESH)
         {
+            /* MMIO 探针：强制 QEMU 退出翻译块并处理挂起事件 */
             (void)mmio_read32(priv->mmio_base, VIRTIO_MMIO_INTERRUPT_STATUS);
         }
+        else
+        {
+            /* WFI：让出 CPU 给 QEMU 主循环处理 VirtIO BH */
+            virtio_wfi();
+        }
+
+        timeout++;
 
 #if CONFIG_DEBUG_VERBOSE
-        /* 每 200000 次轮询输出一次状态 */
-        if ((timeout & 0x30FFFU) == 0x30FFFU)
+        /* 每 1000 次 WFI 输出一次状态 */
+        if ((timeout % 1000U) == 0U)
         {
-            hal_uart_puts(0x09000000ULL, "[BLK] poll t=");
+            hal_uart_puts(0x09000000ULL, "[BLK] poll wfi=");
             blk_dbg_hex((uint64_t)timeout);
             hal_uart_puts(0x09000000ULL, " used_idx=");
             blk_dbg_hex((uint64_t)priv->used_ring->idx);
@@ -788,12 +859,18 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     hal_uart_puts(0x09000000ULL, "\n");
 #endif
 
+    /* 恢复原始 IRQ 屏蔽状态 */
+    hal_irq_restore(saved_irq_state);
+
     return -110; /* ETIMEDOUT */
 }
 
 /* ========================================================================
  * 驱动操作函数实现
  * ======================================================================== */
+
+/** @brief 前向声明：VirtIO Block 中断处理函数 */
+static void virtio_blk_irq(uint32_t irq, void *dev_data);
 
 /**
  * @brief 探测并初始化 VirtIO Block 设备
@@ -842,6 +919,8 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
             if ((mg == VIRTIO_MAGIC) && (did == VIRTIO_BLK_DEVICE_ID))
             {
                 s_blk_priv.mmio_base = addr;
+                /* 更新 IRQ 为实际 VirtIO MMIO SPI 中断号 */
+                s_blk_priv.irq = VIRTIO_MMIO_IRQ_BASE + slot;
                 found = 1U;
                 break;
             }
@@ -924,6 +1003,13 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     /* 步骤 5: DRIVER_OK — 驱动就绪 */
     status |= VIRTIO_STATUS_DRIVER_OK;
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
+
+    /* 步骤 5.5: 使能 VirtIO MMIO 中断（GIC SPI 配置 + 处理函数注册）
+     * WRITE 操作在 QEMU TCG 中异步完成，需要中断唤醒 WFI 轮询 */
+    (void)gic_set_priority(s_blk_priv.irq, (uint8_t)GIC_PRIORITY_DEFAULT);
+    (void)gic_set_target(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
+    (void)gic_enable_irq(s_blk_priv.irq);
+    (void)interrupt_register(s_blk_priv.irq, virtio_blk_irq, NULL);
 
     /* 步骤 6: 读取设备容量 */
     s_blk_priv.capacity = (uint64_t)mmio_read32(

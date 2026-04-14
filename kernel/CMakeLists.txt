@@ -5,6 +5,10 @@
 
 set(KERNEL_ARCH_DIR ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64)
 
+# ARM64 汇编器配置
+set(CMAKE_ASM_COMPILER aarch64-linux-gnu-as)
+# 不设置 CMAKE_ASM_FLAGS，避免将 C 编译器选项传递给汇编器
+
 # 内核公共头文件
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
@@ -120,44 +124,37 @@ set(KERNEL_SOURCES
     ${KERNEL_VERIFY_SOURCES}
     ${KERNEL_DRIVER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
+    ${CMAKE_SOURCE_DIR}/include/kernel/process_impl.c
 )
+
+# 分离 ASM 文件
+set(KERNEL_ASM_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64/boot.S
+    ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64/exception.S
+    ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64/context.S
+)
+
+# 分离 C 文件
+list(REMOVE_ITEM KERNEL_SOURCES ${KERNEL_ASM_SOURCES})
 
 # ==============================================================================
 # ARM64 内核编译选项
 # ==============================================================================
-set(KERNEL_COMPILE_OPTIONS
-    -Os                      # 最小体积优化（text < 30KB）
-    -mgeneral-regs-only      # 不使用浮点寄存器
-    -mstrict-align           # 严格对齐
-    -fno-pic                 # 不使用位置无关代码
-    -fno-pie                 # 不使用位置无关可执行
-    -mcmodel=large           # 大内存模型（64位地址空间）
-    -fno-stack-protector     # 裸机环境无栈保护器运行时
-    -ffreestanding           # 自由standing环境
-    -mno-outline-atomics     # 禁止 outline atomic helpers（避免 libgcc 依赖）
-    -ffunction-sections      # 分离代码段（配合 --gc-sections）
-    -fdata-sections          # 分离数据段（配合 --gc-sections）
-    -mno-outline-atomics     # 禁止 outline atomic helpers（避免 libgcc 依赖）
-    -fno-builtin             # 禁用内置函数替换
-)
+# 为 C 文件设置编译选项
+set(CMAKE_C_FLAGS "-O2 -mgeneral-regs-only -ffreestanding -mno-outline-atomics -ffunction-sections -fdata-sections")
+
+# 为 ASM 文件设置编译选项（空）
+set(CMAKE_ASM_FLAGS "")
 
 # ==============================================================================
 # 构建内核静态库
 # ==============================================================================
-add_library(kernel_static STATIC ${KERNEL_SOURCES})
-
-target_compile_options(kernel_static PRIVATE
-    ${KERNEL_COMPILE_OPTIONS}
-)
+add_library(kernel_static STATIC ${KERNEL_SOURCES} ${KERNEL_ASM_SOURCES})
 
 # ==============================================================================
 # 内核可执行文件
 # ==============================================================================
-add_executable(aisafe64.elf ${KERNEL_SOURCES})
-
-target_compile_options(aisafe64.elf PRIVATE
-    ${KERNEL_COMPILE_OPTIONS}
-)
+add_executable(aisafe64.elf ${KERNEL_SOURCES} ${KERNEL_ASM_SOURCES})
 
 target_link_options(aisafe64.elf PRIVATE
     -nostartfiles
@@ -169,6 +166,7 @@ target_link_options(aisafe64.elf PRIVATE
     -Wl,-Map=${CMAKE_BINARY_DIR}/aisafe64.map
     -Wl,--no-warn-rwx-segments
     -Wl,--no-warn-mismatch
+    -lgcc
 )
 
 # ==============================================================================

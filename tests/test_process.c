@@ -19,6 +19,41 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+
+/* 跳过 mock_kernel.h 中的测试宏定义，使用本地的 */
+#define MOCK_KERNEL_SKIP_TEST_MACROS
+
+/* 预定义本地测试宏，避免与 mock_kernel.h 冲突 */
+static uint32_t s_tests_run = 0U;
+static uint32_t s_tests_passed = 0U;
+static uint32_t s_tests_failed = 0U;
+
+#define TEST_ASSERT(cond, msg) do { \
+    s_tests_run++; \
+    if (cond) { \
+        s_tests_passed++; \
+    } else { \
+        s_tests_failed++; \
+        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
+    } \
+} while(0)
+
+/* Mock 内核类型（mock_kernel.h 中未定义的） */
+#ifndef KTHREAD_POLICY_FIFO
+#define KTHREAD_POLICY_FIFO 0U
+#endif
+#ifndef KTHREAD_POLICY_RR
+#define KTHREAD_POLICY_RR   1U
+#endif
+typedef uint32_t KThreadPolicy_t;
+#ifndef THREAD_ID_INVALID
+#define THREAD_ID_INVALID ((thread_id_t)0xFFFFFFFFU)
+#endif
+typedef void (*kthread_entry_t)(void *arg);
+#ifndef CONFIG_STACK_SIZE_DEFAULT
+#define CONFIG_STACK_SIZE_DEFAULT 8192U
+#endif
+
 #include "mock_kernel.h"
 
 /* Mock 内核类型（mock_kernel.h 中未定义的） */
@@ -37,23 +72,7 @@ typedef void (*kthread_entry_t)(void *arg);
 #define CONFIG_STACK_SIZE_DEFAULT 8192U
 #endif
 
-/* ========================================================================
- * 测试计数器
- * ======================================================================== */
-
-static uint32_t s_tests_run = 0U;
-static uint32_t s_tests_passed = 0U;
-static uint32_t s_tests_failed = 0U;
-
-#define TEST_ASSERT(cond, msg) do { \
-    s_tests_run++; \
-    if (cond) { \
-        s_tests_passed++; \
-    } else { \
-        s_tests_failed++; \
-        printf("  FAIL: %s (line %d)\n", msg, __LINE__); \
-    } \
-} while(0)
+/* 测试计数器已在文件开头定义 */
 
 /* ========================================================================
  * Mock 数据结构
@@ -145,7 +164,7 @@ static thread_id_t mock_kthread_get_current_tid(void)
 #define SYS_THREAD_YIELD        0x0007U
 #define SYS_THREAD_GET_ID       0x0008U
 
-#define ENOSYS  38
+/* ENOSYS 已在 mock_kernel.h 中定义为 38U */
 
 /**
  * @brief 模拟 SVC 分发器的线程管理部分

@@ -5,7 +5,9 @@
 # 参考 seL4/musllibc 方案：musl 源码零修改，通过 arch 覆盖适配。
 
 cmake_minimum_required(VERSION 3.20)
-project(musl_aisafe C ASM)
+
+# 禁止重复 project() 命令（工具链文件中已设置）
+# project(musl_aisafe C ASM)
 
 # ==============================================================================
 # 路径定义

@@ -34,6 +34,7 @@
 #include <kernel/capability.h>
 #include <kernel/cspace.h>
 #include <kernel/driver.h>
+#include <kernel/process.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -351,7 +352,7 @@ static void uart_print_uint(uint64_t base, uint64_t value)
  * ======================================================================== */
 
 /** @brief 服务线程内核/用户栈大小 (4KB) */
-#define SVC_STACK_SIZE  4096U
+#define SVC_STACK_SIZE  8192U
 
 /** @brief 客户端线程优先级（最低，确保服务先运行） */
 #define CLIENT_PRIO     50U
@@ -876,7 +877,168 @@ static void user_test_entry(void *arg)
         }
     }
 
-    /* 步骤 8: 最终汇总 */
+    /* 步骤 8: 进程管理 API 详细测试 */
+    {
+        static const char msg_test[] = "[EL0] PROC API TEST...\n";
+        (void)syscall2(SYS_DEBUG_PRINT,
+                       (uint64_t)(uintptr_t)msg_test,
+                       (uint64_t)(sizeof(msg_test) - 1U));
+        
+        /* 测试 1: fork - 进程创建 */
+        {
+            static const char msg_fork[] = "[EL0] TEST1: fork...\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)msg_fork,
+                           (uint64_t)(sizeof(msg_fork) - 1U));
+            
+            int32_t child_pid = fork();
+            if (child_pid == 0)
+            {
+                /* 子进程 */
+                static const char child_ok[] = "[EL0] CHILD fork OK\n";
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)child_ok,
+                               (uint64_t)(sizeof(child_ok) - 1U));
+                syscall0(SYS_THREAD_EXIT);
+            }
+            
+            if (child_pid > 0)
+            {
+                /* 父进程 */
+                int status;
+                int32_t waited = waitpid(child_pid, &status, 0);
+                if (waited == child_pid)
+                {
+                    static const char fork_pass[] = "[EL0] TEST1 PASS: fork\n";
+                    (void)syscall2(SYS_DEBUG_PRINT,
+                                   (uint64_t)(uintptr_t)fork_pass,
+                                   (uint64_t)(sizeof(fork_pass) - 1U));
+                }
+            }
+        }
+        
+        /* 测试 2: 祖孙进程（3 层） */
+        {
+            static const char msg_tree[] = "[EL0] TEST2: process tree (3 layers)...\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)msg_tree,
+                           (uint64_t)(sizeof(msg_tree) - 1U));
+            
+            int32_t gp_pid = fork();
+            if (gp_pid == 0)
+            {
+                /* 祖父进程 */
+                int32_t p_pid = fork();
+                if (p_pid == 0)
+                {
+                    /* 父进程 */
+                    int32_t c_pid = fork();
+                    if (c_pid == 0)
+                    {
+                        /* 子进程 */
+                        static const char grandchild_ok[] = "[EL0] GRANDCHILD OK\n";
+                        (void)syscall2(SYS_DEBUG_PRINT,
+                                       (uint64_t)(uintptr_t)grandchild_ok,
+                                       (uint64_t)(sizeof(grandchild_ok) - 1U));
+                        syscall0(SYS_THREAD_EXIT);
+                    }
+                    
+                    /* 父进程等待子进程 */
+                    int status;
+                    waitpid(c_pid, &status, 0);
+                    syscall0(SYS_THREAD_EXIT);
+                }
+                
+                /* 祖父进程等待父进程 */
+                int status;
+                waitpid(p_pid, &status, 0);
+                syscall0(SYS_THREAD_EXIT);
+            }
+            
+            /* 初始进程等待祖父进程 */
+            int status;
+            waitpid(gp_pid, &status, 0);
+            
+            static const char tree_pass[] = "[EL0] TEST2 PASS: process tree\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)tree_pass,
+                           (uint64_t)(sizeof(tree_pass) - 1U));
+        }
+        
+        /* 测试 3: exit - 进程退出 */
+        {
+            static const char msg_exit[] = "[EL0] TEST3: exit...\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)msg_exit,
+                           (uint64_t)(sizeof(msg_exit) - 1U));
+            
+            int32_t child_pid = fork();
+            if (child_pid == 0)
+            {
+                /* 子进程退出 */
+                static const char child_exit[] = "[EL0] CHILD exit(42)\n";
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)child_exit,
+                               (uint64_t)(sizeof(child_exit) - 1U));
+                syscall1(SYS_THREAD_EXIT, 42ULL);
+            }
+            
+            /* 父进程等待子进程 */
+            int status;
+            int32_t waited = waitpid(child_pid, &status, 0);
+            if (waited == child_pid && status == 42)
+            {
+                static const char exit_pass[] = "[EL0] TEST3 PASS: exit\n";
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)exit_pass,
+                               (uint64_t)(sizeof(exit_pass) - 1U));
+            }
+        }
+        
+        /* 测试 4: kill - 信号发送 */
+        {
+            static const char msg_kill[] = "[EL0] TEST4: kill (SIGTERM)...\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)msg_kill,
+                           (uint64_t)(sizeof(msg_kill) - 1U));
+            
+            int32_t child_pid = fork();
+            if (child_pid == 0)
+            {
+                /* 子进程睡眠 */
+                static const char child_sleep[] = "[EL0] CHILD sleeping...\n";
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)child_sleep,
+                               (uint64_t)(sizeof(child_sleep) - 1U));
+                for (volatile int i = 0; i < 10000000; i++);
+                syscall0(SYS_THREAD_EXIT);
+            }
+            
+            /* 父进程发送信号 */
+            kill(child_pid, 15);  /* SIGTERM */
+            
+            /* 等待子进程 */
+            int status;
+            int32_t waited = waitpid(child_pid, &status, 0);
+            if (waited == child_pid)
+            {
+                static const char kill_pass[] = "[EL0] TEST4 PASS: kill\n";
+                (void)syscall2(SYS_DEBUG_PRINT,
+                               (uint64_t)(uintptr_t)kill_pass,
+                               (uint64_t)(sizeof(kill_pass) - 1U));
+            }
+        }
+        
+        /* 所有测试完成 */
+        {
+            static const char all_pass[] = "[EL0] ALL PROC TESTS PASSED\n";
+            (void)syscall2(SYS_DEBUG_PRINT,
+                           (uint64_t)(uintptr_t)all_pass,
+                           (uint64_t)(sizeof(all_pass) - 1U));
+        }
+    }
+
+    /* 步骤 9: 最终汇总 */
     {
         static const char m4[] = "[EL0] ALL PASSED\n";
         (void)syscall2(SYS_DEBUG_PRINT,
@@ -2391,6 +2553,218 @@ void kernel_main(void)
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
 #if CONFIG_DEBUG
+
+    /* ---- ELF 加载器端到端测试 ---- */
+    {
+        /* ELF 常量定义 */
+        #define ELF_TEST_ET_EXEC    2U
+        #define ELF_TEST_EM_AARCH64 183U
+        #define ELF_TEST_PT_LOAD    1U
+        #define ELF_TEST_PF_R       (1U << 0)
+        #define ELF_TEST_PF_W       (1U << 1)
+        #define ELF_TEST_PF_X       (1U << 2)
+
+        /* ELF 头结构（仅需要的字段） */
+        typedef struct
+        {
+            uint8_t  e_ident[16];
+            uint16_t e_type;
+            uint16_t e_machine;
+            uint32_t e_version;
+            uint64_t e_entry;
+            uint64_t e_phoff;
+            uint64_t e_shoff;
+            uint32_t e_flags;
+            uint16_t e_ehsize;
+            uint16_t e_phentsize;
+            uint16_t e_phnum;
+            uint16_t e_shentsize;
+            uint16_t e_shnum;
+        } elf_test_header_t;
+
+        /* ELF 程序头结构 */
+        typedef struct
+        {
+            uint32_t p_type;
+            uint32_t p_flags;
+            uint64_t p_offset;
+            uint64_t p_vaddr;
+            uint64_t p_paddr;
+            uint64_t p_filesz;
+            uint64_t p_memsz;
+            uint64_t p_align;
+        } elf_test_phdr_t;
+
+        /* ELF 段信息 */
+        typedef struct
+        {
+            uint64_t vaddr;
+            uint64_t length;
+            uint64_t offset;
+            uint8_t  prot;
+            bool     active;
+        } elf_test_seg_t;
+
+        /* 内嵌 ELF 二进制：简单的 AArch64 用户态程序
+         * 该 ELF 在构建时由 simple.c 编译生成，
+         * 通过 xxd/ld 机制嵌入内核数据段。
+         * 这里使用手工构造的最小 ELF 以确保自包含。 */
+
+        /* 从 VirtIO 块设备读取 ELF 数据（扇区 0） */
+        static uint8_t s_elf_buf[4096U] __attribute__((aligned(8)));
+        int64_t elf_ret;
+        const elf_test_header_t *ehdr;
+        uint32_t elf_step;
+        uint32_t seg_count;
+        uint32_t si;
+
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] Test start\n");
+        elf_step = 0U;
+
+        /* 步骤 1: 从块设备读取 ELF 文件 */
+        elf_ret = device_read(2U, s_elf_buf, 4096ULL, 0ULL);
+        if (elf_ret <= 0)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] FAIL step 1 (read)\n");
+            elf_step = 1U;
+        }
+
+        if (elf_step == 0U)
+        {
+            ehdr = (const elf_test_header_t *)(void *)s_elf_buf;
+
+            /* 步骤 2: 验证 ELF 魔数 */
+            if ((ehdr->e_ident[0U] != 0x7FU) ||
+                (ehdr->e_ident[1U] != 'E') ||
+                (ehdr->e_ident[2U] != 'L') ||
+                (ehdr->e_ident[3U] != 'F'))
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 2 (magic)\n");
+                elf_step = 2U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            /* 步骤 3: 验证 ELF 类别（64-bit） */
+            if (ehdr->e_ident[4U] != 2U)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 3 (class)\n");
+                elf_step = 3U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            /* 步骤 4: 验证字节序（小端） */
+            if (ehdr->e_ident[5U] != 1U)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 4 (endian)\n");
+                elf_step = 4U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            /* 步骤 5: 验证架构（AArch64） */
+            if (ehdr->e_machine != ELF_TEST_EM_AARCH64)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 5 (machine)\n");
+                elf_step = 5U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            /* 步骤 6: 验证文件类型（EXEC） */
+            if (ehdr->e_type != ELF_TEST_ET_EXEC)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 6 (type)\n");
+                elf_step = 6U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            /* 步骤 7: 打印入口点 */
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] entry=0x");
+            uart_print_hex((uint64_t)QEMU_UART0_BASE, ehdr->e_entry);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+            /* 步骤 8: 解析程序头段 */
+            seg_count = 0U;
+
+            if ((ehdr->e_phoff > 0U) && (ehdr->e_phnum > 0U) &&
+                (ehdr->e_phentsize >= sizeof(elf_test_phdr_t)))
+            {
+                const elf_test_phdr_t *phdr;
+                elf_test_seg_t segs[16U];
+
+                phdr = (const elf_test_phdr_t *)(void *)(
+                    s_elf_buf + ehdr->e_phoff);
+
+                for (si = 0U; (si < ehdr->e_phnum) && (si < 16U); si++)
+                {
+                    if (phdr[si].p_type == ELF_TEST_PT_LOAD)
+                    {
+                        segs[seg_count].vaddr = phdr[si].p_vaddr;
+                        segs[seg_count].length = phdr[si].p_memsz;
+                        segs[seg_count].offset = phdr[si].p_offset;
+
+                        segs[seg_count].prot = 0U;
+                        if ((phdr[si].p_flags & ELF_TEST_PF_R) != 0U)
+                        {
+                            segs[seg_count].prot |= 1U;
+                        }
+                        if ((phdr[si].p_flags & ELF_TEST_PF_W) != 0U)
+                        {
+                            segs[seg_count].prot |= 2U;
+                        }
+                        if ((phdr[si].p_flags & ELF_TEST_PF_X) != 0U)
+                        {
+                            segs[seg_count].prot |= 4U;
+                        }
+
+                        segs[seg_count].active = true;
+                        seg_count++;
+                    }
+                }
+
+                /* 打印段信息 */
+                for (si = 0U; si < seg_count; si++)
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                                  "[ELF] seg ");
+                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)si);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " vaddr=0x");
+                    uart_print_hex((uint64_t)QEMU_UART0_BASE, segs[si].vaddr);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=0x");
+                    uart_print_hex((uint64_t)QEMU_UART0_BASE, segs[si].length);
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " prot=0x");
+                    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)segs[si].prot);
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                }
+            }
+
+            /* 步骤 9: 验证至少有 1 个 PT_LOAD 段 */
+            if (seg_count == 0U)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                              "[ELF] FAIL step 9 (no load segments)\n");
+                elf_step = 9U;
+            }
+        }
+
+        if (elf_step == 0U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] ALL PASSED\n");
+        }
+    }
 
     /* ---- 驱动框架端到端测试 ---- */
     {

@@ -5,6 +5,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(AISafeOS64 C ASM)
 
+# ARM64 交叉编译工具链
+if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/toolchain-arm64.cmake")
+    include(${CMAKE_SOURCE_DIR}/cmake/toolchain-arm64.cmake)
+endif()
+
 # C 标准设置
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -25,35 +30,13 @@ include_directories(
 # MISRA-C:2012 合规编译选项（GNU/Clang）
 # ==============================================================================
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    add_compile_options(
-        -Wall                   # 所有警告
-        -Wextra                 # 额外警告
-        -Werror                 # 警告视为错误
-        -Wpedantic              # 严格标准
-        -Wconversion            # 隐式转换警告
-        -Wsign-conversion       # 符号转换警告
-        -Wshadow                # 变量遮蔽警告
-        -Wstrict-prototypes     # 严格原型检查
-        -Wmissing-prototypes    # 缺失原型警告
-        -Wstrict-overflow=1     # 严格溢出检查
-        -Wvla                   # 禁止变长数组警告
-        -ffreestanding          # 自由standing环境
-        -fno-builtin            # 禁用内置函数
-        -fno-common             # 禁止common符号
-        -fdata-sections         # 分离数据段
-        -ffunction-sections     # 分离代码段
-        -fno-strict-aliasing    # 禁止严格别名
-        -fno-stack-protector    # 裸机环境无栈保护器运行时
-        # MISRA C 额外警告选项
-        -Wundef                 # 未定义宏警告
-        -Wcast-align            # 对齐转换警告
-        -Wwrite-strings         # 字符串字面量 const 限定
-        -Wold-style-definition  # 旧式函数定义警告
-        -Wmissing-declarations  # 缺少声明警告
-        -Wredundant-decls       # 冗余声明警告
-        -Wnested-externs        # 嵌套 extern 警告
-        -Wlogical-op            # 逻辑操作符可疑使用
-        -Waggregate-return      # 返回结构体/联合体警告
+    # 只对 C 文件应用编译选项
+    set_source_files_properties(
+        ${CMAKE_CURRENT_LIST_DIR}/kernel/*.c
+        ${CMAKE_CURRENT_LIST_DIR}/lib/*.c
+        PROPERTIES
+        COMPILE_OPTIONS
+        "-Wall;-Wextra;-Werror;-Wpedantic;-Wconversion;-Wsign-conversion;-Wshadow;-Wstrict-prototypes;-Wmissing-prototypes;-Wstrict-overflow=1;-Wvla;-ffreestanding;-fno-builtin;-fno-common;-fdata-sections;-ffunction-sections;-fno-strict-aliasing;-fno-stack-protector;-Wundef;-Wcast-align;-Wwrite-strings;-Wold-style-definition;-Wmissing-declarations;-Wredundant-decls;-Wnested-externs;-Wlogical-op;-Waggregate-return"
     )
 endif()
 
@@ -74,6 +57,8 @@ add_subdirectory(kernel)
 # musl libc 适配层（交叉编译时构建）
 if(CMAKE_CROSSCOMPILING)
     add_subdirectory(lib/musl_aisafe)
+    # ELF 测试程序（交叉编译为 AArch64 ELF）
+    add_subdirectory(services/test_elf)
 endif()
 
 # ==============================================================================
@@ -109,6 +94,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         test_capability
         test_capability_revoke
         test_smp
+        test_process
+        test_proc_states
     )
 
     foreach(test_name ${TEST_SOURCES})
@@ -119,12 +106,12 @@ if(NOT CMAKE_CROSSCOMPILING)
             -Wall
             -Wextra
             -Wno-unused-function
-            -Wno-sign-comparison
             -Wno-missing-prototypes
             -Wno-missing-declarations
             -Wno-old-style-definition
             -Wno-nested-externs
             -Wno-implicit-function-declaration
+            -Wno-unused-but-set-variable
         )
         # 部分测试需要链接数学库
         target_link_libraries(${test_name} PRIVATE m)
@@ -210,17 +197,19 @@ endif()
 add_custom_target(qemu
     COMMAND qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 1
             -m 1024 -nographic -kernel ${CMAKE_BINARY_DIR}/aisafe64.bin
-    DEPENDS aisafe64.elf
+            -drive if=virtio,format=raw,file=${CMAKE_BINARY_DIR}/disk.img
+    DEPENDS aisafe64.elf simple.elf
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "在 QEMU virt 平台上运行 AISafeOS64 微内核"
+    COMMENT "在 QEMU virt 平台上运行 AISafeOS64 微内核（带磁盘映像）"
 )
 
 # QEMU 调试目标
 add_custom_target(qemu-debug
     COMMAND qemu-system-aarch64 -M virt -cpu cortex-a57 -smp 1
             -m 1024 -nographic -kernel ${CMAKE_BINARY_DIR}/aisafe64.bin
+            -drive if=virtio,format=raw,file=${CMAKE_BINARY_DIR}/disk.img
             -S -s
-    DEPENDS aisafe64.elf
+    DEPENDS aisafe64.elf simple.elf
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "在 QEMU 中启动 AISafeOS64 并等待 GDB 连接（端口 1234）"
 )

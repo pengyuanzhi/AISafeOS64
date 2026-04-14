@@ -370,6 +370,26 @@ static inline int64_t syscall3(uint32_t syscall_nr, uint64_t arg0,
     return ret;
 }
 
+static inline int64_t syscall4(uint32_t syscall_nr, uint64_t arg0,
+                                 uint64_t arg1, uint64_t arg2, uint64_t arg3)
+{
+    int64_t ret;
+    __asm__ volatile(
+        "mov x8, %[nr]\n"
+        "mov x0, %[a0]\n"
+        "mov x1, %[a1]\n"
+        "mov x2, %[a2]\n"
+        "mov x3, %[a3]\n"
+        "svc #0\n"
+        "mov %[ret], x0\n"
+        : [ret] "=r"(ret)
+        : [nr] "r"((uint64_t)syscall_nr),
+          [a0] "r"(arg0), [a1] "r"(arg1), [a2] "r"(arg2), [a3] "r"(arg3)
+        : "x0", "x1", "x2", "x3", "x8", "memory"
+    );
+    return ret;
+}
+
 static inline int64_t syscall5(uint32_t syscall_nr, uint64_t arg0,
                                 uint64_t arg1, uint64_t arg2,
                                 uint64_t arg3, uint64_t arg4)

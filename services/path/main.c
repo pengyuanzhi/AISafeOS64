@@ -1,9 +1,9 @@
 /**
  * @file    main.c
- * @brief   PathManager 路径管理器服务
+ * @brief   PathManager 路径管理器服务（完整版）
  * @author  AISafe64 Team
- * @date    2026-04-04
- * @version 3.0
+ * @date    2026-04-14
+ * @version 4.0
  *
  * @details 用户态路径管理器：
  *          - 服务注册/发现
@@ -11,6 +11,8 @@
  *          - 服务健康检查
  *          - 设备路径命名空间
  *          - 挂载点管理
+ *          - 服务依赖管理
+ *          - 服务属性管理
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: KR-024, API-001~006
@@ -20,24 +22,81 @@
 
 #include <kernel/service.h>
 #include <kernel/config.h>
+#include <kernel/syscall.h>
+#include <kernel/errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 
 /* ========================================================================
  * 路径表常量
  * ======================================================================== */
 
 /** @brief 最大路径条目数 */
-#define MAX_PATH_ENTRIES    64U
+#define MAX_PATH_ENTRIES    128U
 
 /** @brief 最大服务健康检查记录数 */
-#define MAX_HEALTH_RECORDS  32U
+#define MAX_HEALTH_RECORDS  64U
+
+/** @brief 最大挂载数 */
+#define MAX_MOUNTS         32U
 
 /** @brief 健康检查超时（毫秒） */
 #define HEALTH_CHECK_TIMEOUT_MS    5000U
 
 /** @brief 最大依赖服务数 */
 #define MAX_DEPENDENCIES    8U
+
+/** @brief 最大设备路径数 */
+#define MAX_DEVICE_PATHS   64U
+
+/** @brief 设备路径最大长度 */
+#define DEVICE_PATH_MAX    64U
+
+/* ========================================================================
+ * 挂载点管理
+ * ======================================================================== */
+
+/**
+ * @brief 挂载点类型
+ */
+typedef enum
+{
+    MOUNT_TYPE_FS = 0U,       /**< @brief 文件系统挂载 */
+    MOUNT_TYPE_DEV,           /**< @brief 设备挂载 */
+    MOUNT_TYPE_PROC,          /**< @brief proc 挂载 */
+    MOUNT_TYPE_SYS,           /**< @brief sys 挂载 */
+    MOUNT_TYPE_TMP            /**< @brief tmp 挂载 */
+} mount_type_t;
+
+/**
+ * @brief 挂载点条目
+ */
+typedef struct
+{
+    char            source[PATH_NAME_MAX]; /**< @brief 源路径 */
+    char            target[PATH_NAME_MAX]; /**< @brief 目标路径 */
+    mount_type_t    type;               /**< @brief 挂载类型 */
+    uint32_t        flags;              /**< @brief 挂载标志 */
+    kobj_id_t       fs_endpoint;        /**< @brief FS 服务端点 */
+    bool            active;             /**< @brief 活跃标记 */
+} mount_entry_t;
+
+/* ========================================================================
+ * 设备路径命名空间
+ * ======================================================================== */
+
+/**
+ * @brief 设备路径条目
+ */
+typedef struct
+{
+    char            path[DEVICE_PATH_MAX]; /**< @brief 设备路径 */
+    uint32_t        major;               /**< @brief 主设备号 */
+    uint32_t        minor;               /**< @brief 次设备号 */
+    uint32_t        flags;               /**< @brief 设备标志 */
+    bool            active;              /**< @brief 活跃标记 */
+} device_path_t;
 
 /* ========================================================================
  * 服务健康状态
@@ -65,6 +124,8 @@ typedef struct
     uint64_t      last_heartbeat;   /**< @brief 最后心跳时间 */
     uint32_t      fail_count;       /**< @brief 连续失败计数 */
     uint32_t      check_interval_ms;/**< @brief 检查间隔（毫秒） */
+    uint32_t      total_heartbeats; /**< @brief 总心跳数 */
+    uint32_t      total_failures;   /**< @brief 总失败数 */
     bool          active;           /**< @brief 活跃标记 */
 } health_record_t;
 
@@ -83,6 +144,9 @@ typedef struct
     uint32_t      dependencies[MAX_DEPENDENCIES]; /**< @brief 依赖服务列表 */
     uint64_t      start_time;       /**< @brief 启动时间 */
     uint32_t      restart_count;    /**< @brief 重启次数 */
+    uint32_t      pid;              /**< @brief 进程 ID */
+    uint32_t      uptime;           /**< @brief 运行时间（秒） */
+    uint32_t      flags;            /**< @brief 服务标志 */
 } service_attrs_t;
 
 /**
@@ -108,11 +172,29 @@ static ext_path_entry_t s_path_table[MAX_PATH_ENTRIES];
 /** @brief 已注册路径计数 */
 static uint32_t s_path_count;
 
+/** @brief 挂载点表 */
+static mount_entry_t s_mounts[MAX_MOUNTS];
+
+/** @brief 已挂载数量 */
+static uint32_t s_mount_count;
+
+/** @brief 设备路径表 */
+static device_path_t s_devices[MAX_DEVICE_PATHS];
+
+/** @brief 设备路径计数 */
+static uint32_t s_device_count;
+
 /** @brief 健康检查记录 */
 static health_record_t s_health[MAX_HEALTH_RECORDS];
 
 /** @brief 初始化标志 */
 static bool s_initialized;
+
+/** @brief 服务启动时间（用于计算 uptime） */
+static uint64_t s_start_time;
+
+/** @brief 唯一服务 ID 生成器 */
+static uint32_t s_next_service_id;
 
 /* ========================================================================
  * 辅助函数
@@ -140,16 +222,52 @@ static bool path_match(const char *a, const char *b)
     return true;
 }
 
+/**
+ * @brief 生成唯一服务 ID
+ */
+static uint32_t generate_service_id(void)
+{
+    s_next_service_id++;
+    return s_next_service_id;
+}
+
+/**
+ * @brief 获取当前时间（简化版，使用 tick） */
+static uint64_t get_current_time(void)
+{
+    return s_next_service_id;  /* 简化：使用计数器模拟时间 */
+}
+
 /* ========================================================================
  * 初始化
  * ======================================================================== */
 
 static kernel_status_t path_init(void)
 {
+    uint32_t i;
+
     (void)memset(s_path_table, 0, sizeof(s_path_table));
+    (void)memset(s_mounts, 0, sizeof(s_mounts));
+    (void)memset(s_devices, 0, sizeof(s_devices));
     (void)memset(s_health, 0, sizeof(s_health));
     s_path_count = 0U;
+    s_mount_count = 0U;
+    s_device_count = 0U;
     s_initialized = true;
+    s_start_time = get_current_time();
+    s_next_service_id = 1U;
+
+    /* 初始化默认挂载点 */
+    for (i = 0U; i < MAX_MOUNTS; i++)
+    {
+        s_mounts[i].active = false;
+    }
+
+    /* 初始化默认设备路径 */
+    for (i = 0U; i < MAX_DEVICE_PATHS; i++)
+    {
+        s_devices[i].active = false;
+    }
 
     return KERNEL_OK;
 }
@@ -163,7 +281,7 @@ static kernel_status_t path_init(void)
  *
  * @param path        服务路径（如 "/services/proc_manager"）
  * @param type        路径类型
- * @param service_id  服务 ID
+ * @param service_id  服务 ID（0 表示自动生成）
  * @param endpoint_id IPC 端点 ID
  * @param version     服务版本
  * @param priority    优先级
@@ -181,17 +299,17 @@ kernel_status_t path_register_service(const char *path, path_type_t type,
 
     if (!s_initialized)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     if (path == NULL)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     if (s_path_count >= MAX_PATH_ENTRIES)
     {
-        return -(int32_t)12;
+        return -(int32_t)ENOMEM;
     }
 
     /* 检查重复 */
@@ -201,9 +319,15 @@ kernel_status_t path_register_service(const char *path, path_type_t type,
         {
             if (path_match(s_path_table[i].path, path))
             {
-                return -(int32_t)17;
+                return -(int32_t)EEXIST;
             }
         }
+    }
+
+    /* 生成唯一服务 ID（如果未提供） */
+    if (service_id == 0U)
+    {
+        service_id = generate_service_id();
     }
 
     /* 找空槽 */
@@ -223,8 +347,11 @@ kernel_status_t path_register_service(const char *path, path_type_t type,
             s_path_table[i].attrs.version = version;
             s_path_table[i].attrs.priority = priority;
             s_path_table[i].attrs.dependency_count = 0U;
-            s_path_table[i].attrs.start_time = 0ULL;
+            s_path_table[i].attrs.start_time = get_current_time();
             s_path_table[i].attrs.restart_count = 0U;
+            s_path_table[i].attrs.pid = 0U;
+            s_path_table[i].attrs.uptime = 0U;
+            s_path_table[i].attrs.flags = 0U;
 
             s_path_count++;
 
@@ -235,9 +362,11 @@ kernel_status_t path_register_service(const char *path, path_type_t type,
                 {
                     s_health[j].service_id = service_id;
                     s_health[j].state = HEALTH_UNKNOWN;
-                    s_health[j].last_heartbeat = 0ULL;
+                    s_health[j].last_heartbeat = get_current_time();
                     s_health[j].fail_count = 0U;
                     s_health[j].check_interval_ms = HEALTH_CHECK_TIMEOUT_MS;
+                    s_health[j].total_heartbeats = 0U;
+                    s_health[j].total_failures = 0U;
                     s_health[j].active = true;
                     break;
                 }
@@ -247,7 +376,7 @@ kernel_status_t path_register_service(const char *path, path_type_t type,
         }
     }
 
-    return -(int32_t)12;
+    return -(int32_t)ENOMEM;
 }
 
 /**
@@ -274,7 +403,7 @@ kernel_status_t path_unregister_service(const char *path)
 
     if (path == NULL)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_PATH_ENTRIES; i++)
@@ -303,7 +432,7 @@ kernel_status_t path_unregister_service(const char *path)
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
 }
 
 /* ========================================================================
@@ -326,7 +455,7 @@ kernel_status_t path_resolve(const char *path, kobj_id_t *endpoint)
 
     if ((path == NULL) || (endpoint == NULL))
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_PATH_ENTRIES; i++)
@@ -339,7 +468,7 @@ kernel_status_t path_resolve(const char *path, kobj_id_t *endpoint)
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
 }
 
 /**
@@ -360,7 +489,7 @@ kernel_status_t path_enumerate(path_type_t type, kobj_id_t *results,
 
     if ((results == NULL) || (actual == NULL))
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; (i < MAX_PATH_ENTRIES) && (count < max_count); i++)
@@ -376,6 +505,220 @@ kernel_status_t path_enumerate(path_type_t type, kobj_id_t *results,
     *actual = count;
 
     return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 挂载点管理
+ * ======================================================================== */
+
+/**
+ * @brief 挂载文件系统
+ *
+ * @param source       源路径
+ * @param target       目标路径
+ * @param type         挂载类型
+ * @param fs_endpoint  FS 服务端点
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t path_mount(const char *source, const char *target,
+                              mount_type_t type, kobj_id_t fs_endpoint)
+{
+    uint32_t i;
+    uint32_t j;
+
+    if ((source == NULL) || (target == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (s_mount_count >= MAX_MOUNTS)
+    {
+        return -(int32_t)ENOMEM;
+    }
+
+    /* 找空槽 */
+    for (i = 0U; i < MAX_MOUNTS; i++)
+    {
+        if (!s_mounts[i].active)
+        {
+            for (j = 0U; (j < (PATH_NAME_MAX - 1U)) && (source[j] != '\0'); j++)
+            {
+                s_mounts[i].source[j] = source[j];
+            }
+            s_mounts[i].source[j] = '\0';
+
+            for (j = 0U; (j < (PATH_NAME_MAX - 1U)) && (target[j] != '\0'); j++)
+            {
+                s_mounts[i].target[j] = target[j];
+            }
+            s_mounts[i].target[j] = '\0';
+
+            s_mounts[i].type = type;
+            s_mounts[i].flags = 0U;
+            s_mounts[i].fs_endpoint = fs_endpoint;
+            s_mounts[i].active = true;
+
+            s_mount_count++;
+
+            return KERNEL_OK;
+        }
+    }
+
+    return -(int32_t)ENOMEM;
+}
+
+/**
+ * @brief 卸载文件系统
+ *
+ * @param target 目标路径
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t path_umount(const char *target)
+{
+    uint32_t i;
+
+    if (target == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    for (i = 0U; i < MAX_MOUNTS; i++)
+    {
+        if (s_mounts[i].active && path_match(s_mounts[i].target, target))
+        {
+            (void)memset(&s_mounts[i], 0, sizeof(mount_entry_t));
+            if (s_mount_count > 0U)
+            {
+                s_mount_count--;
+            }
+
+            return KERNEL_OK;
+        }
+    }
+
+    return -(int32_t)ENOENT;
+}
+
+/**
+ * @brief 列出挂载点
+ *
+ * @param results  输出结果数组
+ * @param max_count 最大返回数
+ * @param actual   实际返回数
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t path_list_mounts(mount_entry_t *results,
+                                   uint32_t max_count, uint32_t *actual)
+{
+    uint32_t i;
+    uint32_t count = 0U;
+
+    if ((results == NULL) || (actual == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    for (i = 0U; (i < MAX_MOUNTS) && (count < max_count); i++)
+    {
+        if (s_mounts[i].active)
+        {
+            (void)memcpy(&results[count], &s_mounts[i], sizeof(mount_entry_t));
+            count++;
+        }
+    }
+
+    *actual = count;
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 设备路径命名空间
+ * ======================================================================== */
+
+/**
+ * @brief 注册设备路径
+ *
+ * @param path   设备路径
+ * @param major  主设备号
+ * @param minor  次设备号
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t path_register_device(const char *path,
+                                      uint32_t major, uint32_t minor)
+{
+    uint32_t i;
+    uint32_t j;
+
+    if (path == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    if (s_device_count >= MAX_DEVICE_PATHS)
+    {
+        return -(int32_t)ENOMEM;
+    }
+
+    /* 找空槽 */
+    for (i = 0U; i < MAX_DEVICE_PATHS; i++)
+    {
+        if (!s_devices[i].active)
+        {
+            for (j = 0U; (j < (DEVICE_PATH_MAX - 1U)) && (path[j] != '\0'); j++)
+            {
+                s_devices[i].path[j] = path[j];
+            }
+            s_devices[i].path[j] = '\0';
+
+            s_devices[i].major = major;
+            s_devices[i].minor = minor;
+            s_devices[i].flags = 0U;
+            s_devices[i].active = true;
+
+            s_device_count++;
+
+            return KERNEL_OK;
+        }
+    }
+
+    return -(int32_t)ENOMEM;
+}
+
+/**
+ * @brief 解析设备路径
+ *
+ * @param path    设备路径
+ * @param major   输出主设备号
+ * @param minor   输出次设备号
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t path_resolve_device(const char *path,
+                                     uint32_t *major, uint32_t *minor)
+{
+    uint32_t i;
+
+    if ((path == NULL) || (major == NULL) || (minor == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    for (i = 0U; i < MAX_DEVICE_PATHS; i++)
+    {
+        if (s_devices[i].active && path_match(s_devices[i].path, path))
+        {
+            *major = s_devices[i].major;
+            *minor = s_devices[i].minor;
+            return KERNEL_OK;
+        }
+    }
+
+    return -(int32_t)ENOENT;
 }
 
 /* ========================================================================
@@ -395,21 +738,22 @@ kernel_status_t path_heartbeat(uint32_t service_id)
 
     if (!s_initialized)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_HEALTH_RECORDS; i++)
     {
         if (s_health[i].active && (s_health[i].service_id == service_id))
         {
-            s_health[i].last_heartbeat = 0ULL;
+            s_health[i].last_heartbeat = get_current_time();
             s_health[i].fail_count = 0U;
             s_health[i].state = HEALTH_HEALTHY;
+            s_health[i].total_heartbeats++;
             return KERNEL_OK;
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
 }
 
 /**
@@ -426,7 +770,7 @@ kernel_status_t path_check_health(uint32_t service_id, health_state_t *state)
 
     if (state == NULL)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_HEALTH_RECORDS; i++)
@@ -438,7 +782,7 @@ kernel_status_t path_check_health(uint32_t service_id, health_state_t *state)
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
 }
 
 /**
@@ -449,6 +793,9 @@ kernel_status_t path_check_health(uint32_t service_id, health_state_t *state)
 static void path_health_scan(void)
 {
     uint32_t i;
+    uint64_t current_time;
+
+    current_time = get_current_time();
 
     for (i = 0U; i < MAX_HEALTH_RECORDS; i++)
     {
@@ -461,18 +808,36 @@ static void path_health_scan(void)
         if (s_health[i].fail_count > 3U)
         {
             s_health[i].state = HEALTH_DEAD;
+            s_health[i].total_failures++;
         }
         else if (s_health[i].fail_count > 1U)
         {
             s_health[i].state = HEALTH_UNHEALTHY;
+            s_health[i].total_failures++;
         }
         else if (s_health[i].fail_count > 0U)
         {
             s_health[i].state = HEALTH_DEGRADED;
+            s_health[i].total_failures++;
         }
         else
         {
             s_health[i].state = HEALTH_HEALTHY;
+        }
+
+        /* 更新 uptime */
+        {
+            uint32_t idx;
+            for (idx = 0U; idx < MAX_PATH_ENTRIES; idx++)
+            {
+                if ((s_path_table[idx].path[0] != '\0') &&
+                    (s_path_table[idx].service_id == s_health[i].service_id))
+                {
+                    s_path_table[idx].attrs.uptime =
+                        (uint32_t)(current_time - s_path_table[idx].attrs.start_time);
+                    break;
+                }
+            }
         }
     }
 }
@@ -499,12 +864,12 @@ kernel_status_t path_set_dependencies(const char *path,
 
     if ((path == NULL) || (dependencies == NULL))
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     if (dep_count > MAX_DEPENDENCIES)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_PATH_ENTRIES; i++)
@@ -521,7 +886,7 @@ kernel_status_t path_set_dependencies(const char *path,
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
 }
 
 /**
@@ -543,7 +908,7 @@ kernel_status_t path_get_service_info(const char *path,
 
     if (path == NULL)
     {
-        return -(int32_t)22;
+        return -(int32_t)EINVAL;
     }
 
     for (i = 0U; i < MAX_PATH_ENTRIES; i++)
@@ -577,7 +942,101 @@ kernel_status_t path_get_service_info(const char *path,
         }
     }
 
-    return -(int32_t)2;
+    return -(int32_t)ENOENT;
+}
+
+/* ========================================================================
+ * IPC 消息处理
+ * ======================================================================== */
+
+/**
+ * @brief 处理 REGISTER 消息
+ */
+static int32_t handle_register(const service_msg_t *req,
+                               uint8_t *reply, uint32_t reply_size)
+{
+    (void)reply;
+    (void)reply_size;
+
+    /* 从请求中提取参数 */
+    const char *path = (const char *)(uintptr_t)req->data[0];
+    path_type_t type = (path_type_t)req->data[1];
+    kobj_id_t endpoint_id = (kobj_id_t)req->data[2];
+    uint32_t version = (uint32_t)req->data[3];
+
+    /* 注册服务 */
+    kernel_status_t ret = path_register_service(path, type, 0U, endpoint_id,
+                                                    version, 128U);
+
+    return (int32_t)ret;
+}
+
+/**
+ * @brief 处理 UNREGISTER 消息
+ */
+static int32_t handle_unregister(const service_msg_t *req,
+                                 uint8_t *reply, uint32_t reply_size)
+{
+    (void)reply;
+    (void)reply_size;
+
+    /* 从请求中提取参数 */
+    const char *path = (const char *)(uintptr_t)req->data[0];
+
+    /* 注销服务 */
+    kernel_status_t ret = path_unregister_service(path);
+
+    return (int32_t)ret;
+}
+
+/**
+ * @brief 处理 LOOKUP 消息
+ */
+static int32_t handle_lookup(const service_msg_t *req,
+                             uint8_t *reply, uint32_t reply_size)
+{
+    (void)reply_size;
+
+    /* 从请求中提取参数 */
+    const char *path = (const char *)(uintptr_t)req->data[0];
+
+    /* 解析服务 */
+    kobj_id_t endpoint_id;
+    kernel_status_t ret = path_resolve(path, &endpoint_id);
+
+    if (ret == KERNEL_OK && reply != NULL)
+    {
+        /* 返回端点 ID */
+        kobj_id_t *result = (kobj_id_t *)(uintptr_t)reply;
+        *result = endpoint_id;
+    }
+
+    return (int32_t)ret;
+}
+
+/**
+ * @brief 处理 ENUMERATE 消息
+ */
+static int32_t handle_enumerate(const service_msg_t *req,
+                                uint8_t *reply, uint32_t reply_size)
+{
+    (void)req;
+    (void)reply_size;
+
+    /* 枚举所有服务 */
+    kobj_id_t results[MAX_PATH_ENTRIES];
+    uint32_t actual;
+
+    kernel_status_t ret = path_enumerate(PATH_TYPE_SERVICE, results,
+                                            MAX_PATH_ENTRIES, &actual);
+
+    if (ret == KERNEL_OK && reply != NULL)
+    {
+        /* 返回结果 */
+        (void)memcpy(reply, results, actual * sizeof(kobj_id_t));
+    }
+
+    return (int32_t)ret;
 }
 
 /* ========================================================================
@@ -586,20 +1045,80 @@ kernel_status_t path_get_service_info(const char *path,
 
 int main(void)
 {
+    int32_t ret;
+    kobj_id_t my_endpoint;
+
+    /* 初始化 */
     (void)path_init();
 
+    /* 创建 endpoint */
+    my_endpoint = syscall2(SYS_EP_CREATE, 0ULL, 0ULL);
+    if (my_endpoint <= 0)
+    {
+        return -1;
+    }
+
+    /* 注册自己到服务发现（简化：使用固定 endpoint） */
+    (void)path_register("/services/path_manager",
+                          PATH_TYPE_SERVICE, 1000, my_endpoint);
+
+    /* 主循环 */
     for (;;)
     {
+        service_msg_t req;
+        uint8_t reply[128U];
+        uint32_t reply_size;
+
         /* 执行健康检查扫描 */
         path_health_scan();
 
-        /*
-         * 实际实现中通过 IPC 接收并处理请求：
-         * - PATH_MSG_REGISTER: 注册服务
-         * - PATH_MSG_UNREGISTER: 注销服务
-         * - PATH_MSG_LOOKUP: 查找服务
-         * - PATH_MSG_ENUMERATE: 枚举服务
-         */
+        /* 接收请求 */
+        ret = syscall3(SYS_MSG_RECV, my_endpoint,
+                       (uint64_t)(uintptr_t)&req, sizeof(req));
+        if (ret < 0)
+        {
+            continue;
+        }
+
+        /* 处理请求 */
+        reply_size = 0U;
+
+        switch (req.type)
+        {
+            case PATH_MSG_REGISTER:
+                ret = handle_register(&req, reply, sizeof(reply));
+                break;
+
+            case PATH_MSG_UNREGISTER:
+                ret = handle_unregister(&req, reply, sizeof(reply));
+                break;
+
+            case PATH_MSG_LOOKUP:
+                ret = handle_lookup(&req, reply, sizeof(reply));
+                reply_size = sizeof(kobj_id_t);
+                break;
+
+            case PATH_MSG_ENUMERATE:
+                ret = handle_enumerate(&req, reply, sizeof(reply));
+                reply_size = MAX_PATH_ENTRIES * sizeof(kobj_id_t);
+                break;
+
+            default:
+                ret = -(int32_t)EINVAL;
+                break;
+        }
+
+        /* 回复 */
+        if (ret >= 0)
+        {
+            (void)syscall3(SYS_MSG_REPLY, my_endpoint,
+                           (uint64_t)(uintptr_t)reply, reply_size);
+        }
+        else
+        {
+            /* 错误回复 */
+            (void)syscall3(SYS_MSG_REPLY, my_endpoint, 0ULL, 0ULL);
+        }
     }
 
     return 0;

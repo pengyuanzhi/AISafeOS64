@@ -472,6 +472,9 @@ typedef struct
  * 通用断言宏
  * ======================================================================== */
 
+/* 允许用户自定义测试宏，避免冲突 */
+#ifndef MOCK_KERNEL_SKIP_TEST_MACROS
+
 static uint32_t s_total  = 0U;
 static uint32_t s_passed = 0U;
 static uint32_t s_failed = 0U;
@@ -496,6 +499,22 @@ static uint32_t s_failed = 0U;
 /* ========================================================================
  * 测试辅助宏
  * ======================================================================== */
+
+/** @brief 重置断言计数器 */
+#define TEST_RESET() do { \
+    s_total = 0U; s_passed = 0U; s_failed = 0U; \
+} while (0)
+
+/** @brief 返回测试结果（0=全部通过） */
+#define TEST_RESULT() ((s_failed > 0U) ? 1 : 0)
+
+/** @brief 打印测试总结 */
+#define TEST_SUMMARY(name) do { \
+    printf("\n结果: %u 通过 / %u 失败 / %u 总计\n", \
+           s_passed, s_failed, s_total); \
+} while (0)
+
+#endif /* MOCK_KERNEL_SKIP_TEST_MACROS */
 
 /** @brief 重置断言计数器 */
 #define TEST_RESET() do { \

@@ -466,7 +466,7 @@ _Static_assert(
  * @note 生产构建应关闭此选项
  */
 #ifndef CONFIG_DEBUG
-#define CONFIG_DEBUG    0
+#define CONFIG_DEBUG    1
 #endif
 
 /**
