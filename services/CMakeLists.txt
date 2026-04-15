@@ -1,0 +1,62 @@
+# services/CMakeLists.txt
+# AISafeOS64 用户态服务构建配置（musl_aisafe 迁移版）
+#
+# 服务迁移策略：
+# - Phase 3: 从 lib/musl_legacy/ 迁移到标准 musl
+# - 保留内核系统调用（<kernel/syscall.h>）
+# - 使用 musl 字符串和内存管理
+# - 每个服务编译为独立的 ELF 文件
+
+if(CMAKE_CROSSCOMPILING)
+    # ================================================================
+    # 用户态服务列表（逐步迁移）
+    # ================================================================
+    set(USERLAND_SERVICES
+        path
+        init
+        mem
+        proc
+    )
+
+    # ================================================================
+    # 编译用户态服务（musl_aisafe 版本）
+    # ================================================================
+    foreach(SERVICE_NAME IN LISTS USERLAND_SERVICES)
+        add_executable(${SERVICE_NAME}.elf
+            ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
+        )
+
+        target_link_libraries(${SERVICE_NAME}.elf musl_aisafe)
+
+        target_include_directories(${SERVICE_NAME}.elf PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+        )
+
+        target_compile_options(${SERVICE_NAME}.elf PRIVATE
+            -std=c11
+            -Wall
+            -Wextra
+            -ffreestanding
+            -fno-builtin
+            -fno-common
+            -fno-stack-protector
+            -nostdlib
+            -nostartfiles
+            -O2
+        )
+
+        target_link_options(${SERVICE_NAME}.elf PRIVATE
+            -nostdlib
+            -nostartfiles
+            -static
+            -Wl,--gc-sections
+            -Wl,--no-warn-rwx-segments
+        )
+    endforeach()
+
+    # ================================================================
+    # 特殊处理：dev/driver_framework.c（Rust/C 混合）
+    # ================================================================
+    # add_subdirectory(dev)  # 待迁移
+endif()

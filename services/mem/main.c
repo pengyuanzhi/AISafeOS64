@@ -144,7 +144,7 @@ typedef struct
     kobj_id_t   vspace_id;          /**< @brief 虚拟地址空间 ID */
     vaddr_t     vaddr;              /**< @brief 虚拟地址 */
     paddr_t     paddr;              /**< @brief 物理地址 */
-    uint64_t    size;               @/**< @brief 映射大小 */
+    uint64_t    size;               /**< @brief 映射大小 */
     uint32_t    flags;              /**< @brief 映射标志 */
     uint32_t    owner_pid;          /**< @brief 所属进程 */
     bool        in_use;             /**< @brief 使用标记 */
