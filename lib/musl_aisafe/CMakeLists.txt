@@ -32,6 +32,7 @@ set(MUSL_CFLAGS
 # 头文件搜索路径（优先级从高到低）
 # ==============================================================================
 set(MUSL_INCS
+    ${MUSL_ASAFE}/include
     ${MUSL_ASAFE}/arch/aarch64_aisafe
     ${MUSL_UPSTREAM}/arch/generic
     ${GEN_DIR}/src/internal
