@@ -156,9 +156,8 @@ static uint64_t s_boot_start_time;
  * 外部函数声明
  * ======================================================================== */
 
-extern int sys_debug_print(const char *str, uint64_t len);
-extern void sys_thread_yield(void);
-extern uint64_t sys_get_timestamp(void);
+
+
 
 /* ========================================================================
  * 辅助函数
@@ -224,7 +223,7 @@ static void init_print(const char *msg)
 {
     if (msg != NULL)
     {
-        (void)sys_debug_print(msg, (uint64_t)init_strlen(msg));
+        (void)syscall2(SYS_DEBUG_PRINT, (uint64_t)msg, (uint64_t)init_strlen(msg));
     }
 }
 
@@ -623,7 +622,7 @@ static kernel_status_t init_start_service(uint32_t svc_idx)
      */
 
     svc->state = INIT_SVC_RUNNING;
-    svc->start_time = sys_get_timestamp();
+    svc->start_time = syscall0(SYS_SYSTEM_INFO);
     svc->last_heartbeat = svc->start_time;
     s_active_count++;
 
@@ -883,7 +882,7 @@ static void init_check_heartbeats(void)
     uint64_t now;
     init_service_desc_t *svc;
 
-    now = sys_get_timestamp();
+    now = syscall0(SYS_SYSTEM_INFO);
 
     for (i = 0U; i < INIT_MAX_SERVICES; i++)
     {
@@ -1026,7 +1025,7 @@ static void init_get_report(init_system_report_t *report)
     }
 
     report->sys_state = s_system_state;
-    report->boot_time = sys_get_timestamp() - s_boot_start_time;
+    report->boot_time = syscall0(SYS_SYSTEM_INFO) - s_boot_start_time;
 }
 
 /**
@@ -1166,7 +1165,7 @@ int main(void)
     init_print("[init] AISafeOS64 init service started\n");
 
     /* 记录启动时间 */
-    s_boot_start_time = sys_get_timestamp();
+    s_boot_start_time = syscall0(SYS_SYSTEM_INFO);
 
     /* 步骤 1：初始化服务注册表 */
     (void)memset(s_services, 0, sizeof(s_services));
@@ -1184,7 +1183,7 @@ int main(void)
         s_system_state = SYSTEM_STATE_SHUTTING_DOWN;
         for (;;)
         {
-            sys_thread_yield();
+            (void)syscall0(SYS_THREAD_YIELD);
         }
         return 1;
     }
@@ -1218,7 +1217,7 @@ int main(void)
         /* 定期打印状态报告 */
         /* TODO: 基于定时器周期性打印 */
 
-        sys_thread_yield();
+        (void)syscall0(SYS_THREAD_YIELD);
     }
 
     return 0;

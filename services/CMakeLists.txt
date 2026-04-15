@@ -9,6 +9,11 @@
 
 if(CMAKE_CROSSCOMPILING)
     # ================================================================
+    # C 运行时（启动代码和初始化）
+    # ================================================================
+    add_subdirectory(crt)
+
+    # ================================================================
     # 用户态服务列表（逐步迁移）
     # ================================================================
     set(USERLAND_SERVICES
@@ -26,7 +31,7 @@ if(CMAKE_CROSSCOMPILING)
             ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
         )
 
-        target_link_libraries(${SERVICE_NAME}.elf musl_aisafe)
+        target_link_libraries(${SERVICE_NAME}.elf musl_aisafe crt0)
 
         target_include_directories(${SERVICE_NAME}.elf PRIVATE
             ${CMAKE_SOURCE_DIR}/include
@@ -43,6 +48,8 @@ if(CMAKE_CROSSCOMPILING)
             -fno-stack-protector
             -nostdlib
             -nostartfiles
+            -U_FORTIFY_SOURCE
+            -D_FORTIFY_SOURCE=0
             -O2
         )
 
@@ -54,6 +61,41 @@ if(CMAKE_CROSSCOMPILING)
             -Wl,--no-warn-rwx-segments
         )
     endforeach()
+
+    # ================================================================
+    # 测试程序（验证启动代码和 C 运行时）
+    # ================================================================
+    add_executable(hello_start.elf hello_start.c)
+
+    target_link_libraries(hello_start.elf musl_aisafe crt0)
+
+    target_include_directories(hello_start.elf PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+    )
+
+    target_compile_options(hello_start.elf PRIVATE
+        -std=c11
+        -Wall
+        -Wextra
+        -ffreestanding
+        -fno-builtin
+        -fno-common
+        -fno-stack-protector
+        -nostdlib
+        -nostartfiles
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -O2
+    )
+
+    target_link_options(hello_start.elf PRIVATE
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--no-warn-rwx-segments
+    )
 
     # ================================================================
     # 特殊处理：dev/driver_framework.c（Rust/C 混合）
