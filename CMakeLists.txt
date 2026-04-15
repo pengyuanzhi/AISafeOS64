@@ -64,6 +64,9 @@ if(CMAKE_CROSSCOMPILING)
     add_executable(test_musl_aisafe services/test_musl_aisafe.c)
     target_link_libraries(test_musl_aisafe musl_aisafe)
     target_include_directories(test_musl_aisafe PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include)
+    
+    # 用户态服务（musl_aisafe 迁移）
+    add_subdirectory(services)
 endif()
 
 # ==============================================================================
