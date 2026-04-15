@@ -1182,6 +1182,88 @@ static int32_t proc_set_state(uint32_t pid, proc_state_t state)
     return 0;
 }
 
+/* ========================================================================
+ * proc_get_proclist - 获取进程列表
+ * ======================================================================== */
+
+/**
+ * @brief 获取进程列表
+ *
+ * @param pid_list 输出：进程 ID 列表
+ * @param max_count 最大进程数
+ * @param count 输出：实际进程数
+ * @return 0 成功，其他为错误码
+ */
+static int32_t proc_get_proclist(uint32_t *pid_list, uint32_t max_count,
+                              uint32_t *count)
+{
+    uint32_t i;
+    uint32_t actual_count;
+
+    actual_count = 0U;
+
+    for (i = 0U; i < MAX_PROCESSES; i++)
+    {
+        if (s_procs[i].base.state != PROC_STATE_EMPTY)
+        {
+            if (actual_count < max_count)
+            {
+                pid_list[actual_count] = s_procs[i].base.pid;
+            }
+            actual_count++;
+        }
+    }
+
+    *count = actual_count;
+
+    return 0;
+}
+
+/* ========================================================================
+ * proc_killpg - 终止进程组
+ * ======================================================================== */
+
+/**
+ * @brief 终止进程组中的所有进程
+ *
+ * @param pgrp 进程组 ID
+ * @param sig 信号
+ * @return 0 成功，其他为错误码
+ */
+static int32_t proc_killpg(uint32_t pgrp, uint32_t sig)
+{
+    uint32_t i;
+    int32_t ret;
+    uint32_t killed_count;
+
+    killed_count = 0U;
+    ret = 0;
+
+    for (i = 0U; i < MAX_PROCESSES; i++)
+    {
+        if ((s_procs[i].base.state != PROC_STATE_EMPTY) &&
+            (s_procs[i].pgrp == pgrp))
+        {
+            int32_t tmp = proc_exit(s_procs[i].base.pid, -(int32_t)sig);
+            if (tmp == 0)
+            {
+                killed_count++;
+            }
+            else
+            {
+                ret = tmp;
+            }
+        }
+    }
+
+    if (killed_count == 0U)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    return ret;
+}
+
 int main(void)
 {
     int32_t ret;
