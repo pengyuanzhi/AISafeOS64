@@ -141,7 +141,7 @@ static void blk_dbg_hex(uint64_t value)
 
 /** @brief MTTCG 模式下 MMIO 探针会持续持有 BQL，阻止 QEMU 主循环处理
  *         VirtIO BH。设为 0 直接进入 WFI 模式，立即释放 BQL */
-#define VIRTQ_YIELD_THRESH          0U
+#define VIRTQ_YIELD_THRESH          1000U  /* 临时修改：先使用 MMIO 探针 */
 
 /**
  * @brief VirtQueue 描述符（16 字节）

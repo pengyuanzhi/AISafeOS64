@@ -2420,7 +2420,7 @@ void kernel_main(void)
         (void)device_probe_all();
     }
 
-#if 0  /* CONFIG_DEBUG */  /* 临时禁用 VirtIO Block 测试 */
+#if CONFIG_DEBUG
     /* ---- VirtIO Block 读写验证 ---- */
     {
         int64_t blk_ret;
