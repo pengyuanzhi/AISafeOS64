@@ -133,8 +133,7 @@ file(GLOB _LDSO_ARCH ${MUSL_UPSTREAM}/src/ldso/aarch64/*.s)
 set(_AISAFE_SRCS
     ${MUSL_ASAFE}/src/syscall_dispatch.c
     ${MUSL_ASAFE}/src/musl_safety.c
-    ${MUSL_ASAFE}/src/boot.c
-    ${MUSL_ASAFE}/src/tls.c
+    ${MUSL_ASAFE}/src/boot_simple.c
 )
 
 # ==============================================================================
