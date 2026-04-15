@@ -20,6 +20,36 @@
 #include <stddef.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/types.h>
+
+/* ========================================================================
+ * 权限位定义（sys/stat.h 的子集）
+ * ======================================================================== */
+
+#define S_IRUSR 00400  /* 读权限，所有者 */
+#define S_IWUSR 00200  /* 写权限，所有者 */
+#define S_IXUSR 00100  /* 执行权限，所有者 */
+#define S_IRWXU (S_IRUSR|S_IWUSR|S_IXUSR)  /* 所有者所有权限 */
+
+#define S_IRGRP 00040  /* 读权限，组 */
+#define S_IWGRP 00020  /* 写权限，组 */
+#define S_IXGRP 00010  /* 执行权限，组 */
+#define S_IRWXG (S_IRGRP|S_IWGRP|S_IXGRP)  /* 组所有权限 */
+
+#define S_IROTH 00004  /* 读权限，其他 */
+#define S_IWOTH 00002  /* 写权限，其他 */
+#define S_IXOTH 00001  /* 执行权限，其他 */
+#define S_IRWXO (S_IROTH|S_IWOTH|S_IXOTH)  /* 其他所有权限 */
+
+#define S_ISUID 004000  /* 设置用户 ID */
+#define S_ISGID 002000  /* 设置组 ID */
+#define S_ISVTX 001000  /* 粘滞位 */
+
+/* ========================================================================
+ * 类型定义
+ * ======================================================================== */
+
+typedef unsigned int mode_t;
 
 /* ========================================================================
  * 参数验证接口

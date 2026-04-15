@@ -190,6 +190,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_musl_safety PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_musl_safety COMMAND test_musl_safety)
 
+    # test_syscall_dispatch — musl 系统调用分发器测试
+    add_executable(test_syscall_dispatch tests/test_syscall_dispatch.c lib/musl_aisafe/src/syscall_dispatch.c lib/musl_aisafe/src/musl_safety.c)
+    target_include_directories(test_syscall_dispatch PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/arch/aarch64_aisafe ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${CMAKE_SOURCE_DIR}/lib/musl_legacy/include ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_syscall_dispatch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_syscall_dispatch COMMAND test_syscall_dispatch)
+
     # test_musl_posix — 仅测试头文件常量和类型定义
     add_executable(test_musl_posix tests/test_musl_posix.c)
     target_include_directories(test_musl_posix PRIVATE ${MUSL_LEGACY_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
