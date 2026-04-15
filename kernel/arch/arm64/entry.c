@@ -34,6 +34,7 @@
 #include <kernel/capability.h>
 #include <kernel/cspace.h>
 #include <kernel/driver.h>
+#include <kernel/elf.h>
 #include <kernel/process.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
@@ -2419,7 +2420,7 @@ void kernel_main(void)
         (void)device_probe_all();
     }
 
-#if CONFIG_DEBUG
+#if 0  /* CONFIG_DEBUG */  /* 临时禁用 VirtIO Block 测试 */
     /* ---- VirtIO Block 读写验证 ---- */
     {
         int64_t blk_ret;
@@ -2462,9 +2463,13 @@ void kernel_main(void)
         }
 
         /* 查询 virtio-blk 设备容量 (dev_id=2) */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Querying capacity...\n");
         {
             uint64_t blk_cap = 0U;
             kernel_status_t ioc_r = device_ioctl(2U, 0U, &blk_cap);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] IOCTL returned ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)ioc_r);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
             if (ioc_r == KERNEL_OK)
             {
                 hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] cap=");
@@ -2487,16 +2492,18 @@ void kernel_main(void)
         }
 
         /* 先读扇区 0 验证 virtqueue 工作正常 */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Calling device_read...\n");
         blk_ret = device_read(2U, s_blk_rd, 512ULL, 0ULL);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] device_read returned ");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
         if (blk_ret == 512)
         {
             hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 OK\n");
         }
         else
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 FAIL ret=");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 FAIL\n");
         }
 
         blk_ret = device_write(2U, s_blk_wr, 512ULL, 0ULL);
@@ -2624,7 +2631,11 @@ void kernel_main(void)
         elf_step = 0U;
 
         /* 步骤 1: 从块设备读取 ELF 文件 */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] Reading ELF from disk...\n");
         elf_ret = device_read(2U, s_elf_buf, 4096ULL, 0ULL);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] device_read returned ");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((elf_ret < 0) ? (-elf_ret) : elf_ret));
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
         if (elf_ret <= 0)
         {
             hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] SKIP (no block device)\n");
@@ -2827,6 +2838,65 @@ void kernel_main(void)
         (void)create_service_thread(path_service_entry, "path_svc",
                                     s_path_kern_stack, s_path_user_stack,
                                     svc_stack_words, (priority_t)49U);
+
+        /* ---- 第八步：初始化 ELF 加载器 ---- */
+        {
+            int64_t elf_ret;
+            elf_error_t elf_err;
+            uint32_t i;
+            elf_header_t s_elf_header;
+            elf_segment_t s_elf_segments[16U];
+            uint32_t s_elf_segment_count;
+            #define ELF_MAX_SEGMENTS 16U
+            #define ELF_BUF_SIZE 4096U
+            static uint8_t s_elf_buf[ELF_BUF_SIZE] __attribute__((aligned(8))) = {0};
+
+            /* 从块设备读取 ELF 数据 */
+            #define ELF_MAX_SEGMENTS 16U
+            elf_ret = device_read(2U, s_elf_buf, ELF_BUF_SIZE, 0ULL);
+            if (elf_ret <= 0)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] SKIP (no block device)\n");
+            }
+            else
+            {
+                /* 初始化 ELF 加载器 */
+                elf_err = elf_loader_init(s_elf_buf, (uint32_t)elf_ret,
+                                             &s_elf_header, s_elf_segments,
+                                             ELF_MAX_SEGMENTS,
+                                             &s_elf_segment_count);
+
+                if (elf_err != ELF_OK)
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] FAIL init ");
+                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)elf_err);
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                }
+                else
+                {
+                    /* 打印 ELF 头信息 */
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] entry=0x");
+                    uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_header.e_entry);
+                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+                    /* 打印段信息 */
+                    for (i = 0U; i < s_elf_segment_count; i++)
+                    {
+                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] seg ");
+                        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)i);
+                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " vaddr=0x");
+                        uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_segments[i].vaddr);
+                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=0x");
+                        uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_segments[i].length);
+                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " prot=0x");
+                        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_elf_segments[i].prot);
+                        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    }
+
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] OK\n");
+                }
+            }
+        }
 
         /* 客户端 (prio=50, 最低优先级，确保服务先就绪) */
         (void)create_service_thread(user_test_entry, "client",
