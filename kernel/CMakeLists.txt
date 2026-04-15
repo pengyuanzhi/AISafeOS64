@@ -112,6 +112,13 @@ set(KERNEL_DRIVER_SOURCES
 )
 
 # ==============================================================================
+# ELF 加载器源文件 (lib/)
+# ==============================================================================
+set(KERNEL_ELF_LOADER_SOURCES
+    elf_loader.c
+)
+
+# ==============================================================================
 # 合并所有源文件
 # ==============================================================================
 set(KERNEL_SOURCES
@@ -123,6 +130,7 @@ set(KERNEL_SOURCES
     ${KERNEL_IRQ_SOURCES}
     ${KERNEL_VERIFY_SOURCES}
     ${KERNEL_DRIVER_SOURCES}
+    ${KERNEL_ELF_LOADER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
     ${CMAKE_SOURCE_DIR}/include/kernel/process_impl.c
 )
