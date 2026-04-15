@@ -97,6 +97,15 @@ if(CMAKE_CROSSCOMPILING)
         -Wl,--no-warn-rwx-segments
     )
 
+    # 生成磁盘映像：将 hello_start.elf 嵌入磁盘扇区
+    # 布局: 扇区 0 = ELF 文件, 以扇区(512B)对齐
+    add_custom_command(TARGET hello_start.elf POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "创建磁盘映像..."
+        COMMAND dd if=/dev/zero of=${CMAKE_BINARY_DIR}/disk.img bs=512 count=128 2>/dev/null
+        COMMAND dd if=$<TARGET_FILE:hello_start.elf> of=${CMAKE_BINARY_DIR}/disk.img bs=512 conv=notrunc 2>/dev/null
+        COMMENT "创建 disk.img (64KB, 包含 hello_start.elf)"
+    )
+
     # ================================================================
     # 特殊处理：dev/driver_framework.c（Rust/C 混合）
     # ================================================================
