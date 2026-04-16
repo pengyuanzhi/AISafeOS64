@@ -23,6 +23,22 @@
 #include <stdint.h>
 #include <string.h>
 
+/* 网络接口层定义（内联避免头文件依赖） */
+
+/** @brief 网络接口操作接口 */
+typedef struct net_if_ops
+{
+    int32_t (*init)(void);
+    int64_t (*send_frame)(const void *buf, uint64_t size);
+    int64_t (*recv_frame)(void *buf, uint64_t size);
+    int32_t (*close)(void);
+    int (*is_running)(void);
+} net_if_ops_t;
+
+/* 网络接口层函数声明 */
+int32_t net_if_register(const char *name, const char *driver,
+                        const net_if_ops_t *ops, const uint8_t mac_addr[6]);
+
 /* ========================================================================
  * VirtIO MMIO 寄存器定义
  * ======================================================================== */
@@ -491,6 +507,30 @@ static int32_t virtio_net_init(uint64_t mmio_base, uint32_t irq)
 }
 
 /* ========================================================================
+ * 公共接口函数声明（用于网络接口层）
+ * ======================================================================== */
+
+/** @brief 发送以太网帧 */
+int64_t virtio_net_send_eth_frame(const void *buf, uint64_t size);
+
+/** @brief 接收以太网帧 */
+int64_t virtio_net_recv_eth_frame(void *buf, uint64_t size);
+
+/* ========================================================================
+ * 网络接口层接口
+ * ======================================================================== */
+
+/** @brief 网络接口操作接口 */
+static const net_if_ops_t s_virtio_net_ops =
+{
+    .init        = NULL,  /* TODO: 如果需要，可以添加 */
+    .send_frame  = virtio_net_send_eth_frame,
+    .recv_frame  = virtio_net_recv_eth_frame,
+    .close       = NULL,  /* TODO: 如果需要，可以添加 */
+    .is_running  = NULL,  /* TODO: 如果需要，可以添加 */
+};
+
+/* ========================================================================
  * 公共接口（网络协议栈调用）
  * ======================================================================== */
 
@@ -570,6 +610,14 @@ int32_t main(void)
 
     /* 初始化驱动 */
     ret = virtio_net_init(mmio_base, irq);
+    if (ret != 0)
+    {
+        return ret;
+    }
+
+    /* 注册到网络接口层 */
+    ret = net_if_register("eth0", "virtio-net", &s_virtio_net_ops,
+                           s_priv.config.mac);
     if (ret != 0)
     {
         return ret;

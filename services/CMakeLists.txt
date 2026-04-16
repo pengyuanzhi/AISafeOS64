@@ -21,6 +21,7 @@ if(CMAKE_CROSSCOMPILING)
         init
         mem
         proc
+        net
         drv_virtio_net
     )
 
@@ -28,15 +29,33 @@ if(CMAKE_CROSSCOMPILING)
     # 编译用户态服务（musl_aisafe 版本）
     # ================================================================
     foreach(SERVICE_NAME IN LISTS USERLAND_SERVICES)
-        add_executable(${SERVICE_NAME}.elf
-            ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
-        )
+        if(SERVICE_NAME STREQUAL "net")
+            # 网络协议栈：包含网络接口层
+            add_executable(${SERVICE_NAME}.elf
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/net_if/net_if.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/net_if/ethernet.c
+            )
+        elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
+            # VirtIO Net 驱动：包含网络接口层
+            add_executable(${SERVICE_NAME}.elf
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/ethernet.c
+            )
+        else()
+            # 普通服务：只有一个 main.c 文件
+            add_executable(${SERVICE_NAME}.elf
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
+            )
+        endif()
 
         target_link_libraries(${SERVICE_NAME}.elf musl_aisafe crt0)
 
         target_include_directories(${SERVICE_NAME}.elf PRIVATE
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if
         )
 
         target_compile_options(${SERVICE_NAME}.elf PRIVATE
