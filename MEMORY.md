@@ -1,5 +1,73 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 VirtIO Block 驱动完善 - Legacy MMIO + 性能优化 ✅ (11:45)
+
+### 驱动改进
+
+**virtio-blk.c 完善** (commit: 88604c9)
+
+#### 1. VirtIO MMIO Legacy 模式修复
+- ✅ VirtQueue 内存布局 4KB 对齐
+  - vq_mem 从 4KB 边界开始分配：`(vq_mem + 4095) & ~4095`
+  - used_ring 4KB 对齐到 4KB 边界
+- ✅ PFN 地址计算正确
+  - Legacy 模式使用 desc_table 地址计算 PFN
+  - 修正：`pfn = desc_addr >> 12`（而非 used_ring）
+- ✅ VirtIO Legacy 初始化序列规范
+  - `ACKNOWLEDGE → DRIVER → DRIVER_FEATURES → GUEST_PAGE_SIZE`
+  - `QUEUE_SEL → QUEUE_NUM → QUEUE_ALIGN → QUEUE_PFN`
+  - `FEATURES_OK → DRIVER_OK`
+
+#### 2. 设备地址修正 (entry.c)
+- ✅ virtio-blk MMIO 地址从 0x0A003C00 修正为 0x0A003E00 (slot 31)
+- ✅ QEMU virt 平台设备映射验证（info qtree）
+
+#### 3. 性能优化
+- ✅ 简化代码注释（保留核心说明）
+- ✅ 优化轮询策略（MMIO 探针 + WFI 混合）
+  - 前 100 次：MMIO 探针（强制 QEMU 退出翻译块）
+  - 100+ 次：WFI（让出 CPU 给 QEMU 主循环处理 BH）
+- ✅ 降低调试输出频率（从 1000 次输出一次）
+- ✅ 禁用详细调试输出（生产模式性能优化）
+
+#### 4. 错误处理增强
+- ✅ 区分 VirtIO 响应状态
+  - `VIRTIO_BLK_S_OK`: 成功
+  - `VIRTIO_BLK_S_IOERR`: I/O 错误（返回 EIO）
+  - `VIRTIO_BLK_S_UNSUPP`: 不支持（返回 ENOTSUP）
+- ✅ 改进超时处理
+  - `VIRTQ_POLL_TIMEOUT = 500000`（减少到 50%）
+  - 中断安全：临时使能 IRQ 后恢复原始状态
+
+### 验证结果
+
+**READ 操作 ✅**
+- Probe 成功（devid=2, cap=128 sectors）
+- device_read(0) 返回 512 字节
+- Poll 完成，used_ring 正确更新
+- 描述符链正确释放
+
+**SMP 测试 ✅**
+- CPU 0-3 全部通过（count=1000）
+
+**⏳ WRITE 操作**
+- QEMU TCG 模式下异步操作
+- 需要进一步优化 WFI/中断机制
+
+### 架构特点
+
+- VirtIO MMIO Legacy 模式规范合规
+- DMA 一致性（dc cvac + dsb ish）
+- 混合轮询策略（MMIO 探针 + WFI）
+- 中断安全（临时使能 IRQ 后恢复原始状态）
+
+### text 大小
+
+- 60,774 bytes (59.4KB) - 禁用调试输出
+- 65,641 bytes (64.0KB) - 启用调试输出
+
+---
+
 ## 2026-04-11 C 库架构决策变更：标准 musl + 适配层 ✅ (20:02)
 
 ### 架构决策
