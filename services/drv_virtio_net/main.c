@@ -196,6 +196,146 @@ static inline void mmio_write32(uint64_t base, uint32_t offset, uint32_t value)
  * ======================================================================== */
 
 /**
+ * @brief 描述符状态
+ */
+static bool virtq_desc_is_free(virtq_desc_t *desc)
+{
+    return (desc->len == 0U);
+}
+
+/**
+ * @brief 分配空闲描述符
+ */
+static int32_t virtq_alloc_desc(virtq_desc_t *desc_table, uint16_t *free_idx)
+{
+    uint16_t start_idx = *free_idx;
+    uint16_t idx = start_idx;
+
+    do
+    {
+        if (virtq_desc_is_free(&desc_table[idx]))
+        {
+            desc_table[idx].len = 1U; /* 标记为已使用 */
+            *free_idx = (uint16_t)(idx + 1U);
+            if (*free_idx >= VIRTQ_QUEUE_SIZE)
+            {
+                *free_idx = 0U;
+            }
+            return (int32_t)idx;
+        }
+        idx = (uint16_t)(idx + 1U);
+        if (idx >= VIRTQ_QUEUE_SIZE)
+        {
+            idx = 0U;
+        }
+    } while (idx != start_idx);
+
+    return -1; /* 没有空闲描述符 */
+}
+
+/**
+ * @brief 释放描述符链
+ */
+static void virtq_free_desc(virtq_desc_t *desc_table, uint16_t desc_idx)
+{
+    desc_table[desc_idx].len = 0U; /* 标记为空闲 */
+    /* TODO: 释放描述符链（VIRTQ_DESC_F_NEXT） */
+}
+
+/**
+ * @brief TX VirtQueue 提交
+ */
+static int64_t virtq_tx_submit(const void *buf, uint64_t size)
+{
+    virtq_desc_t *desc;
+    uint16_t desc_idx;
+    uint16_t avail_idx;
+
+    if ((buf == NULL) || (size == 0U))
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 分配描述符 */
+    desc = s_priv.tx_desc;
+    desc_idx = (uint16_t)virtq_alloc_desc(desc, &s_priv.tx_free_idx);
+    if (desc_idx < 0)
+    {
+        return -12; /* ENOMEM */
+    }
+
+    /* 设置描述符 */
+    desc[desc_idx].addr = (uint64_t)(uintptr_t)buf;
+    desc[desc_idx].len = (uint32_t)size;
+    desc[desc_idx].flags = 0U; /* 只写 */
+    desc[desc_idx].next = VIRTQ_DESC_INVALID;
+
+    /* 添加到 TX Available Ring */
+    avail_idx = s_priv.tx_avail.idx % VIRTQ_QUEUE_SIZE;
+    s_priv.tx_avail.ring[avail_idx] = desc_idx;
+
+    /* 更新 Available Ring 索引 */
+    s_priv.tx_avail.idx = (uint16_t)(s_priv.tx_avail.idx + 1U);
+
+    /* Kick TX 设备（queue 1） */
+    mmio_write32(s_priv.mmio_base, VIRTIO_MMIO_QUEUE_NOTIFY, 1U);
+
+    return (int64_t)size;
+}
+
+/**
+ * @brief RX VirtQueue 接收
+ */
+static int64_t virtq_rx_recv(void *buf, uint64_t size)
+{
+    virtq_used_t *used;
+    virtq_desc_t *desc;
+    uint16_t used_idx;
+    uint32_t desc_id;
+    uint32_t data_len;
+
+    if ((buf == NULL) || (size == 0U))
+    {
+        return -22; /* EINVAL */
+    }
+
+    used = &s_priv.rx_used;
+
+    /* 检查是否有新的数据包 */
+    if (used->idx == s_priv.rx_last_used)
+    {
+        return -11; /* EAGAIN */
+    }
+
+    /* 处理 Used Ring */
+    used_idx = s_priv.rx_last_used % VIRTQ_QUEUE_SIZE;
+    desc_id = used->ring[used_idx].id;
+    data_len = used->ring[used_idx].len;
+
+    if (desc_id >= VIRTQ_QUEUE_SIZE)
+    {
+        return -5; /* EIO */
+    }
+
+    desc = s_priv.rx_desc;
+
+    /* 复制数据 */
+    if (data_len > size)
+    {
+        data_len = (uint32_t)size;
+    }
+    (void)memcpy(buf, (void *)(uintptr_t)desc[desc_id].addr, data_len);
+
+    /* 释放描述符 */
+    virtq_free_desc(desc, (uint16_t)desc_id);
+
+    /* 更新最后使用索引 */
+    s_priv.rx_last_used = (uint16_t)(s_priv.rx_last_used + 1U);
+
+    return (int64_t)data_len;
+}
+
+/**
  * @brief VirtIO 设备探测
  */
 static int32_t virtio_net_probe(uint64_t mmio_base, uint32_t irq)
@@ -354,24 +494,63 @@ static int32_t virtio_net_init(uint64_t mmio_base, uint32_t irq)
  * 公共接口（网络协议栈调用）
  * ======================================================================== */
 
+/** @brief 以太网帧头大小 */
+#define ETH_HDR_SIZE            14U
+
+/** @brief 以太网类型：IPv4 */
+#define ETH_TYPE_IPV4           0x0800U
+
+/** @brief 以太网类型：ARP */
+#define ETH_TYPE_ARP            0x0806U
+
+/** @brief VirtIO Net MTU */
+#define VIRTIO_NET_MTU          1514U
+
+/** @brief 最大数据包大小（MTU + 以太网头） */
+#define VIRTIO_NET_MAX_PACKET_SIZE (VIRTIO_NET_MTU + ETH_HDR_SIZE)
+
+/** @brief RX 描述符缓冲区大小 */
+#define RX_BUFFER_SIZE           2048U
+
+/** @brief TX 描述符缓冲区大小 */
+#define TX_BUFFER_SIZE           2048U
+
 /**
- * @brief 发送网络数据包
+ * @brief 发送以太网帧
+ *
+ * @param buf   以太网帧缓冲区
+ * @param size  帧大小（必须包含以太网头）
+ *
+ * @return 实际发送大小，负数表示错误
  */
-int64_t virtio_net_send(const void *buf, uint64_t size)
+int64_t virtio_net_send_eth_frame(const void *buf, uint64_t size)
 {
-    (void)buf;
-    (void)size;
-    return -95; /* ENOTSUP - 待实现 */
+    if ((buf == NULL) || (size == 0U) || (size > VIRTIO_NET_MAX_PACKET_SIZE))
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 直接提交到 TX VirtQueue */
+    return virtq_tx_submit(buf, size);
 }
 
 /**
- * @brief 接收网络数据包
+ * @brief 接收以太网帧
+ *
+ * @param buf   接收缓冲区
+ * @param size  缓冲区大小
+ *
+ * @return 实际接收大小，负数表示错误
  */
-int64_t virtio_net_recv(void *buf, uint64_t size)
+int64_t virtio_net_recv_eth_frame(void *buf, uint64_t size)
 {
-    (void)buf;
-    (void)size;
-    return -95; /* ENOTSUP - 待实现 */
+    if ((buf == NULL) || (size == 0U))
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 直接从 RX VirtQueue 接收 */
+    return virtq_rx_recv(buf, size);
 }
 
 /* ========================================================================
