@@ -1,5 +1,57 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 VirtIO Block 完全中断驱动模式 ✅ (12:52)
+
+### 核心功能
+
+**1. 完全中断驱动模式（优先）**
+- 使用内核通知对象机制（ipc_notification）
+- 请求提交后阻塞等待（ipc_notification_wait）
+- 中断唤醒等待线程（ipc_notification_signal）
+- 真正的异步 I/O，节省 CPU 资源
+
+**2. 智能回退机制**
+- 延迟初始化通知对象（virtblk_ensure_notify）
+- 内核早期初始化阶段回退到轮询模式
+- 调度器就绪后自动切换到中断驱动模式
+- 兼容性最大化
+
+**3. 中断处理函数改造**
+- virtio_blk_irq 触发通知唤醒等待线程
+- ACK 中断后发送 notification 信号
+
+### 验证结果
+```
+[BLK] IOCTL returned 0          ← 设备 probe 成功
+[BLK] cap=128 sectors          ← 容量读取成功
+[BLK] READ0 OK                 ← READ 操作成功
+[BLK] WRITE OK                 ← WRITE 操作成功
+[BLK] READ OK                  ← READ 验证成功
+[DRV TEST] ALL PASSED          ← 驱动框架测试通过
+[CAP TEST] ALL PASSED          ← 能力系统测试通过
+[SMP TEST] CPU 0-3 done (1000) ← SMP 测试通过
+```
+
+### 技术细节
+- 通知对象延迟创建（首次 I/O 操作时）
+- 调度器未就绪时回退到轮询模式
+- 中断处理函数支持唤醒机制
+- text 大小：60,774 字节（59.3KB）
+- 代码复用率：高（轮询模式代码保留作为回退）
+
+### 代码统计
+- 修改文件：kernel/driver/drv_virtio_blk.c
+- 新增行数：177 行
+- 删除行数：64 行
+- net change：+113 行
+
+### 对应需求
+- DV-020~023: VirtIO Block 设备驱动
+- KR-006: 异步通知（延迟 < 500ns）
+- KR-023: 通道-连接模型（通知对象）
+
+---
+
 ## 2026-04-16 VirtIO Block 驱动完善 - Legacy MMIO + 性能优化 ✅ (11:45)
 
 ### 驱动改进
