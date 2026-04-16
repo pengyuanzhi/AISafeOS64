@@ -1,5 +1,64 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 VirtIO Net 驱动框架实现 ✅ (16:36)
+
+### 核心功能
+
+**1. VirtIO Net 驱动框架**
+- VirtIO MMIO 寄存器操作
+- RX/TX VirtQueue 环形缓冲区管理（双队列）
+- VirtIO Legacy 模式初始化序列
+- 完全中断驱动模式框架
+- 智能回退机制（中断 + 轮询）
+
+**2. 设备探测**
+- VirtIO Net 设备 ID 验证（device_id = 1）
+- MAC 地址读取
+- VirtQueue 初始化（RX + TX）
+- 中断注册和 GIC 配置
+- 驱动注册到驱动框架
+
+**3. 驱动注册**
+- 注册到驱动框架（driver_register_kern）
+- 设备注册（VirtIO Net MMIO @ 0x0A003C00, IRQ 78）
+- 驱动测试验证输出
+
+### 验证结果
+```
+[NET] VirtIO Net driver registered
+[NET]   (RX/TX VirtQueue framework ready)
+[NET]   (Network stack integration pending)
+✅ 内核启动成功
+✅ VirtIO Block 驱动正常工作
+✅ SMP 测试通过（4 核）
+✅ CAP 测试通过
+```
+
+### 技术细节
+- VirtQueue 管理：复用 VirtIO Block 的 VirtQueue 框架
+- 双队列架构：RX + TX VirtQueue 独立管理
+- 完全中断驱动：notification 对象 + 阻塞等待
+- 智能回退：通知对象创建失败时回退到轮询模式
+- MAC 地址读取：从 VirtIO MMIO 配置空间读取
+- text 大小：65,038 字节（63.5KB）
+
+### 代码统计
+- 新增文件：kernel/driver/drv_virtio_net.c (~900 行）
+- 修改文件：kernel/CMakeLists.txt, kernel/arch/arm64/entry.c
+- 新增行数：~920 行
+- net change：+832 行
+
+### 待完成
+- ⏳ 网络数据包收发实现（virtio_net_tx_packet / virtio_net_rx_packet）
+- ⏳ 网络协议栈集成（net_register_interface）
+- ⏳ QEMU 设备地址验证（virtio-net-device MMIO 地址）
+
+### 对应需求
+- DV-024~027: VirtIO Net 设备驱动
+- NW-001~005: 网络协议栈框架接口
+
+---
+
 ## 2026-04-16 VirtIO Block 完全中断驱动模式 ✅ (12:52)
 
 ### 核心功能
@@ -1066,10 +1125,12 @@ text = 22,470 bytes (21.9KB), bss = 93,680 bytes
 ### 待完成 ⏳
 
 **P0 — 功能缺陷（阻塞后续开发）**
-- [ ] virtio-blk Legacy MMIO virtqueue 调试 — 设备 probe 成功(容量读取OK)，但 virtqueue 提交请求后设备无响应(轮询超时 ret=110)
-  - 根因: QEMU virt 平台 virtio-mmio 是 Legacy(v1) 模式，使用 QUEUE_PFN(0x040) 而非 DESC_LOW/HIGH(0x080)
-  - 已实现 Legacy PFN 模式支持，但设备仍未处理请求
-  - 需要进一步调试: 验证 PFN 是否被设备接受、描述符链格式是否正确
+- [x] virtio-blk Legacy MMIO virtqueue 调试 — ✅ 已完成（2026-04-16 12:52）
+  - ✅ 实现 VirtIO Block 完全中断驱动模式
+  - ✅ 智能回退机制（中断驱动 + 轮询回退）
+  - ✅ QEMU TCG 异步 I/O 优化
+  - ✅ 完整读写链路测试通过
+  - ✅ commit: 3b887cf feat(driver): VirtIO Block 完全中断驱动模式
 
 **P1 — 安全认证（阻塞 ASIL-D / SIL-4 认证）**
 - [ ] MISRA C:2012 零偏差修复 — 全量扫描已完成(1,382 violations, 42 rules)，需修复
@@ -1080,14 +1141,19 @@ text = 22,470 bytes (21.9KB), bss = 93,680 bytes
 - [ ] 安全认证文档 (ISO 26262 ASIL-D, IEC 61508 SIL-4)
 
 **P2 — 功能完善**
-- [ ] virtio-net 驱动适配
+- [x] virtio-net 驱动适配 — ✅ 框架实现完成（2026-04-16 16:36）
+  - ✅ VirtIO Net 驱动框架（RX/TX VirtQueue）
+  - ✅ 设备探测和初始化
+  - ✅ 驱动注册和验证
+  - ⏳ 网络数据包收发实现（待完成）
+  - ⏳ 网络协议栈集成（待完成）
 - [ ] cspace_from_root 性能优化 (O(n)→O(1))
-- [ ] text 段优化 (55.8KB → <50KB)
+- [ ] text 段优化 (65.0KB → <50KB)
 - [ ] entry.c 移除调试扫描代码 (virtio-mmio slot 扫描)
 - [ ] drv_virtio_blk.c 移除调试输出
 
 ### 内核代码量
-- **text**: ~55,800 bytes (54.5KB)
+- **text**: 65,038 bytes (63.5KB) - VirtIO Net 驱动框架
 
 ### HAL 接口数量
 - **35 个** HAL 接口
