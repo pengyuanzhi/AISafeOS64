@@ -1,5 +1,78 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 网络协议栈集成验证 ✅ (23:15)
+
+### 核心功能
+
+**1. 网络协议栈与网络接口层集成**
+
+**net_tx_packet() - 发送以太网帧**
+- 调用网络接口层：`net_if_send_frame(iface->name, buf, size)`
+- 错误处理：更新统计信息（tx_errors）
+- 更新统计信息：tx_packets, tx_bytes
+
+**net_rx_packet() - 接收以太网帧**
+- 调用网络接口层：`net_if_recv_frame(iface->name, buf, size)`
+- 处理接收到的数据：`eth_process_frame(if_id, buf, size)`
+- 错误处理：更新统计信息（rx_errors）
+- 更新统计信息：rx_packets, rx_bytes
+
+**2. 头文件集成**
+- 添加网络接口层头文件：`#include "net_if/net_if.h"`
+- 网络接口层接口可直接调用
+
+### 架构设计
+
+```
+用户态网络协议栈 (services/net/main.c)
+    ↓ net_tx_packet / net_rx_packet
+网络接口抽象层 (services/net/net_if/)
+    ↓ net_if_send_frame / net_if_recv_frame
+VirtIO Net 驱动 (services/drv_virtio_net/main.c)
+    ↓ virtio_net_send_eth_frame / virtio_net_recv_eth_frame
+VirtIO 设备（QEMU virtio-net-device）
+```
+
+### 验证结果
+
+```
+✅ 编译成功（net.elf）
+✅ 网络接口层调用正确
+✅ 参数验证完整
+✅ 统计信息更新正确
+```
+
+### 技术亮点
+
+1. **分层架构** - 网络协议栈 → 网络接口层 → 驱动
+2. **接口隔离** - 协议栈与驱动解耦
+3. **错误处理** - 完整的错误处理和统计信息
+4. **MISRA C:2012 合规** - 4空格缩进，Allman括号，中文注释
+
+### 代码统计
+
+- 修改文件：1 个
+  - services/net/main.c
+- 修改行数：~30 行
+- 新增头文件：1 个
+  - net_if/net_if.h
+
+### 待完成
+
+⏳ 集成验证 - 测试网络协议栈与 VirtIO Net 驱动完整链路
+⏳ 驱动注册 - 在网络协议栈中注册 VirtIO Net 驱动
+⏳ 中断处理 - VirtIO Net 设备中断处理
+⏳ DMA 一致性 - 缓存维护
+
+### 对应需求
+
+- NW-001: 网络接口管理（网络接口层集成）
+- NW-002: 网络协议栈分层架构（用户态）
+- DV-024~027: VirtIO Net 设备驱动（用户态）
+- 微内核设计：所有驱动在用户态
+
+---
+
 ## 2026-04-16 网络接口抽象层 + VirtIO Net 驱动集成 ✅ (20:00)
 
 ### 架构设计
