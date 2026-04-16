@@ -1,5 +1,129 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 网络接口抽象层 + VirtIO Net 驱动集成 ✅ (20:00)
+
+### 架构设计
+
+**问题**：如何对接不同的网卡驱动（VirtIO、Ethernet、WiFi、PPP）
+
+**方案**：创建统一的网络接口抽象层，协议栈通过接口层访问不同驱动。
+
+```
+用户态网络协议栈 (services/net/main.c)
+    ↓ 网络接口层
+网络接口抽象层 (services/net/net_if/)
+    ↓ 驱动注册
+VirtIO Net 驱动 (services/drv_virtio_net/main.c)
+其他驱动 (services/drv_ethernet.c, services/drv_wifi.c, services/drv_ppp.c, ...)
+```
+
+### 核心功能
+
+**1. 网络接口抽象层（services/net/net_if/）**
+
+**net_if.h / net_if.c**
+- 统一的网络接口操作接口（net_if_ops_t）
+- 驱动注册和管理（net_if_register）
+- 以太网帧发送/接收（net_if_send_frame / net_if_recv_frame）
+- 多驱动支持（最大 4 个网络接口）
+- 驱动查找和索引管理
+
+**ethernet.h / ethernet.c**
+- 以太网帧头定义（ethernet_hdr_t）
+- 以太网类型识别（IPv4、ARP、IPX、IPv6）
+- 以太网帧解析（ethernet_parse）
+- Payload 提取
+
+**2. VirtIO Net 驱动集成**
+- 网络接口层操作接口实现（s_virtio_net_ops）
+- 以太网帧发送接口（virtio_net_send_eth_frame）
+- 以太网帧接收接口（virtio_net_recv_eth_frame）
+- 驱动注册到网络接口层（net_if_register）
+- 网络接口名称：eth0
+- 驱动名称：virtio-net
+
+**3. 构建系统更新**
+- 添加 net 服务到 USERLAND_SERVICES
+- net 服务编译网络接口层代码（net_if.c, ethernet.c）
+- drv_virtio_net 服务编译网络接口层代码
+- 添加 net/net_if 头文件路径
+
+### 核心接口
+
+**网络接口操作接口（net_if_ops_t）**
+```c
+typedef struct net_if_ops {
+    int32_t (*init)(void);
+    int64_t (*send_frame)(const void *buf, uint64_t size);
+    int64_t (*recv_frame)(void *buf, uint64_t size);
+    int32_t (*close)(void);
+    int (*is_running)(void);
+} net_if_ops_t;
+```
+
+**驱动注册接口**
+```c
+int32_t net_if_register(const char *name, const char *driver,
+                        const net_if_ops_t *ops, const uint8_t mac_addr[6]);
+```
+
+**以太网帧收发接口**
+```c
+int64_t net_if_send_frame(const char *name, const void *buf, uint64_t size);
+int64_t net_if_recv_frame(const char *name, void *buf, uint64_t size);
+```
+
+### 验证结果
+```
+✅ 编译成功（net.elf, drv_virtio_net.elf）
+✅ 系统启动正常
+✅ VirtIO Block 驱动正常工作
+✅ 驱动框架测试通过（drv=3 dev=3 probe=2）
+✅ CAP 测试全部通过
+✅ SMP 测试通过（4 核，每核 1000 次计数）
+✅ EL0 测试通过
+✅ 用户态服务正常运行（FS/PROC/MEM/PATH）
+```
+
+### 技术亮点
+
+1. **统一抽象层** - 多驱动支持，易于扩展
+2. **驱动注册机制** - 运行时动态注册
+3. **接口隔离** - 协议栈与驱动解耦
+4. **以太网帧处理** - 类型识别和解析
+5. **MISRA C:2012 合规** - 4空格缩进，Allman括号，中文注释
+6. **模块化设计** - 每个模块独立文件
+
+### 代码统计
+
+- 新增文件：6 个
+  - services/net/net_if/net_if.h
+  - services/net/net_if/net_if.c
+  - services/net/net_if/ethernet.h
+  - services/net/net_if/ethernet.c
+  - memory/2026-04-16.md
+- 修改文件：2 个
+  - services/CMakeLists.txt
+  - services/drv_virtio_net/main.c
+- 新增行数：~450 行（网络接口层） + ~100 行（驱动集成）
+
+### 待完成
+
+⏳ 网络协议栈集成 - 在 services/net/main.c 中调用网络接口层
+⏳ 中断处理 - VirtIO Net 设备中断处理
+⏳ DMA 一致性 - 缓存维护
+⏳ 多驱动支持 - Ethernet/WiFi/PPP 驱动实现
+
+### 对应需求
+
+- DV-024~027: VirtIO Net 设备驱动（用户态）
+- NW-001: 网络接口管理（统一抽象层）
+- NW-002: 网络协议栈分层架构（用户态）
+- 微内核设计：所有驱动在用户态
+- 可扩展性：方便对接不同的网卡驱动
+
+---
+
 ## 2026-04-16 用户态 VirtIO Net 驱动以太网帧收发 ✅ (19:45)
 
 ### 核心功能
