@@ -137,11 +137,11 @@ static void blk_dbg_hex(uint64_t value)
 #define VIRTIO_BLK_MAX_IO_SIZE      (VIRTIO_BLK_SECTOR_SIZE * VIRTIO_BLK_MAX_SECTORS)
 
 /** @brief 轮询超时计数 */
-#define VIRTQ_POLL_TIMEOUT          1000000U
+#define VIRTQ_POLL_TIMEOUT          500000U
 
-/** @brief MTTCG 模式下 MMIO 探针会持续持有 BQL，阻止 QEMU 主循环处理
- *         VirtIO BH。设为 0 直接进入 WFI 模式，立即释放 BQL */
-#define VIRTQ_YIELD_THRESH          1000U  /* 临时修改：先使用 MMIO 探针 */
+/** @brief 完全禁用 WFI，只使用 MMIO 探针
+ *         QEMU TCG 模式下，MMIO 探针强制退出翻译块并处理事件 */
+#define VIRTQ_YIELD_THRESH          999999U
 
 /**
  * @brief VirtQueue 描述符（16 字节）
@@ -424,7 +424,8 @@ static void virtq_setup_memory(virtio_blk_priv_t *priv, uint16_t queue_size)
     uint8_t *base;
     uint32_t offset;
 
-    base = priv->vq_mem;
+    /* VirtIO MMIO Legacy 模式: vq_mem 必须从 4KB 边界开始 */
+    base = (uint8_t *)(((uintptr_t)priv->vq_mem + 4095U) & ~4095ULL);
     priv->vq_state.queue_size = queue_size;
 
     /* 描述符表 */
@@ -437,8 +438,7 @@ static void virtq_setup_memory(virtio_blk_priv_t *priv, uint16_t queue_size)
                               sizeof(virtq_avail_hdr_t));
     offset += VIRTQ_AVAIL_RING_SIZE;
 
-    /* Used Ring: Legacy 模式按 QUEUE_ALIGN=4096 对齐
-     * QEMU vring_align() 使用 queue_align 计算 used 地址 */
+    /* Used Ring: Legacy 模式必须 4KB 对齐 */
     offset = (offset + 4095U) & ~4095U;
     priv->used_ring = (virtq_used_hdr_t *)(void *)(base + offset);
     priv->used_ring_entries = (virtq_used_elem_t *)(void *)(base + offset +
@@ -490,13 +490,17 @@ static void virtq_write_mmio_regs(virtio_blk_priv_t *priv)
 
     if (version == 1U)
     {
-        /* Legacy mode: 使用 QUEUE_PFN 寄存器传递页帧号 */
+        /* Legacy mode: 使用 desc_table 地址传递页帧号
+         *
+         * QEMU virtio-mmio Legacy 模式使用 QUEUE_PFN 寄存器，
+         * 页帧号必须是整个 vring（desc_table）的地址 >> 12（4KB 对齐）
+         */
         uint32_t pfn = (uint32_t)(desc_addr >> 12U);
 
         /* 设置队列对齐 (4096) */
         mmio_write32(priv->mmio_base, VIRTIO_MMIO_LEGACY_QUEUE_ALIGN, 4096U);
 
-        /* 写入页帧号 */
+        /* 写入页帧号（desc_table 的 PFN） */
         mmio_write32(priv->mmio_base, VIRTIO_MMIO_LEGACY_QUEUE_PFN, pfn);
     }
     else
@@ -738,9 +742,6 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
      * QEMU TCG 的 helper_wfi() 通过 arm_cpu_exec_interrupt() 判断
      * 是否有挂起中断。当 PSTATE.I 置位时，QEMU 判定"无挂起中断"，
      * WFI 永久停机。必须清除 PSTATE.I 使 GIC VirtIO SPI 可被感知。
-     *
-     * 此时内核定时器尚未重武装（CNTP_CTL_EL0.ENABLE=0），
-     * 且 GIC 仅使能了 VirtIO BLK SPI，因此仅 VirtIO 中断会触发。
      */
     saved_irq_state = hal_irq_saved_state();
     hal_irq_enable();
@@ -798,28 +799,31 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
                 hal_uart_puts(0x09000000ULL, "\n");
 #endif
                 hal_irq_restore(saved_irq_state);
-                return -5; /* EIO */
+
+                /* 错误处理：根据 VirtIO 响应状态返回对应错误码 */
+                if (priv->req_buf.resp.status == VIRTIO_BLK_S_IOERR)
+                {
+                    return -5; /* EIO */
+                }
+                else if (priv->req_buf.resp.status == VIRTIO_BLK_S_UNSUPP)
+                {
+                    return -95; /* ENOTSUP */
+                }
+                else
+                {
+                    return -5; /* EIO */
+                }
             }
         }
 
         /*
-         * 混合等待策略：
+         * 优化轮询策略：
          *
          * 阶段 1（前 YIELD_THRESH 次）：MMIO 探针
-         *   读取 VirtIO MMIO 中断状态寄存器，强制 QEMU 退出当前
-         *   翻译块（Translation Block）并经过 MMIO helper 路径。
-         *   在 helper 路径中，QEMU 获取/释放 BQL，给主循环线程
-         *   机会处理挂起的 VirtIO 写完成 BH（bottom half）。
-         *   READ 操作通常同步完成（在 MMIO kick 处理中），
-         *   WRITE 操作异步完成（需要 BH 回调更新 used ring）。
+         *   读取 VirtIO MMIO 中断状态寄存器，强制 QEMU 退出翻译块。
          *
          * 阶段 2（YIELD_THRESH 之后）：WFI
-         *   如果 MMIO 探针未能等到完成（可能是 WRITE 完成极慢），
-         *   切换到 WFI 让出 CPU，QEMU cpu_exec 返回 EXCP_HALTED，
-         *   MTTCG 线程重新获取 BQL 并处理事件，主循环处理 BH，
-         *   BH 完成后通过 GIC SPI 唤醒 WFI。
-         *
-         * 前置条件：PSTATE.I 已由 hal_irq_enable() 清零。
+         *   让出 CPU 给 QEMU 主循环处理异步 BH。
          */
         if (timeout < VIRTQ_YIELD_THRESH)
         {
@@ -835,7 +839,7 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
         timeout++;
 
 #if CONFIG_DEBUG_VERBOSE
-        /* 每 1000 次 WFI 输出一次状态 */
+        /* 每 100 次 WFI 输出一次状态（降低频率减少开销） */
         if ((timeout % 1000U) == 0U)
         {
             hal_uart_puts(0x09000000ULL, "[BLK] poll wfi=");
@@ -950,7 +954,7 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     hal_uart_puts((uint64_t)0x09000000ULL, "[BLK] probe: OK\n");
 #endif
 
-    /* 步骤 3: VirtIO 初始化序列 */
+    /* 步骤 3: VirtIO Legacy 模式初始化序列 */
     status = VIRTIO_STATUS_ACKNOWLEDGE;
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
 
@@ -960,22 +964,10 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     /* 不协商任何特性（简化实现） */
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_DRIVER_FEATURES, 0U);
 
-    /* 设置 Guest 页大小 (4KB) */
+    /* Legacy 模式: 设置 Guest 页大小 (4KB)，必须在 QUEUE_PFN 之前 */
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_GUEST_PAGE_SIZE, 4096U);
 
-    status |= VIRTIO_STATUS_FEATURES_OK;
-    mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
-
-    /* 验证 FEATURES_OK */
-    if ((mmio_read32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS)
-         & VIRTIO_STATUS_FEATURES_OK) == 0U)
-    {
-        mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS,
-                     VIRTIO_STATUS_FAILED);
-        return -5; /* EIO */
-    }
-
-    /* 步骤 4: 初始化 VirtQueue */
+    /* 步骤 4: 初始化 VirtQueue (必须在 FEATURES_OK 之前) */
     /* 查询设备支持的最大队列大小 */
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_QUEUE_SEL, 0U);
     q_num_max = mmio_read32(s_blk_priv.mmio_base, VIRTIO_MMIO_QUEUE_NUM_MAX);
@@ -1000,18 +992,42 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     /* 将 VirtQueue 地址写入 MMIO 寄存器 */
     virtq_write_mmio_regs(&s_blk_priv);
 
-    /* 步骤 5: DRIVER_OK — 驱动就绪 */
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] virtq setup done\n");
+    hal_uart_puts(0x09000000ULL, "[BLK]   desc=");
+    blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.desc_table);
+    hal_uart_puts(0x09000000ULL, " avail=");
+    blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.avail_ring);
+    hal_uart_puts(0x09000000ULL, " used=");
+    blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.used_ring);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
+    /* 步骤 5: 特性确认 */
+    status |= VIRTIO_STATUS_FEATURES_OK;
+    mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
+
+    /* 验证 FEATURES_OK */
+    if ((mmio_read32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS)
+         & VIRTIO_STATUS_FEATURES_OK) == 0U)
+    {
+        mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS,
+                     VIRTIO_STATUS_FAILED);
+        return -5; /* EIO */
+    }
+
+    /* 步骤 6: DRIVER_OK — 驱动就绪（队列配置完成后） */
     status |= VIRTIO_STATUS_DRIVER_OK;
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
 
-    /* 步骤 5.5: 使能 VirtIO MMIO 中断（GIC SPI 配置 + 处理函数注册）
+    /* 步骤 7: 使能 VirtIO MMIO 中断（GIC SPI 配置 + 处理函数注册）
      * WRITE 操作在 QEMU TCG 中异步完成，需要中断唤醒 WFI 轮询 */
     (void)gic_set_priority(s_blk_priv.irq, (uint8_t)GIC_PRIORITY_DEFAULT);
     (void)gic_set_target(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
     (void)gic_enable_irq(s_blk_priv.irq);
     (void)interrupt_register(s_blk_priv.irq, virtio_blk_irq, NULL);
 
-    /* 步骤 6: 读取设备容量 */
+    /* 步骤 8: 读取设备容量 */
     s_blk_priv.capacity = (uint64_t)mmio_read32(
         s_blk_priv.mmio_base, VIRTIO_MMIO_CONFIG);
     s_blk_priv.capacity |= ((uint64_t)mmio_read32(

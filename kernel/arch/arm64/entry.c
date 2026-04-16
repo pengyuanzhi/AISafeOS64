@@ -2412,9 +2412,9 @@ void kernel_main(void)
         (void)device_register("pl011", DRIVER_TYPE_UART,
                               (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
 
-        /* VirtIO Block MMIO @ 0x0A003C00, IRQ 79 (slot=31) */
+        /* VirtIO Block MMIO @ 0x0A003E00, IRQ 79 (slot=31) */
         (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
-                              (paddr_t)0x0A003C00ULL, 0x200ULL, 79U, NULL);
+                              (paddr_t)0x0A003E00ULL, 0x200ULL, 79U, NULL);
 
         /* 执行设备探测 */
         (void)device_probe_all();
@@ -2455,7 +2455,7 @@ void kernel_main(void)
         {
             volatile uint32_t *b31;
             uint32_t d31;
-            b31 = (volatile uint32_t *)(void *)0x0A003C00ULL;
+            b31 = (volatile uint32_t *)(void *)0x0A003E00ULL;
             d31 = b31[2U];  /* device_id */
             hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] slot31 devid=0x");
             uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)d31);
