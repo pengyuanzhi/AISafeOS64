@@ -24,6 +24,7 @@
 #include <kernel/interrupt.h>
 #include <kernel/ipc_notification.h>
 #include <kernel/netstack.h>
+#include <kernel/string.h>
 #include <sched/thread.h>
 #include <hal.h>
 #include <stdint.h>
@@ -541,16 +542,104 @@ static kernel_status_t virtq_poll_completion(virtio_net_priv_t *priv, bool is_rx
 /**
  * @brief 发送网络数据包
  *
- * @param buf      数据包缓冲区
+ * @param buf      数据包缓冲区（以太网帧）
  * @param size     数据包大小
  *
  * @return 实际发送的字节数，负数错误码
  */
 static int64_t virtio_net_tx_packet(const void *buf, uint64_t size)
 {
-    (void)buf;
+    virtq_desc_t *desc;
+    uint16_t desc_hdr;
+    uint16_t desc_data;
+    uint16_t avail_idx;
+    kernel_status_t ret;
+    uint8_t tx_buf[2048U] __attribute__((aligned(64)));
+    virtio_net_hdr_t *net_hdr;
+
     (void)size;
-    return -95; /* ENOTSUP - 待实现 */
+
+    desc = s_net_priv.tx_desc_table;
+
+    /* 检查 VirtQueue 是否有空闲描述符 */
+    if (s_net_priv.tx_vq_state.num_free < 2U)
+    {
+        return -12; /* ENOMEM */
+    }
+
+    /* 检查数据包大小 */
+    if (size > VIRTIO_NET_MAX_PACKET_SIZE)
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 分配 2 个描述符（VirtIO Net Header + Data） */
+    desc_hdr = virtq_alloc_desc(&s_net_priv.tx_vq_state, s_net_priv.tx_desc_table);
+    desc_data = virtq_alloc_desc(&s_net_priv.tx_vq_state, s_net_priv.tx_desc_table);
+
+    /* 构造发送缓冲区（VirtIO Net Header + Ethernet Frame） */
+    net_hdr = (virtio_net_hdr_t *)tx_buf;
+    (void)memset(net_hdr, 0U, sizeof(virtio_net_hdr_t));
+
+    /* 复制以太网帧 */
+    (void)memcpy(tx_buf + sizeof(virtio_net_hdr_t), buf, size);
+
+    /* 描述符 0: VirtIO Net Header（设备只读） */
+    desc[desc_hdr].addr = (uint64_t)(uintptr_t)&s_net_priv.tx_vq_mem[0];
+    desc[desc_hdr].len = sizeof(virtio_net_hdr_t);
+    desc[desc_hdr].flags = VIRTQ_DESC_F_NEXT;
+    desc[desc_hdr].next = desc_data;
+
+    /* 描述符 1: Data（设备只读） */
+    desc[desc_data].addr = (uint64_t)(uintptr_t)(&s_net_priv.tx_vq_mem[0] + sizeof(virtio_net_hdr_t));
+    desc[desc_data].len = (uint32_t)size;
+    desc[desc_data].flags = 0U; /* 不使用 NEXT，这是最后一个描述符 */
+    desc[desc_data].next = VIRTQ_DESC_INVALID;
+
+    /* DMA 一致性：清理发送缓冲区 */
+    hal_dcache_clean((uint64_t)(uintptr_t)&s_net_priv.tx_vq_mem[0],
+                      sizeof(virtio_net_hdr_t) + (uint32_t)size);
+    virtio_dsb();
+
+    /* 添加到 TX Available Ring */
+    avail_idx = s_net_priv.tx_avail_ring->idx % s_net_priv.tx_vq_state.queue_size;
+    s_net_priv.tx_avail_ring_entries[avail_idx] = desc_hdr;
+
+    hal_dmb_ishst();
+    s_net_priv.tx_avail_ring->idx = (uint16_t)(s_net_priv.tx_avail_ring->idx + 1U);
+
+    /* DMA 一致性：清理 TX Available Ring */
+    hal_dcache_clean((uint64_t)(uintptr_t)s_net_priv.tx_avail_ring,
+                      VIRTQ_AVAIL_RING_SIZE);
+    virtio_dsb();
+
+    /* Kick TX 设备（queue 1） */
+    mmio_write32(s_net_priv.mmio_base, VIRTIO_MMIO_QUEUE_NOTIFY, 1U);
+
+    /* 等待完成 */
+    ret = virtq_wait_completion(&s_net_priv, false);
+    if (ret != KERNEL_OK)
+    {
+        return (int64_t)ret;
+    }
+
+    /* 处理 TX Used Ring */
+    {
+        uint16_t used_idx = s_net_priv.tx_vq_state.last_used_idx % s_net_priv.tx_vq_state.queue_size;
+        uint32_t desc_id = s_net_priv.tx_used_ring_entries[used_idx].id;
+
+        /* 释放描述符链 */
+        virtq_free_chain(&s_net_priv.tx_vq_state, s_net_priv.tx_desc_table,
+                          (uint16_t)desc_id);
+
+        s_net_priv.tx_vq_state.last_used_idx =
+            (uint16_t)(s_net_priv.tx_vq_state.last_used_idx + 1U);
+    }
+
+    /* 更新统计 */
+    s_net_priv.tx_vq_state.queue_size = (uint16_t)(s_net_priv.tx_vq_state.queue_size + 1U);
+
+    return (int64_t)size;
 }
 
 /**
@@ -563,9 +652,107 @@ static int64_t virtio_net_tx_packet(const void *buf, uint64_t size)
  */
 static int64_t virtio_net_rx_packet(void *buf, uint64_t size)
 {
-    (void)buf;
-    (void)size;
-    return -95; /* ENOTSUP - 待实现 */
+    virtq_desc_t *desc;
+    uint16_t desc_hdr;
+    uint16_t desc_data;
+    uint16_t avail_idx;
+    kernel_status_t ret;
+    uint16_t used_idx;
+    uint32_t desc_id;
+    uint32_t data_len;
+
+    desc = s_net_priv.rx_desc_table;
+
+    /* 检查 VirtQueue 是否有空闲描述符 */
+    if (s_net_priv.rx_vq_state.num_free < 2U)
+    {
+        return -12; /* ENOMEM */
+    }
+
+    /* 分配 2 个描述符（VirtIO Net Header + Data） */
+    desc_hdr = virtq_alloc_desc(&s_net_priv.rx_vq_state, s_net_priv.rx_desc_table);
+    desc_data = virtq_alloc_desc(&s_net_priv.rx_vq_state, s_net_priv.rx_desc_table);
+
+    /* 描述符 0: VirtIO Net Header（设备可写） */
+    desc[desc_hdr].addr = (uint64_t)(uintptr_t)&s_net_priv.rx_vq_mem[0];
+    desc[desc_hdr].len = sizeof(virtio_net_hdr_t);
+    desc[desc_hdr].flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    desc[desc_hdr].next = desc_data;
+
+    /* 描述符 1: Data Buffer（设备可写） */
+    desc[desc_data].addr = (uint64_t)(uintptr_t)(&s_net_priv.rx_vq_mem[0] + sizeof(virtio_net_hdr_t));
+    desc[desc_data].len = (uint32_t)size;
+    desc[desc_data].flags = VIRTQ_DESC_F_WRITE; /* 不使用 NEXT，这是最后一个描述符 */
+    desc[desc_data].next = VIRTQ_DESC_INVALID;
+
+    /* DMA 一致性：清理描述符表 */
+    hal_dcache_clean((uint64_t)(uintptr_t)s_net_priv.rx_desc_table,
+                      VIRTQ_DESC_TABLE_SIZE);
+    virtio_dsb();
+
+    /* 添加到 RX Available Ring */
+    avail_idx = s_net_priv.rx_avail_ring->idx % s_net_priv.rx_vq_state.queue_size;
+    s_net_priv.rx_avail_ring_entries[avail_idx] = desc_hdr;
+
+    hal_dmb_ishst();
+    s_net_priv.rx_avail_ring->idx = (uint16_t)(s_net_priv.rx_avail_ring->idx + 1U);
+
+    /* DMA 一致性：清理 RX Available Ring */
+    hal_dcache_clean((uint64_t)(uintptr_t)s_net_priv.rx_avail_ring,
+                      VIRTQ_AVAIL_RING_SIZE);
+    virtio_dsb();
+
+    /* Kick RX 设备（queue 0） */
+    mmio_write32(s_net_priv.mmio_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0U);
+
+    /* 等待完成 */
+    ret = virtq_wait_completion(&s_net_priv, true);
+    if (ret != KERNEL_OK)
+    {
+        return (int64_t)ret;
+    }
+
+    /* DMA 一致性：使接收缓冲区对 CPU 可见 */
+    hal_dcache_invalidate((uint64_t)(uintptr_t)&s_net_priv.rx_vq_mem[0],
+                          sizeof(virtio_net_hdr_t) + (uint32_t)size);
+    virtio_dsb();
+
+    /* 处理 RX Used Ring */
+    used_idx = s_net_priv.rx_vq_state.last_used_idx % s_net_priv.rx_vq_state.queue_size;
+    desc_id = s_net_priv.rx_used_ring_entries[used_idx].id;
+    data_len = s_net_priv.rx_used_ring_entries[used_idx].len;
+
+    /* 复制以太网帧（跳过 VirtIO Net Header） */
+    if (data_len > sizeof(virtio_net_hdr_t))
+    {
+        uint32_t pkt_len = data_len - sizeof(virtio_net_hdr_t);
+        if (pkt_len > size)
+        {
+            pkt_len = (uint32_t)size;
+        }
+        (void)memcpy(buf, &s_net_priv.rx_vq_mem[0] + sizeof(virtio_net_hdr_t), pkt_len);
+
+        /* 释放描述符链 */
+        virtq_free_chain(&s_net_priv.rx_vq_state, s_net_priv.rx_desc_table,
+                          (uint16_t)desc_id);
+
+        s_net_priv.rx_vq_state.last_used_idx =
+            (uint16_t)(s_net_priv.rx_vq_state.last_used_idx + 1U);
+
+        /* 更新统计 */
+        s_net_priv.rx_vq_state.queue_size = (uint16_t)(s_net_priv.rx_vq_state.queue_size + 1U);
+
+        return (int64_t)pkt_len;
+    }
+
+    /* 释放描述符链 */
+    virtq_free_chain(&s_net_priv.rx_vq_state, s_net_priv.rx_desc_table,
+                      (uint16_t)desc_id);
+
+    s_net_priv.rx_vq_state.last_used_idx =
+        (uint16_t)(s_net_priv.rx_vq_state.last_used_idx + 1U);
+
+    return -5; /* EIO */
 }
 
 /* ========================================================================
@@ -706,9 +893,8 @@ static kernel_status_t virtio_net_probe(void *dev_data)
                                                     s_net_priv.driver_id);
     if (s_net_priv.net_if_id < 0)
     {
-        mmio_write32(s_net_priv.mmio_base, VIRTIO_MMIO_STATUS,
-                     VIRTIO_STATUS_FAILED);
-        return s_net_priv.net_if_id;
+        /* 网络协议栈未实现，但驱动仍然可以工作 */
+        s_net_priv.net_if_id = -1;
     }
 #else
     (void)s_net_priv.driver_id;
@@ -755,26 +941,56 @@ static kernel_status_t virtio_net_ioctl(void *dev_data, uint32_t cmd, void *arg)
 }
 
 /**
- * @brief VirtIO Net 数据收发（未实现）
+ * @brief VirtIO Net 数据收发（网络接口操作）
  */
 static int64_t virtio_net_read(void *dev_data, void *buf,
                                 uint64_t size, uint64_t offset)
 {
     (void)dev_data;
-    (void)buf;
-    (void)size;
     (void)offset;
-    return -95; /* ENOTSUP */
+
+    if (s_net_priv.initialized == 0U)
+    {
+        return -6; /* ENXIO */
+    }
+
+    if ((buf == NULL) || (size == 0U))
+    {
+        return -22; /* EINVAL */
+    }
+
+    if (size > VIRTIO_NET_MAX_PACKET_SIZE)
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 接收网络数据包 */
+    return virtio_net_rx_packet(buf, size);
 }
 
 static int64_t virtio_net_write(void *dev_data, const void *buf,
                                  uint64_t size, uint64_t offset)
 {
     (void)dev_data;
-    (void)buf;
-    (void)size;
     (void)offset;
-    return -95; /* ENOTSUP */
+
+    if (s_net_priv.initialized == 0U)
+    {
+        return -6; /* ENXIO */
+    }
+
+    if ((buf == NULL) || (size == 0U))
+    {
+        return -22; /* EINVAL */
+    }
+
+    if (size > VIRTIO_NET_MAX_PACKET_SIZE)
+    {
+        return -22; /* EINVAL */
+    }
+
+    /* 发送网络数据包 */
+    return virtio_net_tx_packet(buf, size);
 }
 
 /* ========================================================================

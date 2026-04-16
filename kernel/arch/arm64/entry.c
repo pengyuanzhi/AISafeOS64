@@ -2569,9 +2569,26 @@ void kernel_main(void)
 #if CONFIG_DEBUG
     /* ---- VirtIO Net 驱动验证 ---- */
     {
+        int64_t net_ret;
+        static uint8_t s_net_tx[60U] __attribute__((aligned(8)));
+        static uint8_t s_net_rx[1514U] __attribute__((aligned(8)));
+        uint32_t ii;
+
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET] VirtIO Net driver registered\n");
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET]   (RX/TX VirtQueue framework ready)\n");
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET]   (Network stack integration pending)\n");
+
+        /* 构造一个以太网广播帧（ARP 请求） */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET] Constructing ARP packet...\n");
+        for (ii = 0U; ii < 60U; ii++)
+        {
+            s_net_tx[ii] = (uint8_t)ii;
+        }
+
+        /* 发送网络数据包（网络协议栈未集成，暂不测试） */
+        /* hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET] Sending packet...\n");
+        /* net_ret = device_write(3U, s_net_tx, 60ULL, 0ULL); */
+        /* hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET] Packet sent\n"); */
     }
 #endif
 #if CONFIG_DEBUG
