@@ -21,6 +21,7 @@ if(CMAKE_CROSSCOMPILING)
         init
         mem
         proc
+        drv_virtio_net
     )
 
     # ================================================================
