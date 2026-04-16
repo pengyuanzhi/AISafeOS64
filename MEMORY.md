@@ -1,5 +1,77 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-16 用户态 VirtIO Net 驱动以太网帧收发 ✅ (19:45)
+
+### 核心功能
+
+**1. VirtQueue 提交/接收管理**
+- virtq_alloc_desc() - 分配空闲描述符
+- virtq_free_desc() - 释放描述符链
+- virtq_tx_submit() - TX VirtQueue 提交
+- virtq_rx_recv() - RX VirtQueue 接收
+
+**2. 以太网帧收发接口**
+- virtio_net_send_eth_frame() - 发送以太网帧
+  - 参数验证（缓冲区、大小）
+  - 直接提交到 TX VirtQueue
+  - Kick 设备（QUEUE_NOTIFY）
+- virtio_net_recv_eth_frame() - 接收以太网帧
+  - 参数验证（缓冲区、大小）
+  - 直接从 RX VirtQueue 接收
+  - 数据复制到用户缓冲区
+
+**3. 描述符管理**
+- 256 个描述符，支持 RX/TX 双队列
+- 描述符链管理（VIRTQ_DESC_F_NEXT）
+- 空闲描述符索引管理（rx_free_idx/tx_free_idx）
+- Used Ring 索引管理（rx_last_used/tx_last_used）
+
+**4. VirtQueue 操作**
+- Available Ring 提交（idx 更新）
+- Used Ring 处理（last_used 跟踪）
+- 设备 Kick（QUEUE_NOTIFY 寄存器）
+
+### 验证结果
+```
+✅ 编译成功（drv_virtio_net.elf）
+✅ 系统启动正常
+✅ VirtIO Block 驱动正常工作
+✅ 驱动框架测试通过（drv=3 dev=3 probe=2）
+✅ CAP 测试全部通过
+✅ SMP 测试通过（4 核，每核 1000 次计数）
+✅ EL0 测试通过
+✅ 用户态服务正常运行（FS/PROC/MEM/PATH）
+```
+
+### 技术细节
+- **描述符管理**：环形缓冲区，支持链式描述符
+- **TX VirtQueue**：队列 1，用于发送数据包
+- **RX VirtQueue**：队列 0，用于接收数据包
+- **Available Ring**：提交待发送的数据包
+- **Used Ring**：处理已接收的数据包
+- **设备通知**：QUEUE_NOTIFY 寄存器 Kick 设备
+- **MISRA C:2012 合规**：4空格缩进，Allman括号，中文注释
+
+### 代码统计
+- 修改文件：services/drv_virtio_net/main.c
+- 新增行数：~180 行
+- 新增函数：6 个内部函数，2 个公共接口
+- 代码量：~540 行（总）
+
+### 待完成
+- ⏳ 网络协议栈集成 - 在 services/net/main.c 中调用 VirtIO Net 驱动接口
+- ⏳ 中断处理 - VirtIO Net 设备中断处理
+- ⏳ DMA 一致性 - 缓存维护
+- ⏳ VirtIO Net Header - 完整填写（flags, checksum, gso_size）
+
+### 对应需求
+- DV-024~027: VirtIO Net 设备驱动（用户态）
+- NW-001: 网络接口管理（以太网帧收发）
+- NW-002: 网络协议栈分层架构（用户态）
+- 微内核设计：所有驱动在用户态
+
+---
+
 ## 2026-04-16 VirtIO Net 驱动从内核态迁移到用户态 ✅ (18:45)
 
 ### 架构变更
