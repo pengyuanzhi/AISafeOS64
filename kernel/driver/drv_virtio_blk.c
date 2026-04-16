@@ -22,6 +22,8 @@
 #include <kernel/config.h>
 #include <kernel/gic.h>
 #include <kernel/interrupt.h>
+#include <kernel/ipc_notification.h>
+#include <sched/thread.h>
 #include <hal.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -137,7 +139,7 @@ static void blk_dbg_hex(uint64_t value)
 #define VIRTIO_BLK_MAX_IO_SIZE      (VIRTIO_BLK_SECTOR_SIZE * VIRTIO_BLK_MAX_SECTORS)
 
 /** @brief 轮询超时计数 */
-#define VIRTQ_POLL_TIMEOUT          500000U
+#define VIRTQ_POLL_TIMEOUT          1000000U
 
 /** @brief 完全禁用 WFI，只使用 MMIO 探针
  *         QEMU TCG 模式下，MMIO 探针强制退出翻译块并处理事件 */
@@ -284,10 +286,20 @@ typedef struct
     virtio_blk_request_t req_buf
                         __attribute__((aligned(64)));
 
+    /** @brief 完全中断驱动模式：通知对象 */
+    kobj_id_t            notify_id;          /**< @brief 通知对象 ID */
+    volatile bool        completed;          /**< @brief 请求完成标志 */
+
 } virtio_blk_priv_t;
 
 /** @brief VirtIO Block 驱动私有数据实例 */
 static virtio_blk_priv_t s_blk_priv;
+
+/* ========================================================================
+ * 函数前向声明
+ * ======================================================================== */
+static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv);
+static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv);
 
 /* ========================================================================
  * MMIO 寄存器访问辅助
@@ -718,12 +730,150 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
  *
  * @return KERNEL_OK 成功，负数超时或 I/O 错误
  */
+/**
+ * @brief 确保 notify 对象已创建（延迟初始化）
+ *
+ * @details 在第一次 I/O 操作时创建通知对象，避免在内核早期
+ *          初始化阶段（调度器未就绪时）创建失败。
+ *
+ * @param priv 驱动私有数据指针
+ *
+ * @return KERNEL_OK 成功，负数错误码失败
+ */
+static kernel_status_t virtblk_ensure_notify(virtio_blk_priv_t *priv)
+{
+    if (priv->notify_id == 0U)
+    {
+        thread_id_t current_tid = kthread_get_current_tid();
+        if (current_tid == THREAD_ID_INVALID)
+        {
+            /* 调度器未就绪，延迟创建 */
+            return -12; /* ENOMEM */
+        }
+
+        kernel_status_t ret = ipc_notification_create(current_tid, &priv->notify_id);
+        if (ret != KERNEL_OK)
+        {
+            return ret;
+        }
+    }
+
+    return KERNEL_OK;
+}
+
+static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv)
+{
+    uint16_t used_idx;
+    uint32_t desc_id;
+    uint64_t triggered;
+    kernel_status_t ret;
+
+    (void)desc_id;
+    (void)used_idx;
+
+    /* 确保通知对象已创建 */
+    ret = virtblk_ensure_notify(priv);
+    if (ret != KERNEL_OK)
+    {
+        /* 通知对象创建失败（例如调度器未就绪），回退到轮询模式 */
+#if CONFIG_DEBUG_VERBOSE
+        hal_uart_puts(0x09000000ULL, "[BLK] fallback to poll\n");
+#endif
+        return virtq_poll_completion(priv);
+    }
+
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] wait start notify_id=");
+    blk_dbg_hex((uint64_t)priv->notify_id);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
+    /* 初始化完成标志 */
+    priv->completed = false;
+
+    /* 阻塞等待中断通知 */
+    ret = ipc_notification_wait(priv->notify_id, 1U, &triggered);
+    if (ret != KERNEL_OK)
+    {
+#if CONFIG_DEBUG_VERBOSE
+        hal_uart_puts(0x09000000ULL, "[BLK] wait failed ret=");
+        blk_dbg_hex((uint64_t)ret);
+        hal_uart_puts(0x09000000ULL, "\n");
+#endif
+        return ret;
+    }
+
+    /* 中断已唤醒，检查 Used Ring 处理完成 */
+    used_idx = priv->vq_state.last_used_idx % priv->vq_state.queue_size;
+
+    /* DMA 一致性：使 Used Ring 条目对 CPU 可见 */
+    hal_dcache_invalidate(
+        (uint64_t)(uintptr_t)&priv->used_ring_entries[used_idx],
+        (uint64_t)sizeof(virtq_used_elem_t));
+    virtio_dsb();
+
+    desc_id = priv->used_ring_entries[used_idx].id;
+
+#if CONFIG_DEBUG_VERBOSE
+    hal_uart_puts(0x09000000ULL, "[BLK] wait done used_idx=");
+    blk_dbg_hex((uint64_t)used_idx);
+    hal_uart_puts(0x09000000ULL, " desc_id=");
+    blk_dbg_hex((uint64_t)desc_id);
+    hal_uart_puts(0x09000000ULL, " triggered=");
+    blk_dbg_hex(triggered);
+    hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
+    /* 释放描述符链 */
+    virtq_free_chain(priv, (uint16_t)desc_id);
+
+    priv->vq_state.last_used_idx =
+        (uint16_t)(priv->vq_state.last_used_idx + 1U);
+
+    /* DMA 一致性：使响应数据和读缓冲区对 CPU 可见 */
+    hal_dcache_invalidate((uint64_t)(uintptr_t)&priv->req_buf,
+                          (uint64_t)sizeof(priv->req_buf));
+    virtio_dsb();
+
+    /* 检查响应状态 */
+    if (priv->req_buf.resp.status == VIRTIO_BLK_S_OK)
+    {
+        return KERNEL_OK;
+    }
+    else
+    {
+#if CONFIG_DEBUG_VERBOSE
+        hal_uart_puts(0x09000000ULL, "[BLK] resp status=");
+        blk_dbg_hex((uint64_t)priv->req_buf.resp.status);
+        hal_uart_puts(0x09000000ULL, "\n");
+#endif
+
+        /* 错误处理：根据 VirtIO 响应状态返回对应错误码 */
+        if (priv->req_buf.resp.status == VIRTIO_BLK_S_IOERR)
+        {
+            return -5; /* EIO */
+        }
+        else if (priv->req_buf.resp.status == VIRTIO_BLK_S_UNSUPP)
+        {
+            return -95; /* ENOTSUP */
+        }
+        else
+        {
+            return -5; /* EIO */
+        }
+    }
+}
+
+/*
+ * ========================================================================
+ * 轮询模式实现（作为中断驱动模式的回退）
+ * ========================================================================
+ */
 static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
 {
     uint32_t timeout;
     uint16_t used_idx;
     uint32_t desc_id;
-
     uint32_t saved_irq_state;
 
     timeout = 0U;
@@ -731,17 +881,11 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
 #if CONFIG_DEBUG_VERBOSE
     hal_uart_puts(0x09000000ULL, "[BLK] poll start last_used=");
     blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
-    hal_uart_puts(0x09000000ULL, " used_ring@");
-    blk_dbg_hex((uint64_t)(uintptr_t)priv->used_ring);
     hal_uart_puts(0x09000000ULL, "\n");
 #endif
 
     /*
      * 保存 IRQ 状态并临时使能 IRQ（清除 PSTATE.I）
-     *
-     * QEMU TCG 的 helper_wfi() 通过 arm_cpu_exec_interrupt() 判断
-     * 是否有挂起中断。当 PSTATE.I 置位时，QEMU 判定"无挂起中断"，
-     * WFI 永久停机。必须清除 PSTATE.I 使 GIC VirtIO SPI 可被感知。
      */
     saved_irq_state = hal_irq_saved_state();
     hal_irq_enable();
@@ -766,14 +910,6 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
 
             desc_id = priv->used_ring_entries[used_idx].id;
 
-#if CONFIG_DEBUG_VERBOSE
-            hal_uart_puts(0x09000000ULL, "[BLK] poll done used_idx=");
-            blk_dbg_hex((uint64_t)used_idx);
-            hal_uart_puts(0x09000000ULL, " desc_id=");
-            blk_dbg_hex((uint64_t)desc_id);
-            hal_uart_puts(0x09000000ULL, "\n");
-#endif
-
             /* 释放描述符链 */
             virtq_free_chain(priv, (uint16_t)desc_id);
 
@@ -785,22 +921,16 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
                                   (uint64_t)sizeof(priv->req_buf));
             virtio_dsb();
 
+            /* 恢复 IRQ 状态 */
+            hal_irq_restore(saved_irq_state);
+
             /* 检查响应状态 */
             if (priv->req_buf.resp.status == VIRTIO_BLK_S_OK)
             {
-                hal_irq_restore(saved_irq_state);
                 return KERNEL_OK;
             }
             else
             {
-#if CONFIG_DEBUG_VERBOSE
-                hal_uart_puts(0x09000000ULL, "[BLK] resp status=");
-                blk_dbg_hex((uint64_t)priv->req_buf.resp.status);
-                hal_uart_puts(0x09000000ULL, "\n");
-#endif
-                hal_irq_restore(saved_irq_state);
-
-                /* 错误处理：根据 VirtIO 响应状态返回对应错误码 */
                 if (priv->req_buf.resp.status == VIRTIO_BLK_S_IOERR)
                 {
                     return -5; /* EIO */
@@ -818,52 +948,20 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
 
         /*
          * 优化轮询策略：
-         *
-         * 阶段 1（前 YIELD_THRESH 次）：MMIO 探针
-         *   读取 VirtIO MMIO 中断状态寄存器，强制 QEMU 退出翻译块。
-         *
-         * 阶段 2（YIELD_THRESH 之后）：WFI
-         *   让出 CPU 给 QEMU 主循环处理异步 BH。
          */
         if (timeout < VIRTQ_YIELD_THRESH)
         {
-            /* MMIO 探针：强制 QEMU 退出翻译块并处理挂起事件 */
             (void)mmio_read32(priv->mmio_base, VIRTIO_MMIO_INTERRUPT_STATUS);
         }
         else
         {
-            /* WFI：让出 CPU 给 QEMU 主循环处理 VirtIO BH */
             virtio_wfi();
         }
 
         timeout++;
-
-#if CONFIG_DEBUG_VERBOSE
-        /* 每 100 次 WFI 输出一次状态（降低频率减少开销） */
-        if ((timeout % 1000U) == 0U)
-        {
-            hal_uart_puts(0x09000000ULL, "[BLK] poll wfi=");
-            blk_dbg_hex((uint64_t)timeout);
-            hal_uart_puts(0x09000000ULL, " used_idx=");
-            blk_dbg_hex((uint64_t)priv->used_ring->idx);
-            hal_uart_puts(0x09000000ULL, " last=");
-            blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
-            hal_uart_puts(0x09000000ULL, "\n");
-        }
-#endif
     }
 
-#if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] poll TIMEOUT used_ring.idx=");
-    blk_dbg_hex((uint64_t)priv->used_ring->idx);
-    hal_uart_puts(0x09000000ULL, " last_used=");
-    blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
-    hal_uart_puts(0x09000000ULL, " used_flags=");
-    blk_dbg_hex((uint64_t)priv->used_ring->flags);
-    hal_uart_puts(0x09000000ULL, "\n");
-#endif
-
-    /* 恢复原始 IRQ 屏蔽状态 */
+    /* 恢复 IRQ 状态 */
     hal_irq_restore(saved_irq_state);
 
     return -110; /* ETIMEDOUT */
@@ -1035,6 +1133,8 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
 
     s_blk_priv.initialized = 1U;
 
+    /* 通知对象在第一次 I/O 操作时延迟创建（virtblk_ensure_notify） */
+
     return KERNEL_OK;
 }
 
@@ -1047,6 +1147,13 @@ static kernel_status_t virtio_blk_remove(void *dev_data)
 
     if (s_blk_priv.initialized != 0U)
     {
+        /* 销毁通知对象（完全中断驱动模式） */
+        if (s_blk_priv.notify_id != 0U)
+        {
+            (void)ipc_notification_destroy(s_blk_priv.notify_id);
+            s_blk_priv.notify_id = 0U;
+        }
+
         mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, 0U);
         s_blk_priv.initialized = 0U;
     }
@@ -1102,8 +1209,8 @@ static int64_t virtio_blk_read(void *dev_data, void *buf,
         return (int64_t)ret;
     }
 
-    /* 轮询等待完成 */
-    ret = virtq_poll_completion(&s_blk_priv);
+    /* 等待中断通知完成 */
+    ret = virtq_wait_completion(&s_blk_priv);
     if (ret != KERNEL_OK)
     {
         return (int64_t)ret;
@@ -1176,8 +1283,8 @@ static int64_t virtio_blk_write(void *dev_data, const void *buf,
         return (int64_t)ret;
     }
 
-    /* 轮询等待完成 */
-    ret = virtq_poll_completion(&s_blk_priv);
+    /* 等待中断通知完成 */
+    ret = virtq_wait_completion(&s_blk_priv);
     if (ret != KERNEL_OK)
     {
         return (int64_t)ret;
@@ -1218,9 +1325,9 @@ static kernel_status_t virtio_blk_ioctl(void *dev_data, uint32_t cmd,
 }
 
 /**
- * @brief VirtIO Block 中断处理函数
+ * @brief VirtIO Block 中断处理函数（完全中断驱动模式）
  *
- * @details 读取中断状态，ACK 中断，处理 Used Ring 完成项
+ * @details 读取中断状态，ACK 中断，触发通知唤醒等待线程
  */
 static void virtio_blk_irq(uint32_t irq, void *dev_data)
 {
@@ -1234,6 +1341,12 @@ static void virtio_blk_irq(uint32_t irq, void *dev_data)
         /* ACK 中断 */
         mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_INTERRUPT_ACK,
                      int_status);
+
+        /* 触发通知唤醒等待线程 */
+        if (s_blk_priv.notify_id != 0U)
+        {
+            (void)ipc_notification_signal(s_blk_priv.notify_id, 1U);
+        }
     }
 }
 
