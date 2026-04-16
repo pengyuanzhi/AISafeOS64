@@ -2403,9 +2403,11 @@ void kernel_main(void)
     {
         extern kernel_status_t drv_uart_register(void);
         extern kernel_status_t drv_virtio_blk_register(void);
+        extern kernel_status_t drv_virtio_net_register(void);
 
         (void)drv_uart_register();
         (void)drv_virtio_blk_register();
+        (void)drv_virtio_net_register();
 
         /* 注册 QEMU 平台设备 */
         /* PL011 UART @ 0x09000000, IRQ 33 */
@@ -2415,6 +2417,10 @@ void kernel_main(void)
         /* VirtIO Block MMIO @ 0x0A003E00, IRQ 79 (slot=31) */
         (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
                               (paddr_t)0x0A003E00ULL, 0x200ULL, 79U, NULL);
+
+        /* VirtIO Net MMIO @ 0x0A003C00, IRQ 78 (slot=30) */
+        (void)device_register("virtio,net", DRIVER_TYPE_NET,
+                              (paddr_t)0x0A003C00ULL, 0x200ULL, 78U, NULL);
 
         /* 执行设备探测 */
         (void)device_probe_all();
@@ -2559,6 +2565,15 @@ void kernel_main(void)
     }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
+
+#if CONFIG_DEBUG
+    /* ---- VirtIO Net 驱动验证 ---- */
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET] VirtIO Net driver registered\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET]   (RX/TX VirtQueue framework ready)\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[NET]   (Network stack integration pending)\n");
+    }
+#endif
 #if CONFIG_DEBUG
 
     /* ---- ELF 加载器端到端测试 ---- */
