@@ -24,6 +24,7 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
+#include "net_if/net_if.h"
 
 /* ========================================================================
  * 协议常量
@@ -1496,9 +1497,7 @@ static void eth_process_frame(uint32_t if_id, const uint8_t *frame, uint32_t len
 int64_t net_rx_packet(uint32_t if_id, void *buf, uint64_t size)
 {
     net_interface_t *iface;
-    uint32_t head;
-    uint32_t tail;
-    uint32_t used;
+    int64_t ret;
 
     if (if_id >= NET_MAX_INTERFACES)
     {
@@ -1517,50 +1516,33 @@ int64_t net_rx_packet(uint32_t if_id, void *buf, uint64_t size)
         return -(int64_t)22;
     }
 
-    /* 检查接收环是否有数据 */
-    head = s_rx_head[if_id];
-    tail = s_rx_tail[if_id];
-
-    if (head >= tail)
+    /* 调用网络接口层接收以太网帧 */
+    ret = net_if_recv_frame(iface->name, buf, size);
+    if (ret < 0)
     {
-        used = head - tail;
-    }
-    else
-    {
-        used = NET_RX_QUEUE_DEPTH - (tail - head);
+        iface->stats.rx_errors++;
+        return ret;
     }
 
-    if (used == 0U)
+    if (ret == 0)
     {
+        /* 没有数据可接收 */
         return 0LL;
     }
 
-    /* 从接收环复制数据并解析协议栈 */
-    {
-        uint64_t copy_size = size;
-        if (copy_size > NET_MAX_PACKET_SIZE)
-        {
-            copy_size = NET_MAX_PACKET_SIZE;
-        }
+    /* 传递给协议栈处理 */
+    eth_process_frame(if_id, (const uint8_t *)buf, (uint32_t)ret);
 
-        (void)memcpy(buf, s_rx_buf[if_id][tail % NET_RX_QUEUE_DEPTH],
-                     (size_t)copy_size);
+    iface->stats.rx_packets++;
+    iface->stats.rx_bytes += (uint64_t)ret;
 
-        /* 传递给协议栈处理 */
-        eth_process_frame(if_id, (const uint8_t *)buf, (uint32_t)copy_size);
-
-        s_rx_tail[if_id] = (tail + 1U) % NET_RX_QUEUE_DEPTH;
-
-        iface->stats.rx_packets++;
-        iface->stats.rx_bytes += copy_size;
-
-        return (int64_t)copy_size;
-    }
+    return ret;
 }
 
 int64_t net_tx_packet(uint32_t if_id, const void *buf, uint64_t size)
 {
     net_interface_t *iface;
+    int64_t ret;
 
     if (if_id >= NET_MAX_INTERFACES)
     {
@@ -1585,10 +1567,18 @@ int64_t net_tx_packet(uint32_t if_id, const void *buf, uint64_t size)
         return -(int64_t)22;
     }
 
-    iface->stats.tx_packets++;
-    iface->stats.tx_bytes += size;
+    /* 调用网络接口层发送以太网帧 */
+    ret = net_if_send_frame(iface->name, buf, size);
+    if (ret < 0)
+    {
+        iface->stats.tx_errors++;
+        return ret;
+    }
 
-    return (int64_t)size;
+    iface->stats.tx_packets++;
+    iface->stats.tx_bytes += (uint64_t)ret;
+
+    return ret;
 }
 
 /* ========================================================================
