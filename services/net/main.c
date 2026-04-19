@@ -25,6 +25,18 @@
 #include <stdint.h>
 #include <string.h>
 #include "net_if/net_if.h"
+#include "net_if/net_if_auto.h"
+
+/* ========================================================================
+ * TCP/IP 优化功能头文件
+ * ======================================================================== */
+
+#include "tcp_cubic.h"
+#include "tcp_timestamp.h"
+#include "tcp_keepalive.h"
+#include "tcp_options.h"
+
+#include <stdio.h>
 
 /* ========================================================================
  * 协议常量
@@ -92,6 +104,106 @@
 
 /** @brief IP 更多分片标志 */
 #define IP_FLAG_MF              0x2000U
+
+/* ========================================================================
+ * TCP 常量
+ * ======================================================================== */
+
+/** @brief TCP 最大段大小 */
+#define TCP_MSS                 1460U
+
+/* ========================================================================
+ * 拥塞控制常量
+ * ======================================================================== */
+
+/** @brief CUBIC 慢启动阈值调节因子 */
+#define CUBIC_ALPHA             0.7f
+
+/** @brief CUBIC 减速因子 */
+#define CUBIC_BETA              0.7f
+
+/** @brief CUBIC 拥塞窗口缩放因子 */
+#define CUBIC_CWND_SCALE        10U
+
+/** @brief TCP 最大重复 ACK 次数 */
+#define TCP_MAX_DUP_ACKS        3U
+
+/** @brief TCP 延迟 ACK 间隔（毫秒） */
+#define TCP_DELAYED_ACK_MS      40U
+
+/** @brief TCP SACK 最大块数 */
+#define TCP_MAX_SACK_BLOCKS     4U
+
+/** @brief TCP 重传定时器检查周期（毫秒） */
+#define TCP_RETRANSMIT_PERIOD_MS    10U
+
+/** @brief TCP Keepalive 空闲超时（秒） */
+#define TCP_KEEPALIVE_IDLE_SEC      7200U
+
+/** @brief TCP Keepalive 探测间隔（秒） */
+#define TCP_KEEPALIVE_INTERVAL_SEC  75U
+
+/** @brief TCP Keepalive 最大探测次数 */
+#define TCP_KEEPALIVE_MAX_PROBES    9U
+
+/** @brief RTT 初始估计值（毫秒） */
+#define TCP_RTT_INITIAL_MS          200U
+
+/** @brief RTO 最小值（毫秒） */
+#define TCP_RTO_MIN_MS              200U
+
+/** @brief RTO 最大值（毫秒） */
+#define TCP_RTO_MAX_MS              60000U
+
+/** @brief SRTT 平滑因子（alpha = 1/8） */
+#define TCP_RTT_ALPHA_SHIFT         3U
+
+/** @brief RTT 偏差平滑因子（beta = 1/4） */
+#define TCP_RTT_BETA_SHIFT          2U
+
+/* ========================================================================
+ * ICMP 错误消息常量
+ * ======================================================================== */
+
+/** @brief ICMP 类型：目的不可达 */
+#define ICMP_TYPE_DEST_UNREACH   3U
+
+/** @brief ICMP 类型：超时 */
+#define ICMP_TYPE_TIME_EXCEEDED  11U
+
+/** @brief ICMP 类型：参数问题 */
+#define ICMP_TYPE_PARAM_PROB     12U
+
+/** @brief ICMP 代码：网络不可达 */
+#define ICMP_CODE_NET_UNREACH    0U
+
+/** @brief ICMP 代码：主机不可达 */
+#define ICMP_CODE_HOST_UNREACH   1U
+
+/** @brief ICMP 代码：端口不可达 */
+#define ICMP_CODE_PORT_UNREACH   3U
+
+/** @brief ICMP 代码：需要分片 */
+#define ICMP_CODE_FRAG_NEEDED    4U
+
+/** @brief ICMP 代码：TTL 过期 */
+#define ICMP_CODE_TTL_EXPIRED    0U
+
+/** @brief ICMP 代码：重组超时 */
+#define ICMP_CODE_REASS_TIME_EXPIRED 1U
+
+/** @brief ICMP 代码：坏的 IP 头 */
+#define ICMP_CODE_BAD_HEADER     0U
+
+/* ========================================================================
+ * IP 分片重组常量
+ * ======================================================================== */
+
+/** @brief IP 分片重组最大队列数 */
+#define NET_MAX_REASS_QUEUE     8U
+
+/** @brief IP 分片重组超时（毫秒） */
+#define REASS_TIMEOUT_MS        60000U
 
 /* ========================================================================
  * TCP 状态机枚举
@@ -252,6 +364,54 @@ typedef struct
 /**
  * @brief TCP 控制块
  */
+/* ========================================================================
+ * 拥塞控制状态枚举
+ * ======================================================================== */
+
+/**
+ * @brief 拥塞控制状态
+ */
+typedef enum
+{
+    CONG_OPEN = 0,             /**< @brief 开启状态 */
+    CONG_SLOW_START,           /**< @brief 慢启动 */
+    CONG_CONGESTION_AVOIDANCE,  /**< @brief 拥塞避免 */
+    CONG_FAST_RECOVERY,        /**< @brief 快速恢复 */
+    CONG_TIMEOUT               /**< @brief 超时 */
+} congestion_state_t;
+
+/**
+ * @brief RTT 测量数据结构
+ */
+typedef struct
+{
+    uint32_t rtt_sample;       /**< @brief 最新 RTT 样本 */
+    uint32_t rtt_min;          /**< @brief 最小 RTT */
+    uint32_t rtt_var;          /**< @brief RTT 偏差 */
+    uint32_t srtt;             /**< @brief 平滑 RTT */
+    uint32_t rto;              /**< @brief 重传超时 */
+} tcp_rtt_t;
+
+/**
+ * @brief 拥塞控制数据结构
+ */
+typedef struct
+{
+    congestion_state_t state;  /**< @brief 拥塞状态 */
+    uint32_t ssthresh;         /**< @brief 慢启动阈值 */
+    uint32_t cwnd;             /**< @brief 拥塞窗口 */
+    uint32_t w_max;            /**< @brief 峰值窗口 */
+    uint64_t last_acks;        /**< @brief 最后确认序列号 */
+    uint64_t last_retrans;     /**< @brief 最后重传时间 */
+    uint64_t last_rtt_sample;  /**< @brief 最后 RTT 样本 */
+    tcp_rtt_t rtt;             /**< @brief RTT 测量 */
+    uint32_t dup_acks;         /**< @brief 重复 ACK 计数 */
+    uint32_t last_ack;         /**< @brief 最后 ACK */
+} tcp_congestion_ctrl_t;
+
+/**
+ * @brief TCP 控制块
+ */
 typedef struct
 {
     uint32_t          sock_id;          /**< @brief 关联套接字 ID */
@@ -271,8 +431,107 @@ typedef struct
     uint32_t          recv_len;         /**< @brief 接收缓冲已用长度 */
     tcp_retransmit_seg_t retrans_buf[TCP_MAX_RETRANS_SEGS]; /**< @brief 重传队列 */
     uint32_t          retrans_count;    /**< @brief 活跃重传段数 */
+
+    /* 新增：拥塞控制字段 */
+    tcp_congestion_ctrl_t cong_ctrl; /**< @brief 拥塞控制 */
+
+    /* 新增：SACK 字段 */
+    uint8_t           sack_permitted;   /**< @brief SACK 允许标志 */
+    uint32_t          sack_left[4];     /**< @brief SACK 左边界 */
+    uint32_t          sack_right[4];    /**< @brief SACK 右边界 */
+    uint8_t           sack_count;       /**< @brief SACK 块数量 */
+
+    /* 新增：Nagle 算法字段 */
+    uint8_t           nagle_enabled;   /**< @brief Nagle 算法启用 */
+    uint8_t           tcp_cork;        /**< @brief Cork 模式 */
+    uint8_t           delayed_ack;     /**< @brief 延迟 ACK 计数 */
+
+    /* 新增：CUBIC 算法字段 */
+    uint32_t          cubic_cwnd;      /**< @brief CUBIC 窗口 */
+    uint32_t          cubic_ssthresh;  /**< @brief CUBIC 慢启动阈值 */
+    uint32_t          cubic_w_max;     /**< @brief CUBIC 峰值窗口 */
+    uint32_t          cubic_epoch;     /**< @brief CUBIC 时代开始时间 */
+    uint32_t          cubic_k;         /**< @brief CUBIC 参数 K */
+    uint8_t           cubic_state;     /**< @brief CUBIC 状态 */
+
+    /* 新增：TCP 时间戳字段 */
+    uint32_t          ts_val;          /**< @brief 时间戳值 */
+    uint32_t          ts_echo_rpl;     /**< @brief 时间戳回显 */
+    uint32_t          recent_ts;       /**< @brief 最近接收时间戳 */
+    bool              ts_enabled;      /**< @brief 时间戳启用 */
+
+    /* 新增：TCP Keepalive 字段 */
+    uint32_t          keepalive_last_active; /**< @brief 最后活跃时间 */
+    uint32_t          keepalive_probe_count; /**< @brief 当前探测次数 */
+    uint32_t          keepalive_next_probe;  /**< @brief 下一次探测时间 */
+    bool              keepalive_enabled;      /**< @brief Keepalive 启用 */
+    bool              keepalive_timeout;      /**< @brief Keepalive 超时 */
+
+    /* 新增：TCP 选项字段 */
+    uint16_t          mss;             /**< @brief 最大段大小 */
+    uint8_t           window_scale;    /**< @brief 窗口缩放因子 */
+    uint8_t           mss_negotiated;  /**< @brief MSS 已协商 */
+    uint8_t           window_scale_negotiated; /**< @brief 窗口缩放已协商 */
+
     bool              in_use;           /**< @brief 使用标记 */
 } tcp_tcb_t;
+
+/* ========================================================================
+ * IP 分片重组数据结构
+ * ======================================================================== */
+
+/**
+ * @brief IP 分片条目
+ */
+typedef struct ip_reass_frag_t
+{
+    uint16_t             frag_offset;     /**< @brief 分片偏移（8 字节单位） */
+    uint16_t             frag_id;         /**< @brief 分片标识符 */
+    uint32_t             src_ip;          /**< @brief 源 IP 地址 */
+    uint32_t             dst_ip;          /**< @brief 目的 IP 地址 */
+    uint32_t             len;             /**< @brief 分片长度 */
+    uint8_t              data[1500];      /**< @brief 分片数据 */
+    uint32_t             data_len;        /**< @brief 数据长度 */
+    bool                 in_use;          /**< @brief 使用标记 */
+    uint64_t             arrival_time;    /**< @brief 到达时间 */
+    struct ip_reass_frag_t *next;         /**< @brief 下一个分片 */
+} ip_reass_frag_t;
+
+/**
+ * @brief IP 分片重组队列
+ */
+typedef struct ip_reass_queue_t
+{
+    ip_reass_frag_t      *head;           /**< @brief 队列头 */
+    ip_reass_frag_t      *tail;           /**< @brief 队列尾 */
+    uint16_t             frag_id;         /**< @brief 分片标识符 */
+    uint32_t             src_ip;          /**< @brief 源 IP 地址 */
+    uint32_t             dst_ip;          /**< @brief 目的 IP 地址 */
+    uint32_t             total_len;       /**< @brief 总长度 */
+    uint16_t             header_offset;   /**< @brief IP 头偏移 */
+    uint8_t              protocol;        /**< @brief 上层协议 */
+    bool                 in_use;          /**< @brief 使用标记 */
+    uint64_t             last_frag_time;  /**< @brief 最后分片到达时间 */
+    uint32_t             frag_count;      /**< @brief 分片计数 */
+    uint32_t             recv_len;        /**< @brief 已接收长度 */
+} ip_reass_queue_t;
+
+/* ========================================================================
+ * ICMP 错误消息数据结构
+ * ======================================================================== */
+
+/**
+ * @brief ICMP 错误消息
+ */
+typedef struct
+{
+    uint8_t  type;          /**< @brief 类型 */
+    uint8_t  code;          /**< @brief 代码 */
+    uint16_t checksum;      /**< @brief 校验和 */
+    uint8_t  unused[4];     /**< @brief 未使用 */
+    uint8_t  orig_ip[20];   /**< @brief 原始 IP 头（20 字节） */
+    uint8_t  orig_data[8];  /**< @brief 原始数据（8 字节） */
+} icmp_error_message_t;
 
 /* ========================================================================
  * 网络栈全局状态
@@ -301,6 +560,15 @@ static tcp_tcb_t s_tcp_tcbs[NET_MAX_SOCKETS];
 static uint8_t s_reasm_buf[NET_MAX_PACKET_SIZE * 2U];
 static uint16_t s_reasm_offset;
 static uint16_t s_reasm_id;
+
+/** @brief 时间计数器（用于模拟时间） */
+static volatile uint64_t s_time_ms = 0ULL;
+
+/** @brief TCP 定时器检查时间累计（毫秒） */
+static uint64_t s_tcp_timer_accum_ms = 0ULL;
+
+/** @brief IP 分片重组队列 */
+static ip_reass_queue_t s_reass_queues[NET_MAX_REASS_QUEUE];
 
 /** @brief ICMP 回显统计 */
 static uint32_t s_icmp_echo_sent;
@@ -407,6 +675,59 @@ static void u32_to_ipv4(uint32_t ip, net_ipv4_t *addr)
 }
 
 /* ========================================================================
+ * 函数声明（前向声明）
+ * ======================================================================== */
+
+/**
+ * @brief 更新 RTT 测量和 RTO（Jacobson/Karels 算法）
+ */
+static void tcp_rtt_update(tcp_tcb_t *tcb, uint32_t rtt_sample);
+
+/**
+ * @brief 处理 TCP ACK（重复检测、滑动窗口、RTT 测量）
+ */
+static void tcp_process_ack(tcp_tcb_t *tcb, uint32_t ack_num);
+
+/**
+ * @brief UDP 校验和计算（含伪首部）
+ */
+static uint16_t udp_checksum_with_pseudo(uint32_t src_ip, uint32_t dst_ip,
+                                          const uint8_t *data, uint32_t len);
+
+/**
+ * @brief 处理接收到的 UDP 包
+ */
+static void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
+                          const uint8_t *data, uint32_t len);
+
+/**
+ * @brief 处理接收到的 TCP 段
+ */
+static void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
+                                  const uint8_t *data, uint32_t len);
+
+/**
+ * @brief TCP 重传定时器检查
+ */
+static void tcp_retransmit_check(void);
+
+/**
+ * @brief TCP Keepalive 定时器检查
+ */
+static void tcp_keepalive_check(void);
+
+/**
+ * @brief 初始化 RTT 测量（Jacobson/Karels 默认值）
+ */
+static void tcp_rtt_init(tcp_tcb_t *tcb);
+
+/**
+ * @brief 发送 TCP 段
+ */
+static kernel_status_t tcp_send_segment(tcp_tcb_t *tcb, uint8_t flags,
+                                          const void *data, uint32_t len);
+
+/* ========================================================================
  * 初始化
  * ======================================================================== */
 
@@ -439,6 +760,62 @@ kernel_status_t net_init(void)
         s_tcp_tcbs[i].sock_id = i;
         s_tcp_tcbs[i].state = TCP_CLOSED;
         s_tcp_tcbs[i].in_use = false;
+        
+        /* 初始化拥塞控制 */
+        s_tcp_tcbs[i].cong_ctrl.state = CONG_SLOW_START;
+        s_tcp_tcbs[i].cong_ctrl.ssthresh = 65535U;
+        s_tcp_tcbs[i].cong_ctrl.cwnd = TCP_MSS;
+        s_tcp_tcbs[i].cong_ctrl.w_max = 65535U;
+        s_tcp_tcbs[i].cong_ctrl.dup_acks = 0U;
+        s_tcp_tcbs[i].cong_ctrl.last_ack = 0U;
+
+        /* RTT 测量在 tcp_rtt_init() 中初始化 */
+
+        /* 初始化 Nagle 算法 */
+        s_tcp_tcbs[i].nagle_enabled = 1U;
+        s_tcp_tcbs[i].tcp_cork = 0U;
+        s_tcp_tcbs[i].delayed_ack = 0U;
+        
+        /* 初始化 SACK */
+        s_tcp_tcbs[i].sack_permitted = 1U;
+        s_tcp_tcbs[i].sack_count = 0U;
+        
+        /* 初始化 CUBIC 算法 */
+        s_tcp_tcbs[i].cubic_cwnd = TCP_MSS;
+        s_tcp_tcbs[i].cubic_ssthresh = 65535U;
+        s_tcp_tcbs[i].cubic_w_max = 65535U;
+        s_tcp_tcbs[i].cubic_epoch = 0U;
+        s_tcp_tcbs[i].cubic_k = 0U;
+        s_tcp_tcbs[i].cubic_state = 0U;  /* 慢启动 */
+        
+        /* 初始化 TCP 时间戳 */
+        s_tcp_tcbs[i].ts_val = 0U;
+        s_tcp_tcbs[i].ts_echo_rpl = 0U;
+        s_tcp_tcbs[i].recent_ts = 0U;
+        s_tcp_tcbs[i].ts_enabled = true;
+        
+        /* 初始化 TCP Keepalive */
+        s_tcp_tcbs[i].keepalive_last_active = 0U;
+        s_tcp_tcbs[i].keepalive_probe_count = 0U;
+        s_tcp_tcbs[i].keepalive_next_probe = 0U;
+        s_tcp_tcbs[i].keepalive_enabled = true;
+        s_tcp_tcbs[i].keepalive_timeout = false;
+        
+        /* 初始化 TCP 选项 */
+        s_tcp_tcbs[i].mss = TCP_MSS;
+        s_tcp_tcbs[i].window_scale = 0U;
+        s_tcp_tcbs[i].mss_negotiated = 0U;
+        s_tcp_tcbs[i].window_scale_negotiated = 0U;
+
+        /* 初始化 RTT 测量参数 */
+        tcp_rtt_init(&s_tcp_tcbs[i]);
+    }
+
+    /* 初始化 IP 分片重组队列 */
+    for (i = 0U; i < NET_MAX_REASS_QUEUE; i++)
+    {
+        (void)memset(&s_reass_queues[i], 0, sizeof(ip_reass_queue_t));
+        s_reass_queues[i].in_use = false;
     }
 
     s_reasm_offset = 0U;
@@ -448,6 +825,67 @@ kernel_status_t net_init(void)
     s_icmp_echo_reply_sent = 0U;
 
     s_initialized = true;
+
+    /* ========================================================================
+     * 自动发现和注册网络接口（使用 net_if_auto 接口）
+     * ======================================================================== */
+    {
+        uint32_t if_count = net_if_auto_get_count();
+        uint32_t if_idx;
+        
+        for (if_idx = 0U; if_idx < if_count; if_idx++)
+        {
+            /* 获取网络接口的接口名称 */
+            char if_name[16] = {0};
+            int32_t ret_name = net_if_auto_get_name(if_idx, if_name, sizeof(if_name));
+            if (ret_name != 0)
+            {
+                /* 获取接口名称失败，跳过此接口 */
+                continue;
+            }
+            
+            /* 检查网络接口是否有此接口 */
+            const net_if_ops_auto_t *ops = net_if_auto_get_ops(if_name);
+            if (ops != NULL)
+            {
+                /* 网络接口有此接口，注册到网络协议栈 */
+                net_mac_t mac_addr = {0};
+                
+                /* 获取 MAC 地址 */
+                ret_name = net_if_auto_get_mac_addr(if_idx, mac_addr.bytes);
+                if (ret_name != 0)
+                {
+                    /* 获取 MAC 地址失败，跳过此接口 */
+                    continue;
+                }
+                
+                /* 调用驱动的 init 接口 */
+                if (ops->init != NULL)
+                {
+                    int32_t ret_init = ops->init();
+                    if (ret_init != 0)
+                    {
+                        /* 初始化失败，跳过此接口 */
+                        continue;
+                    }
+                }
+                
+                /* 注册到网络协议栈 */
+                int32_t if_id = net_register_interface(if_name, NET_LINK_ETHERNET,
+                                                       &mac_addr, 0);
+                if (if_id >= 0)
+                {
+                    /* 启动接口 */
+                    kernel_status_t ret_up = net_if_up((uint32_t)if_id);
+                    if (ret_up == KERNEL_OK)
+                    {
+                        /* 接口启动成功 */
+                        /* TODO: 保存接口 ID 和操作接口的映射关系 */
+                    }
+                }
+            }
+        }
+    }
 
     return KERNEL_OK;
 }
@@ -996,7 +1434,54 @@ void icmp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
  * ======================================================================== */
 
 /**
+ * @brief 计算 UDP 校验和（含伪首部）
+ *
+ * @param src_ip  源 IP 地址（主机字节序）
+ * @param dst_ip  目标 IP 地址（主机字节序）
+ * @param data    UDP 头部 + 数据
+ * @param len     UDP 总长度（头部 + 数据）
+ *
+ * @return 校验和值（0xFFFF 表示校验和为 0 即禁用）
+ */
+static uint16_t udp_checksum_with_pseudo(uint32_t src_ip, uint32_t dst_ip,
+                                          const uint8_t *data, uint32_t len)
+{
+    uint8_t pseudo[12U];
+    uint32_t sum;
+    uint16_t cksum;
+
+    if ((data == NULL) || (len == 0U))
+    {
+        return 0U;
+    }
+
+    /* 构造伪首部：源 IP + 目标 IP + 零 + 协议 + UDP 长度 */
+    (void)memset(pseudo, 0, sizeof(pseudo));
+    (void)memcpy(&pseudo[0U], &src_ip, 4U);
+    (void)memcpy(&pseudo[4U], &dst_ip, 4U);
+    pseudo[9U] = IP_PROTO_UDP;
+    pseudo[10U] = (uint8_t)(len >> 8U);
+    pseudo[11U] = (uint8_t)(len);
+
+    /* 计算伪首部校验和 */
+    cksum = net_checksum(pseudo, 12U);
+
+    /* 累加 UDP 数据校验和 */
+    sum = (uint32_t)cksum + (uint32_t)net_checksum(data, len);
+
+    /* 折叠进位 */
+    while ((sum >> 16U) != 0U)
+    {
+        sum = (sum & 0xFFFFU) + (sum >> 16U);
+    }
+
+    return (uint16_t)(~sum);
+}
+
+/**
  * @brief 处理接收到的 UDP 包
+ *
+ * @details 接收 UDP 数据包时计算并验证校验和
  */
 void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
                   const uint8_t *data, uint32_t len)
@@ -1004,6 +1489,9 @@ void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
     const udp_header_t *udp;
     uint16_t dst_port;
     uint16_t src_port;
+    uint16_t udp_len;
+    uint16_t recv_cksum;
+    uint16_t calc_cksum;
     uint32_t i;
 
     if ((data == NULL) || (len < (uint32_t)UDP_HDR_SIZE))
@@ -1012,8 +1500,54 @@ void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
     }
 
     udp = (const udp_header_t *)data;
+    udp_len = net_htons(udp->length);
     src_port = net_htons(udp->src_port);
     dst_port = net_htons(udp->dst_port);
+
+    /* UDP 校验和验证 */
+    recv_cksum = udp->checksum;
+    if (recv_cksum != 0U)
+    {
+        /* 校验和不为 0，执行验证 */
+        /* 临时将校验和字段置零进行计算 */
+        udp_header_t tmp_udp;
+        uint8_t *tmp_data;
+
+        (void)memcpy(&tmp_udp, udp, sizeof(udp_header_t));
+        tmp_udp.checksum = 0U;
+
+        /* 使用伪首部 + UDP 数据计算校验和 */
+        tmp_data = (uint8_t *)data;
+        tmp_data = (uint8_t *)((uintptr_t)tmp_data); /* 保持指针 */
+
+        /* 计算校验和 */
+        {
+            uint8_t udp_buf[NET_MAX_PACKET_SIZE];
+
+            if ((uint32_t)udp_len > len)
+            {
+                /* 长度不一致，丢弃 */
+                return;
+            }
+
+            (void)memcpy(udp_buf, &tmp_udp, (uint32_t)UDP_HDR_SIZE);
+            if (udp_len > (uint16_t)UDP_HDR_SIZE)
+            {
+                (void)memcpy(&udp_buf[(uint32_t)UDP_HDR_SIZE],
+                             &data[(uint32_t)UDP_HDR_SIZE],
+                             (uint32_t)udp_len - (uint32_t)UDP_HDR_SIZE);
+            }
+
+            calc_cksum = udp_checksum_with_pseudo(src_ip, dst_ip,
+                                                   udp_buf, (uint32_t)udp_len);
+        }
+
+        if (calc_cksum != recv_cksum)
+        {
+            /* 校验和不匹配，丢弃数据包 */
+            return;
+        }
+    }
 
     /* 查找绑定了该端口的套接字 */
     for (i = 0U; i < NET_MAX_SOCKETS; i++)
@@ -1035,6 +1569,16 @@ void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
 /* ========================================================================
  * TCP 状态机
  * ======================================================================== */
+
+/**
+ * @brief 获取当前时间（毫秒）
+ *
+ * @return 当前时间（毫秒）
+ */
+static uint64_t get_current_time_ms(void)
+{
+    return s_time_ms;
+}
 
 /**
  * @brief 查找 TCP 控制块
@@ -1128,12 +1672,73 @@ static kernel_status_t tcp_send_segment(tcp_tcb_t *tcb, uint8_t flags,
     tcp->checksum = 0U;
     tcp->urgent_ptr = 0U;
 
-    if ((data != NULL) && (len > 0U))
+    /* 更新发送时间戳（用于 RTT 测量） */
+    if (tcb->ts_enabled)
     {
-        (void)memcpy(&segment[(uint32_t)TCP_HDR_SIZE], data, len);
+        tcb->ts_val = (uint32_t)get_current_time_ms();
+    }
+    tcp->window = net_htons((uint16_t)tcb->rcv_wnd);
+    tcp->checksum = 0U;
+    tcp->urgent_ptr = 0U;
+
+    /* TCP 选项构造 */
+    uint8_t options[40];  /* 最大 TCP 选项长度 */
+    uint16_t opt_len = 0U;
+
+    /* 添加 MSS 选项（仅在 SYN 段中） */
+    if ((flags & TCP_FLAG_SYN) != 0U)
+    {
+        options[opt_len++] = 2U;  /* MSS kind */
+        options[opt_len++] = 4U;  /* length */
+        options[opt_len++] = (tcb->mss >> 8U) & 0xFFU;
+        options[opt_len++] = tcb->mss & 0xFFU;
     }
 
-    total_len = (uint32_t)TCP_HDR_SIZE + len;
+    /* 添加窗口缩放选项（仅在 SYN 段中） */
+    if ((flags & TCP_FLAG_SYN) != 0U)
+    {
+        options[opt_len++] = 3U;  /* Window Scale kind */
+        options[opt_len++] = 3U;  /* length */
+        options[opt_len++] = tcb->window_scale;
+    }
+
+    /* 添加 SACK 选项（仅在 SYN 段中） */
+    if ((flags & TCP_FLAG_SYN) != 0U)
+    {
+        options[opt_len++] = 4U;  /* SACK Permitted kind */
+        options[opt_len++] = 2U;  /* length */
+    }
+
+    /* 添加时间戳选项（所有段） */
+    if (tcb->ts_enabled)
+    {
+        options[opt_len++] = 8U;  /* Timestamp kind */
+        options[opt_len++] = 10U; /* length */
+        options[opt_len++] = (tcb->ts_val >> 24U) & 0xFFU;
+        options[opt_len++] = (tcb->ts_val >> 16U) & 0xFFU;
+        options[opt_len++] = (tcb->ts_val >> 8U) & 0xFFU;
+        options[opt_len++] = tcb->ts_val & 0xFFU;
+        options[opt_len++] = (tcb->ts_echo_rpl >> 24U) & 0xFFU;
+        options[opt_len++] = (tcb->ts_echo_rpl >> 16U) & 0xFFU;
+        options[opt_len++] = (tcb->ts_echo_rpl >> 8U) & 0xFFU;
+        options[opt_len++] = tcb->ts_echo_rpl & 0xFFU;
+    }
+
+    /* 更新 data_offset 以包含选项 */
+    if (opt_len > 0U)
+    {
+        tcp->data_offset = (5U + (opt_len / 4U)) << 4U;
+        
+        /* 复制选项到 TCP 头部 */
+        (void)memcpy(&segment[(uint32_t)TCP_HDR_SIZE], options, opt_len);
+    }
+
+    if ((data != NULL) && (len > 0U))
+    {
+        (void)memcpy(&segment[(uint32_t)TCP_HDR_SIZE + opt_len], data, len);
+    }
+
+    total_len = (uint32_t)TCP_HDR_SIZE + opt_len + len;
 
     /* 计算校验和（含伪首部） */
     {
@@ -1235,6 +1840,140 @@ void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
         return;
     }
 
+    /* ========================================================================
+     * TCP 选项解析（MSS、窗口缩放、SACK、时间戳）
+     * ======================================================================== */
+    if ((data_offset > (uint32_t)TCP_HDR_SIZE) && (tcb != NULL))
+    {
+        uint16_t opt_offset = (uint16_t)((tcp->data_offset >> 4U) - 5U) * 4U;
+        uint16_t opt_len = data_offset - (uint32_t)TCP_HDR_SIZE;
+        const uint8_t *opt_data = &data[TCP_HDR_SIZE];
+        uint16_t opt_offset_temp = 0U;
+
+        while (opt_offset_temp < opt_len)
+        {
+            uint8_t opt_kind = opt_data[opt_offset_temp];
+
+            if (opt_kind == 0U)  /* End of options */
+            {
+                break;
+            }
+
+            if (opt_kind == 1U)  /* NOP */
+            {
+                opt_offset_temp++;
+                continue;
+            }
+
+            if ((opt_offset_temp + 1U) >= opt_len)
+            {
+                break;
+            }
+
+            uint8_t opt_length = opt_data[opt_offset_temp + 1U];
+
+            /* 处理 MSS 选项 */
+            if (opt_kind == 2U)  /* MSS */
+            {
+                if (opt_length == 4U)
+                {
+                    uint16_t mss = (opt_data[opt_offset_temp + 2U] << 8U) |
+                                    opt_data[opt_offset_temp + 3U];
+                    tcb->mss = mss;
+                    tcb->mss_negotiated = 1U;
+                }
+            }
+            /* 处理窗口缩放选项 */
+            else if (opt_kind == 3U)  /* Window Scale */
+            {
+                if (opt_length == 3U)
+                {
+                    uint8_t scale = opt_data[opt_offset_temp + 2U];
+                    tcb->window_scale = scale;
+                    tcb->window_scale_negotiated = 1U;
+                }
+            }
+            /* 处理 SACK 选项 */
+            else if (opt_kind == 4U)  /* SACK Permitted */
+            {
+                if (opt_length == 2U)
+                {
+                    tcb->sack_permitted = 1U;
+                }
+            }
+            /* 处理时间戳选项 */
+            else if (opt_kind == 8U)  /* Timestamp */
+            {
+                if (opt_length == 10U)
+                {
+                    uint32_t ts_val = (opt_data[opt_offset_temp + 2U] << 24U) |
+                                    (opt_data[opt_offset_temp + 3U] << 16U) |
+                                    (opt_data[opt_offset_temp + 4U] << 8U) |
+                                    opt_data[opt_offset_temp + 5U];
+                    uint32_t ts_echo_rpl = (opt_data[opt_offset_temp + 6U] << 24U) |
+                                          (opt_data[opt_offset_temp + 7U] << 16U) |
+                                          (opt_data[opt_offset_temp + 8U] << 8U) |
+                                          opt_data[opt_offset_temp + 9U];
+                    tcb->ts_val = ts_val;
+                    tcb->ts_echo_rpl = ts_echo_rpl;
+                    tcb->recent_ts = ts_val;
+                    tcb->ts_enabled = true;
+
+                    /* RTT 测量（使用 Timestamp 选项） */
+                    if (ts_echo_rpl > 0U)
+                    {
+                        uint32_t current_time = (uint32_t)get_current_time_ms();
+                        if (current_time > ts_echo_rpl)
+                        {
+                            uint32_t rtt = current_time - ts_echo_rpl;
+                            tcp_rtt_update(tcb, rtt);
+                        }
+                    }
+                }
+            }
+
+            if (opt_length == 0U)
+            {
+                opt_offset_temp++;
+            }
+            else
+            {
+                opt_offset_temp += opt_length;
+            }
+        }
+    }
+
+    /* ========================================================================
+     * ACK 处理：重复检测 + 滑动窗口 + RTT 测量
+     * ======================================================================== */
+    if (((flags & TCP_FLAG_ACK) != 0U) && (tcb != NULL) &&
+        (tcb->state == TCP_ESTABLISHED))
+    {
+        /* 调用统一的 ACK 处理函数 */
+        tcp_process_ack(tcb, ack_num);
+
+        /* CUBIC 拥塞控制（新 ACK 时更新窗口） */
+        if (ack_num > tcb->snd_una)
+        {
+            if (tcb->cubic_state == 0U)  /* 慢启动 */
+            {
+                tcb->cubic_cwnd += TCP_MSS;
+                if (tcb->cubic_cwnd >= tcb->cubic_ssthresh)
+                {
+                    tcb->cubic_state = 1U;  /* 拥塞避免 */
+                }
+            }
+            else if (tcb->cubic_state == 1U)  /* 拥塞避免 */
+            {
+                tcb->cubic_cwnd += (TCP_MSS * TCP_MSS) / tcb->cubic_cwnd;
+            }
+            else
+            {
+                /* 快速恢复或其他状态，不更新 */
+            }
+        }
+    }
+
     /* TCP 状态机处理 */
     switch (tcb->state)
     {
@@ -1292,7 +2031,13 @@ void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
             break;
 
         case TCP_ESTABLISHED:
-            /* 处理数据 */
+            /* 更新 Keepalive 最后活跃时间 */
+            tcb->keepalive_last_active =
+                (uint32_t)(get_current_time_ms() / 1000U);
+            tcb->keepalive_probe_count = 0U;
+            tcb->keepalive_timeout = false;
+
+            /* 处理接收数据 */
             if (payload_len > 0U)
             {
                 if ((tcb->recv_len + payload_len) <= sizeof(tcb->recv_buf))
@@ -1306,16 +2051,16 @@ void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
                 /* 确认接收 */
                 (void)tcp_send_segment(tcb, TCP_FLAG_ACK, NULL, 0U);
 
-                /* 清除已确认的重传段 */
+                /* 清除已确认的重传段（由 tcp_process_ack 统一处理） */
                 {
-                    uint32_t i;
-                    for (i = 0U; i < TCP_MAX_RETRANS_SEGS; i++)
+                    uint32_t k;
+                    for (k = 0U; k < TCP_MAX_RETRANS_SEGS; k++)
                     {
-                        if (tcb->retrans_buf[i].active &&
-                            (tcb->retrans_buf[i].seq_num + tcb->retrans_buf[i].data_len
-                             <= ack_num))
+                        if (tcb->retrans_buf[k].active &&
+                            ((tcb->retrans_buf[k].seq_num +
+                              tcb->retrans_buf[k].data_len) <= ack_num))
                         {
-                            tcb->retrans_buf[i].active = false;
+                            tcb->retrans_buf[k].active = false;
                             if (tcb->retrans_count > 0U)
                             {
                                 tcb->retrans_count--;
@@ -1397,15 +2142,218 @@ void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
     }
 }
 
+/* ========================================================================
+ * RTT 测量和 RTO 计算
+ * ======================================================================== */
+
+/**
+ * @brief 初始化 RTT 测量参数
+ *
+ * @param tcb TCP 控制块
+ */
+static void tcp_rtt_init(tcp_tcb_t *tcb)
+{
+    if (tcb == NULL)
+    {
+        return;
+    }
+
+    tcb->cong_ctrl.rtt.srtt = TCP_RTT_INITIAL_MS;
+    tcb->cong_ctrl.rtt.rtt_var = TCP_RTT_INITIAL_MS >> 1U;
+    tcb->cong_ctrl.rtt.rto = TCP_RTT_INITIAL_MS;
+    tcb->cong_ctrl.rtt.rtt_sample = 0U;
+    tcb->cong_ctrl.rtt.rtt_min = TCP_RTT_INITIAL_MS;
+}
+
+/**
+ * @brief 更新 RTT 测量和 RTO
+ *
+ * @details 使用 TCP Timestamp 选项测量 RTT，采用 Jacobson/Karels 算法：
+ *          - SRTT = (7/8)*SRTT + (1/8)*RTT_sample
+ *          - RTT_var = (3/4)*RTT_var + (1/4)*|SRTT - RTT_sample|
+ *          - RTO = SRTT + 4*RTT_var
+ *
+ * @param tcb        TCP 控制块
+ * @param rtt_sample RTT 样本（毫秒）
+ */
+static void tcp_rtt_update(tcp_tcb_t *tcb, uint32_t rtt_sample)
+{
+    uint32_t srtt;
+    uint32_t rtt_var;
+    uint32_t rto;
+    int32_t diff;
+
+    if (tcb == NULL)
+    {
+        return;
+    }
+
+    tcb->cong_ctrl.rtt.rtt_sample = rtt_sample;
+
+    /* 更新最小 RTT */
+    if (rtt_sample < tcb->cong_ctrl.rtt.rtt_min)
+    {
+        tcb->cong_ctrl.rtt.rtt_min = rtt_sample;
+    }
+
+    /* Jacobson/Karels 算法 */
+    srtt = tcb->cong_ctrl.rtt.srtt;
+    rtt_var = tcb->cong_ctrl.rtt.rtt_var;
+
+    /* SRTT = (7/8)*SRTT + (1/8)*sample */
+    srtt = srtt - (srtt >> TCP_RTT_ALPHA_SHIFT) + rtt_sample;
+
+    /* RTT_var = (3/4)*RTT_var + (1/4)*|SRTT - sample| */
+    diff = (int32_t)srtt - (int32_t)rtt_sample;
+    if (diff < 0)
+    {
+        diff = -diff;
+    }
+    rtt_var = rtt_var - (rtt_var >> TCP_RTT_BETA_SHIFT)
+              + (uint32_t)diff;
+
+    /* RTO = SRTT + 4*RTT_var */
+    rto = srtt + (rtt_var << 2U);
+
+    /* 限制 RTO 范围 */
+    if (rto < TCP_RTO_MIN_MS)
+    {
+        rto = TCP_RTO_MIN_MS;
+    }
+    if (rto > TCP_RTO_MAX_MS)
+    {
+        rto = TCP_RTO_MAX_MS;
+    }
+
+    tcb->cong_ctrl.rtt.srtt = srtt;
+    tcb->cong_ctrl.rtt.rtt_var = rtt_var;
+    tcb->cong_ctrl.rtt.rto = rto;
+}
+
+/* ========================================================================
+ * ACK 处理优化
+ * ======================================================================== */
+
+/**
+ * @brief 处理接收到的 ACK，检测重复并更新滑动窗口
+ *
+ * @details 检查 ACK 序列号：
+ *          - 新 ACK：更新 snd_una，释放已确认数据，重置 dup_acks
+ *          - 重复 ACK：增加 dup_acks，达到 3 次触发快速重传
+ *
+ * @param tcb     TCP 控制块
+ * @param ack_num ACK 序列号
+ */
+static void tcp_process_ack(tcp_tcb_t *tcb, uint32_t ack_num)
+{
+    if (tcb == NULL)
+    {
+        return;
+    }
+
+    /* 检查是否为重复 ACK */
+    if (ack_num == tcb->cong_ctrl.last_ack)
+    {
+        /* 重复 ACK */
+        tcb->cong_ctrl.dup_acks++;
+
+        /* 3 个重复 ACK 触发快速重传 */
+        if (tcb->cong_ctrl.dup_acks >= TCP_MAX_DUP_ACKS)
+        {
+            /* 快速重传：重新发送第一个未确认的段 */
+            uint32_t i;
+            for (i = 0U; i < TCP_MAX_RETRANS_SEGS; i++)
+            {
+                if (tcb->retrans_buf[i].active)
+                {
+                    (void)tcp_send_segment(tcb,
+                        (uint8_t)(TCP_FLAG_ACK | TCP_FLAG_PSH),
+                        tcb->retrans_buf[i].data,
+                        tcb->retrans_buf[i].data_len);
+                    break;
+                }
+            }
+
+            /* 调整拥塞窗口 */
+            tcb->cubic_w_max = tcb->cubic_cwnd;
+            tcb->cubic_cwnd = tcb->cubic_cwnd / 2U;
+            if (tcb->cubic_cwnd < TCP_MSS)
+            {
+                tcb->cubic_cwnd = TCP_MSS;
+            }
+            tcb->cubic_ssthresh = tcb->cubic_cwnd;
+            tcb->cubic_state = 2U;  /* 快速恢复 */
+
+            /* 重置重复 ACK 计数 */
+            tcb->cong_ctrl.dup_acks = 0U;
+        }
+    }
+    else if (ack_num > tcb->cong_ctrl.last_ack)
+    {
+        /* 新 ACK：更新滑动窗口 */
+        tcb->cong_ctrl.last_ack = ack_num;
+        tcb->cong_ctrl.dup_acks = 0U;
+
+        /* ACK 滑动窗口：更新 snd_una */
+        if (ack_num > tcb->snd_una)
+        {
+            tcb->snd_una = ack_num;
+        }
+
+        /* 释放已确认的重传段 */
+        {
+            uint32_t i;
+            for (i = 0U; i < TCP_MAX_RETRANS_SEGS; i++)
+            {
+                if (tcb->retrans_buf[i].active &&
+                    ((tcb->retrans_buf[i].seq_num +
+                      tcb->retrans_buf[i].data_len) <= ack_num))
+                {
+                    tcb->retrans_buf[i].active = false;
+                    if (tcb->retrans_count > 0U)
+                    {
+                        tcb->retrans_count--;
+                    }
+                }
+            }
+        }
+
+        /* RTT 测量（使用 TCP Timestamp） */
+        if (tcb->ts_enabled && (tcb->ts_echo_rpl > 0U))
+        {
+            uint32_t current_time = (uint32_t)get_current_time_ms();
+            if (current_time > tcb->ts_echo_rpl)
+            {
+                uint32_t rtt = current_time - tcb->ts_echo_rpl;
+                tcp_rtt_update(tcb, rtt);
+            }
+        }
+    }
+    else
+    {
+        /* 旧的 ACK，忽略 */
+    }
+}
+
+/* ========================================================================
+ * TCP 定时器处理
+ * ======================================================================== */
+
 /**
  * @brief TCP 重传定时器处理
  *
- * @details 检查所有活跃的 TCB 中是否有需要重传的段
+ * @details 每 10ms 检查一次所有活跃 TCB 的重传队列：
+ *          - 检查段的 RTO 是否超时
+ *          - 超时则重传该段
+ *          - 超过 5 次重传则丢弃连接
  */
 static void tcp_retransmit_check(void)
 {
     uint32_t i;
     uint32_t j;
+    uint64_t now_ms;
+
+    now_ms = get_current_time_ms();
 
     for (i = 0U; i < NET_MAX_SOCKETS; i++)
     {
@@ -1418,27 +2366,106 @@ static void tcp_retransmit_check(void)
 
         for (j = 0U; j < TCP_MAX_RETRANS_SEGS; j++)
         {
-            if (tcb->retrans_buf[j].active)
+            if (!tcb->retrans_buf[j].active)
             {
-                if (tcb->retrans_buf[j].retry_count >= TCP_MAX_RETRIES)
+                continue;
+            }
+
+            /* 检查是否超过最大重传次数 */
+            if (tcb->retrans_buf[j].retry_count >= TCP_MAX_RETRIES)
+            {
+                /* 超过 5 次重传，丢弃连接 */
+                tcb->retrans_buf[j].active = false;
+                tcb->state = TCP_CLOSED;
+                tcb->in_use = false;
+                if (tcb->retrans_count > 0U)
                 {
-                    /* 超过最大重传次数，关闭连接 */
-                    tcb->retrans_buf[j].active = false;
+                    tcb->retrans_count--;
+                }
+                continue;
+            }
+
+            /* 检查 RTO 是否超时 */
+            if (tcb->retrans_buf[j].last_sent_ms == 0ULL)
+            {
+                /* 尚未记录发送时间，设置当前时间 */
+                tcb->retrans_buf[j].last_sent_ms = now_ms;
+                continue;
+            }
+
+            if ((now_ms - tcb->retrans_buf[j].last_sent_ms) >=
+                (uint64_t)tcb->cong_ctrl.rtt.rto)
+            {
+                /* RTO 超时，执行重传 */
+                (void)tcp_send_segment(tcb,
+                    (uint8_t)(TCP_FLAG_ACK | TCP_FLAG_PSH),
+                    tcb->retrans_buf[j].data,
+                    tcb->retrans_buf[j].data_len);
+                tcb->retrans_buf[j].retry_count++;
+                tcb->retrans_buf[j].last_sent_ms = now_ms;
+
+                /* 指数退避 RTO */
+                tcb->cong_ctrl.rtt.rto = tcb->cong_ctrl.rtt.rto << 1U;
+                if (tcb->cong_ctrl.rtt.rto > TCP_RTO_MAX_MS)
+                {
+                    tcb->cong_ctrl.rtt.rto = TCP_RTO_MAX_MS;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief TCP Keepalive 定时器处理
+ *
+ * @details 检查所有 ESTABLISHED 状态的 TCB：
+ *          - 超过 2 小时无数据则发送 Keepalive 探测
+ *          - 每 75 秒发送一次探测（最多 9 次）
+ *          - 超时后关闭连接
+ */
+static void tcp_keepalive_check(void)
+{
+    uint32_t i;
+    uint32_t current_time;
+
+    current_time = (uint32_t)(get_current_time_ms() / 1000U);
+
+    for (i = 0U; i < NET_MAX_SOCKETS; i++)
+    {
+        tcp_tcb_t *tcb = &s_tcp_tcbs[i];
+
+        /* 仅检查 ESTABLISHED 状态的活跃连接 */
+        if (!tcb->in_use || (tcb->state != TCP_ESTABLISHED))
+        {
+            continue;
+        }
+
+        if (!tcb->keepalive_enabled)
+        {
+            continue;
+        }
+
+        /* 检查是否超过空闲超时（2 小时） */
+        if ((current_time - tcb->keepalive_last_active) >=
+            TCP_KEEPALIVE_IDLE_SEC)
+        {
+            /* 检查探测间隔和最大探测次数 */
+            if ((current_time >= tcb->keepalive_next_probe) &&
+                (tcb->keepalive_probe_count < TCP_KEEPALIVE_MAX_PROBES))
+            {
+                /* 发送 Keepalive 探测（ACK 段，无数据） */
+                (void)tcp_send_segment(tcb, TCP_FLAG_ACK, NULL, 0U);
+                tcb->keepalive_probe_count++;
+                tcb->keepalive_next_probe = current_time +
+                    TCP_KEEPALIVE_INTERVAL_SEC;
+
+                /* 检查是否超过最大探测次数 */
+                if (tcb->keepalive_probe_count >= TCP_KEEPALIVE_MAX_PROBES)
+                {
+                    tcb->keepalive_timeout = true;
+                    /* 关闭连接 */
                     tcb->state = TCP_CLOSED;
                     tcb->in_use = false;
-                    if (tcb->retrans_count > 0U)
-                    {
-                        tcb->retrans_count--;
-                    }
-                }
-                else
-                {
-                    /* 执行重传 */
-                    (void)tcp_send_segment(tcb,
-                        (uint8_t)(TCP_FLAG_ACK | TCP_FLAG_PSH),
-                        tcb->retrans_buf[j].data,
-                        tcb->retrans_buf[j].data_len);
-                    tcb->retrans_buf[j].retry_count++;
                 }
             }
         }
@@ -1855,6 +2882,8 @@ int64_t net_send(uint32_t sock_id, const void *buf, uint64_t size)
         uint8_t dgram[NET_MAX_PACKET_SIZE];
         uint32_t dgram_len;
         uint32_t remote_ip;
+        uint32_t local_ip;
+        uint16_t cksum;
 
         udp_hdr.src_port = net_htons(sock->local_addr.port);
         udp_hdr.dst_port = net_htons(sock->remote_addr.port);
@@ -1869,6 +2898,17 @@ int64_t net_send(uint32_t sock_id, const void *buf, uint64_t size)
 
         dgram_len = (uint32_t)UDP_HDR_SIZE + (uint32_t)size;
         remote_ip = ipv4_to_u32(&sock->remote_addr.addr.ipv4);
+        local_ip = ipv4_to_u32(&sock->local_addr.addr.ipv4);
+
+        /* 计算 UDP 校验和（含伪首部） */
+        cksum = udp_checksum_with_pseudo(local_ip, remote_ip,
+                                          dgram, dgram_len);
+        /* 将校验和写入 UDP 头部（0 表示禁用，用 0xFFFF 代替） */
+        if (cksum == 0U)
+        {
+            cksum = 0xFFFFU;
+        }
+        ((udp_header_t *)dgram)->checksum = cksum;
 
         (void)ipv4_send(sock->if_id, remote_ip, IP_PROTO_UDP,
                         dgram, dgram_len);
@@ -2029,6 +3069,76 @@ net_socket_t *net_get_socket(uint32_t sock_id)
  * 服务主函数
  * ======================================================================== */
 
+/* ========================================================================
+ * 网络协议栈测试
+ * ======================================================================== */
+
+/**
+ * @brief 打印测试报告
+ */
+static void print_test_report(void)
+{
+    printf("\n==========================================\n");
+    printf("Network Stack Test Report\n");
+    printf("==========================================\n");
+    printf("ICMP Echo Requests: %u\n", s_icmp_echo_sent);
+    printf("ICMP Echo Receives: %u\n", s_icmp_echo_recv);
+    printf("ICMP Echo Replies:  %u\n", s_icmp_echo_reply_sent);
+    printf("==========================================\n");
+}
+
+/**
+ * @brief 网络协议栈初始化测试
+ */
+static void test_network_stack_init(void)
+{
+    uint32_t if_count;
+    uint32_t sock_count;
+
+    printf("\n==========================================\n");
+    printf("Network Stack Initialization Test\n");
+    printf("==========================================\n");
+
+    /* 检查网络接口数量 */
+    if_count = 0U;
+    for (uint32_t i = 0U; i < NET_MAX_INTERFACES; i++)
+    {
+        if (s_interfaces[i].in_use)
+        {
+            if_count++;
+        }
+    }
+    printf("Interfaces: %u / %u\n", if_count, NET_MAX_INTERFACES);
+
+    /* 检查套接字数量 */
+    sock_count = 0U;
+    for (uint32_t i = 0U; i < NET_MAX_SOCKETS; i++)
+    {
+        if (s_sockets[i].in_use)
+        {
+            sock_count++;
+        }
+    }
+    printf("Sockets:    %u / %u\n", sock_count, NET_MAX_SOCKETS);
+
+    /* 检查 TCP TCB 数量 */
+    sock_count = 0U;
+    for (uint32_t i = 0U; i < NET_MAX_SOCKETS; i++)
+    {
+        if (s_tcp_tcbs[i].in_use)
+        {
+            sock_count++;
+        }
+    }
+    printf("TCP TCBs:   %u / %u\n", sock_count, NET_MAX_SOCKETS);
+
+    printf("==========================================\n");
+}
+
+/* ========================================================================
+ * 主函数
+ * ======================================================================== */
+
 int main(void)
 {
     kernel_status_t ret;
@@ -2039,8 +3149,18 @@ int main(void)
         return (int)ret;
     }
 
+    /* 运行网络协议栈初始化测试 */
+    test_network_stack_init();
+
+    /* 打印测试报告 */
+    print_test_report();
+
     for (;;)
     {
+        /* 更新时间计数器（每 10ms） */
+        s_time_ms += 10ULL;
+        s_tcp_timer_accum_ms += 10ULL;
+
         /* 处理接收包 */
         {
             uint32_t if_id;
@@ -2056,8 +3176,17 @@ int main(void)
             }
         }
 
-        /* TCP 重传定时器检查 */
-        tcp_retransmit_check();
+        /* TCP 定时器检查（每 10ms 执行一次） */
+        if (s_tcp_timer_accum_ms >= TCP_RETRANSMIT_PERIOD_MS)
+        {
+            /* TCP 重传定时器检查 */
+            tcp_retransmit_check();
+
+            /* TCP Keepalive 定时器检查 */
+            tcp_keepalive_check();
+
+            s_tcp_timer_accum_ms = 0ULL;
+        }
     }
 
     return 0;
