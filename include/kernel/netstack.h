@@ -202,6 +202,38 @@ typedef struct
 /**
  * @brief 套接字描述符
  */
+/* ========================================================================
+ * Socket 选项常量
+ * ======================================================================== */
+
+/** @brief shutdown 方式 */
+#define NET_SHUT_RD      0U  /**< @brief 关闭读 */
+#define NET_SHUT_WR      1U  /**< @brief 关闭写 */
+#define NET_SHUT_RDWR    2U  /**< @brief 关闭读写 */
+
+/** @brief socket 选项级别 */
+#define NET_SOL_SOCKET   0U  /**< @brief Socket 级别 */
+#define NET_IPPROTO_TCP  6U  /**< @brief TCP 级别 */
+
+/** @brief socket 选项名称 */
+#define NET_SO_REUSEADDR 2U   /**< @brief 地址复用 */
+#define NET_SO_KEEPALIVE 9U   /**< @brief Keepalive */
+#define NET_SO_RCVBUF    8U   /**< @brief 接收缓冲区 */
+#define NET_SO_SNDBUF    7U   /**< @brief 发送缓冲区 */
+#define NET_SO_BROADCAST 6U   /**< @brief 广播 */
+#define NET_TCP_NODELAY  1U   /**< @brief 禁用 Nagle */
+
+/** @brief ioctl 请求 */
+#define NET_FIONBIO      0x5421U  /**< @brief 非阻塞模式 */
+#define NET_FIONREAD     0x541BU  /**< @brief 可读字节数 */
+
+/* ========================================================================
+ * 套接字描述符
+ * ======================================================================== */
+
+/**
+ * @brief 套接字描述符
+ */
 typedef struct
 {
     uint32_t         sock_id;        /**< @brief 套接字 ID */
@@ -214,6 +246,22 @@ typedef struct
     uint32_t         rx_count;       /**< @brief 接收缓冲区包数 */
     uint32_t         tx_count;       /**< @brief 发送缓冲区包数 */
     bool             in_use;         /**< @brief 使用标记 */
+    
+    /* Socket 选项字段 */
+    bool             reuse_addr;     /**< @brief 地址复用 */
+    bool             keepalive;      /**< @brief TCP Keepalive */
+    bool             broadcast;      /**< @brief 允许广播 */
+    bool             nonblocking;    /**< @brief 非阻塞模式 */
+    bool             shutdown_rd;    /**< @brief 关闭读 */
+    bool             shutdown_wr;    /**< @brief 关闭写 */
+    int32_t          rcv_buf_size;   /**< @brief 接收缓冲区大小 */
+    int32_t          snd_buf_size;   /**< @brief 发送缓冲区大小 */
+    
+    /* 统计信息 */
+    uint64_t         rx_bytes;       /**< @brief 接收字节数 */
+    uint64_t         tx_bytes;       /**< @brief 发送字节数 */
+    uint64_t         rx_errors;      /**< @brief 接收错误数 */
+    uint64_t         tx_errors;      /**< @brief 发送错误数 */
 } net_socket_t;
 
 /* ========================================================================
@@ -404,5 +452,86 @@ net_interface_t *net_get_interface(uint32_t if_id);
  * @return 套接字描述符指针
  */
 net_socket_t *net_get_socket(uint32_t sock_id);
+
+/**
+ * @brief 发送数据到指定地址（UDP）
+ *
+ * @param sock_id     套接字 ID
+ * @param buf         数据缓冲区
+ * @param size        数据大小
+ * @param dest_addr   目标地址
+ *
+ * @return 实际发送字节数，负数表示错误
+ *
+ * @note 对应需求: NW-005
+ */
+int64_t net_sendto(uint32_t sock_id, const void *buf, uint64_t size,
+                    const net_sockaddr_t *dest_addr);
+
+/**
+ * @brief 从指定地址接收数据（UDP）
+ *
+ * @param sock_id     套接字 ID
+ * @param buf         数据缓冲区
+ * @param size        缓冲区大小
+ * @param src_addr    源地址（输出）
+ *
+ * @return 实际接收字节数，负数表示错误
+ *
+ * @note 对应需求: NW-005
+ */
+int64_t net_recvfrom(uint32_t sock_id, void *buf, uint64_t size,
+                      net_sockaddr_t *src_addr);
+
+/**
+ * @brief 优雅关闭连接
+ *
+ * @param sock_id     套接字 ID
+ * @param how         关闭方式（NET_SHUT_RD/NET_SHUT_WR/NET_SHUT_RDWR）
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_shutdown(uint32_t sock_id, uint32_t how);
+
+/**
+ * @brief 设置套接字选项
+ *
+ * @param sock_id     套接字 ID
+ * @param level       选项级别（NET_SOL_SOCKET/NET_IPPROTO_TCP）
+ * @param optname     选项名称
+ * @param optval      选项值
+ * @param optlen      选项值长度
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_setsockopt(uint32_t sock_id, uint32_t level,
+                                uint32_t optname, const void *optval,
+                                uint32_t optlen);
+
+/**
+ * @brief 获取套接字选项
+ *
+ * @param sock_id     套接字 ID
+ * @param level       选项级别（NET_SOL_SOCKET/NET_IPPROTO_TCP）
+ * @param optname     选项名称
+ * @param optval      选项值（输出）
+ * @param optlen      选项值长度（输入输出）
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_getsockopt(uint32_t sock_id, uint32_t level,
+                                uint32_t optname, void *optval,
+                                uint32_t *optlen);
+
+/**
+ * @brief 套接字控制操作
+ *
+ * @param sock_id     套接字 ID
+ * @param request     请求类型（NET_FIONBIO/NET_FIONREAD）
+ * @param arg         参数
+ *
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_ioctl(uint32_t sock_id, uint32_t request, void *arg);
 
 #endif /* KERNEL_NETSTACK_H */

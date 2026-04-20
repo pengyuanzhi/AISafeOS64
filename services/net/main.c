@@ -579,6 +579,30 @@ static uint32_t s_icmp_echo_reply_sent;
 static bool s_initialized;
 
 /* ========================================================================
+ * UDP 接收队列数据结构
+ * ======================================================================== */
+
+/** @brief UDP 接收队列深度 */
+#define UDP_RX_QUEUE_DEPTH    16U
+
+/** @brief UDP 接收队列条目 */
+typedef struct
+{
+    bool in_use;                                  /**< @brief 使用标记 */
+    uint32_t sock_id;                             /**< @brief 套接字 ID */
+    net_sockaddr_t src_addr;                      /**< @brief 源地址 */
+    uint8_t data[NET_MAX_PACKET_SIZE];           /**< @brief 数据缓冲区 */
+    uint32_t len;                                 /**< @brief 数据长度 */
+} udp_rx_entry_t;
+
+/** @brief UDP 接收队列 */
+static udp_rx_entry_t s_udp_rx_queue[NET_MAX_SOCKETS][UDP_RX_QUEUE_DEPTH];
+
+/** @brief UDP 接收队列头尾索引 */
+static uint32_t s_udp_rx_head[NET_MAX_SOCKETS];
+static uint32_t s_udp_rx_tail[NET_MAX_SOCKETS];
+
+/* ========================================================================
  * 辅助函数
  * ======================================================================== */
 
@@ -743,6 +767,9 @@ kernel_status_t net_init(void)
     (void)memset(s_arp_cache, 0, sizeof(s_arp_cache));
     (void)memset(s_tcp_tcbs, 0, sizeof(s_tcp_tcbs));
     (void)memset(s_reasm_buf, 0, sizeof(s_reasm_buf));
+    (void)memset(s_udp_rx_queue, 0, sizeof(s_udp_rx_queue));
+    (void)memset(s_udp_rx_head, 0, sizeof(s_udp_rx_head));
+    (void)memset(s_udp_rx_tail, 0, sizeof(s_udp_rx_tail));
 
     for (i = 0U; i < NET_MAX_INTERFACES; i++)
     {
@@ -2643,6 +2670,22 @@ int32_t net_socket(net_af_t family, net_sock_type_t type)
     s_sockets[i].rx_count = 0U;
     s_sockets[i].tx_count = 0U;
     s_sockets[i].in_use = true;
+    
+    /* 初始化套接字选项 */
+    s_sockets[i].reuse_addr = false;
+    s_sockets[i].keepalive = false;
+    s_sockets[i].broadcast = false;
+    s_sockets[i].nonblocking = false;
+    s_sockets[i].shutdown_rd = false;
+    s_sockets[i].shutdown_wr = false;
+    s_sockets[i].rcv_buf_size = 8192;
+    s_sockets[i].snd_buf_size = 8192;
+    
+    /* 初始化统计信息 */
+    s_sockets[i].rx_bytes = 0ULL;
+    s_sockets[i].tx_bytes = 0ULL;
+    s_sockets[i].rx_errors = 0ULL;
+    s_sockets[i].tx_errors = 0ULL;
 
     return (int32_t)i;
 }
@@ -3027,6 +3070,543 @@ kernel_status_t net_close(uint32_t sock_id)
 
     sock->state = NET_SOCK_CLOSED;
     sock->in_use = false;
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * Socket API 扩展接口
+ * ======================================================================== */
+
+/**
+ * @brief 发送数据到指定地址（UDP）
+ * @param sock_id     套接字 ID
+ * @param buf         数据缓冲区
+ * @param size        数据大小
+ * @param dest_addr   目标地址
+ * @return 实际发送字节数，负数表示错误
+ */
+int64_t net_sendto(uint32_t sock_id, const void *buf, uint64_t size,
+                    const net_sockaddr_t *dest_addr)
+{
+    net_socket_t *sock;
+    udp_header_t udp_hdr;
+    uint8_t dgram[NET_MAX_PACKET_SIZE];
+    uint32_t dgram_len;
+    uint32_t remote_ip;
+    uint32_t local_ip;
+    uint16_t cksum;
+    uint32_t if_id;
+
+    /* 参数验证 */
+    if (buf == NULL || dest_addr == NULL)
+    {
+        return -(int64_t)22; /* EINVAL */
+    }
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int64_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int64_t)2; /* ENOENT */
+    }
+
+    if (sock->type != NET_SOCK_DGRAM)
+    {
+        return -(int64_t)22; /* EOPNOTSUPP */
+    }
+
+    if (sock->shutdown_wr)
+    {
+        return -(int64_t)32; /* EPIPE */
+    }
+
+    /* 查找网络接口 */
+    if_id = sock->if_id;
+    if (if_id >= NET_MAX_INTERFACES || !s_interfaces[if_id].in_use)
+    {
+        return -(int64_t)19; /* ENODEV */
+    }
+
+    /* 设置 UDP 头部 */
+    udp_hdr.src_port = net_htons(sock->local_addr.port);
+    udp_hdr.dst_port = net_htons(dest_addr->port);
+    udp_hdr.length = net_htons((uint16_t)((uint32_t)UDP_HDR_SIZE + (uint32_t)size));
+    udp_hdr.checksum = 0U;
+
+    /* 复制数据 */
+    (void)memcpy(dgram, &udp_hdr, (uint32_t)UDP_HDR_SIZE);
+    if (size > 0U)
+    {
+        (void)memcpy(&dgram[(uint32_t)UDP_HDR_SIZE], buf, (uint32_t)size);
+    }
+
+    dgram_len = (uint32_t)UDP_HDR_SIZE + (uint32_t)size;
+    remote_ip = ipv4_to_u32(&dest_addr->addr.ipv4);
+    local_ip = ipv4_to_u32(&s_interfaces[if_id].ipv4_addr);
+
+    /* 计算 UDP 校验和（含伪首部） */
+    cksum = udp_checksum_with_pseudo(local_ip, remote_ip,
+                                      dgram, dgram_len);
+    if (cksum == 0U)
+    {
+        cksum = 0xFFFFU;
+    }
+    ((udp_header_t *)dgram)->checksum = cksum;
+
+    /* 发送 IPv4 数据包 */
+    if (ipv4_send(if_id, remote_ip, IP_PROTO_UDP,
+                  dgram, dgram_len) < (int64_t)dgram_len)
+    {
+        sock->tx_errors++;
+        return -(int64_t)5; /* EIO */
+    }
+
+    sock->tx_count++;
+    sock->tx_bytes += size;
+    return (int64_t)size;
+}
+
+/**
+ * @brief 从指定地址接收数据（UDP）
+ * @param sock_id     套接字 ID
+ * @param buf         数据缓冲区
+ * @param size        缓冲区大小
+ * @param src_addr    源地址（输出）
+ * @return 实际接收字节数，负数表示错误
+ */
+int64_t net_recvfrom(uint32_t sock_id, void *buf, uint64_t size,
+                      net_sockaddr_t *src_addr)
+{
+    net_socket_t *sock;
+    uint32_t tail;
+
+    /* 参数验证 */
+    if (buf == NULL)
+    {
+        return -(int64_t)22;
+    }
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int64_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int64_t)2;
+    }
+
+    if (sock->type != NET_SOCK_DGRAM)
+    {
+        return -(int64_t)22;
+    }
+
+    if (sock->shutdown_rd)
+    {
+        return 0LL; /* EOF */
+    }
+
+    /* 检查接收队列 */
+    tail = s_udp_rx_tail[sock_id];
+    if (tail == s_udp_rx_head[sock_id])
+    {
+        /* 队列为空 */
+        if (sock->nonblocking)
+        {
+            return -(int64_t)11; /* EAGAIN */
+        }
+        /* 阻塞等待（简化实现：立即返回 EAGAIN） */
+        return -(int64_t)11;
+    }
+
+    /* 从队列中取出数据 */
+    if (s_udp_rx_queue[sock_id][tail].in_use &&
+        s_udp_rx_queue[sock_id][tail].sock_id == sock_id)
+    {
+        uint32_t copy_len = s_udp_rx_queue[sock_id][tail].len;
+        if (copy_len > size)
+        {
+            copy_len = (uint32_t)size;
+        }
+        (void)memcpy(buf, s_udp_rx_queue[sock_id][tail].data, copy_len);
+
+        /* 复制源地址 */
+        if (src_addr != NULL)
+        {
+            (void)memcpy(src_addr, &s_udp_rx_queue[sock_id][tail].src_addr,
+                         sizeof(net_sockaddr_t));
+        }
+
+        /* 释放队列条目 */
+        s_udp_rx_queue[sock_id][tail].in_use = false;
+        s_udp_rx_tail[sock_id] = (tail + 1U) % UDP_RX_QUEUE_DEPTH;
+
+        sock->rx_count++;
+        sock->rx_bytes += copy_len;
+        return (int64_t)copy_len;
+    }
+
+    return -(int64_t)11; /* EAGAIN */
+}
+
+/**
+ * @brief 优雅关闭连接
+ * @param sock_id     套接字 ID
+ * @param how         关闭方式（NET_SHUT_RD/NET_SHUT_WR/NET_SHUT_RDWR）
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_shutdown(uint32_t sock_id, uint32_t how)
+{
+    net_socket_t *sock;
+    tcp_tcb_t *tcb;
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int32_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int32_t)2;
+    }
+
+    if (sock->type != NET_SOCK_STREAM)
+    {
+        return -(int32_t)22; /* EOPNOTSUPP */
+    }
+
+    tcb = &s_tcp_tcbs[sock_id];
+
+    switch (how)
+    {
+        case NET_SHUT_RD:
+            /* 关闭读方向：发送 FIN */
+            sock->shutdown_rd = true;
+            if (tcb->state == TCP_ESTABLISHED || tcb->state == TCP_CLOSE_WAIT)
+            {
+                (void)tcp_send_segment(tcb, TCP_FLAG_FIN | TCP_FLAG_ACK, NULL, 0U);
+                if (tcb->state == TCP_ESTABLISHED)
+                {
+                    tcb->state = TCP_FIN_WAIT_1;
+                }
+                else
+                {
+                    tcb->state = TCP_LAST_ACK;
+                }
+            }
+            break;
+
+        case NET_SHUT_WR:
+            /* 关闭写方向：仅标记不可写 */
+            sock->shutdown_wr = true;
+            break;
+
+        case NET_SHUT_RDWR:
+            /* 关闭读写 */
+            sock->shutdown_rd = true;
+            sock->shutdown_wr = true;
+            if (tcb->state == TCP_ESTABLISHED || tcb->state == TCP_CLOSE_WAIT)
+            {
+                (void)tcp_send_segment(tcb, TCP_FLAG_FIN | TCP_FLAG_ACK, NULL, 0U);
+                if (tcb->state == TCP_ESTABLISHED)
+                {
+                    tcb->state = TCP_FIN_WAIT_1;
+                }
+                else
+                {
+                    tcb->state = TCP_LAST_ACK;
+                }
+            }
+            break;
+
+        default:
+            return -(int32_t)22; /* EINVAL */
+    }
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 设置套接字选项
+ * @param sock_id     套接字 ID
+ * @param level       选项级别（NET_SOL_SOCKET/NET_IPPROTO_TCP）
+ * @param optname     选项名称
+ * @param optval      选项值
+ * @param optlen      选项值长度
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_setsockopt(uint32_t sock_id, uint32_t level,
+                                uint32_t optname, const void *optval,
+                                uint32_t optlen)
+{
+    net_socket_t *sock;
+    tcp_tcb_t *tcb;
+
+    if (optval == NULL)
+    {
+        return -(int32_t)22;
+    }
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int32_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int32_t)2;
+    }
+
+    tcb = &s_tcp_tcbs[sock_id];
+
+    switch (level)
+    {
+        case NET_SOL_SOCKET:
+            switch (optname)
+            {
+                case NET_SO_REUSEADDR:
+                    /* 地址复用（TCP/UDP） */
+                    if (optlen >= sizeof(int))
+                    {
+                        sock->reuse_addr = (*((const int *)optval) != 0);
+                    }
+                    break;
+
+                case NET_SO_KEEPALIVE:
+                    /* TCP Keepalive */
+                    if (sock->type == NET_SOCK_STREAM && optlen >= sizeof(int))
+                    {
+                        sock->keepalive = (*((const int *)optval) != 0);
+                    }
+                    break;
+
+                case NET_SO_BROADCAST:
+                    /* 广播（UDP） */
+                    if (sock->type == NET_SOCK_DGRAM && optlen >= sizeof(int))
+                    {
+                        sock->broadcast = (*((const int *)optval) != 0);
+                    }
+                    break;
+
+                case NET_SO_RCVBUF:
+                    /* 接收缓冲区大小 */
+                    if (optlen >= sizeof(int))
+                    {
+                        sock->rcv_buf_size = *((const int *)optval);
+                    }
+                    break;
+
+                case NET_SO_SNDBUF:
+                    /* 发送缓冲区大小 */
+                    if (optlen >= sizeof(int))
+                    {
+                        sock->snd_buf_size = *((const int *)optval);
+                    }
+                    break;
+
+                default:
+                    return -(int32_t)22;
+            }
+            break;
+
+        case NET_IPPROTO_TCP:
+            switch (optname)
+            {
+                case NET_TCP_NODELAY:
+                    /* 禁用 Nagle 算法 */
+                    if (sock->type == NET_SOCK_STREAM && optlen >= sizeof(int))
+                    {
+                        /* nodelay = true 表示禁用 Nagle 算法 */
+                        tcb->nagle_enabled = (*((const int *)optval) == 0);
+                    }
+                    break;
+
+                default:
+                    return -(int32_t)22;
+            }
+            break;
+
+        default:
+            return -(int32_t)22;
+    }
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 获取套接字选项
+ * @param sock_id     套接字 ID
+ * @param level       选项级别（NET_SOL_SOCKET/NET_IPPROTO_TCP）
+ * @param optname     选项名称
+ * @param optval      选项值（输出）
+ * @param optlen      选项值长度（输入输出）
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_getsockopt(uint32_t sock_id, uint32_t level,
+                                uint32_t optname, void *optval,
+                                uint32_t *optlen)
+{
+    net_socket_t *sock;
+    tcp_tcb_t *tcb;
+
+    if (optval == NULL || optlen == NULL)
+    {
+        return -(int32_t)22;
+    }
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int32_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int32_t)2;
+    }
+
+    tcb = &s_tcp_tcbs[sock_id];
+
+    switch (level)
+    {
+        case NET_SOL_SOCKET:
+            switch (optname)
+            {
+                case NET_SO_REUSEADDR:
+                    if (*optlen >= sizeof(int))
+                    {
+                        *((int *)optval) = sock->reuse_addr ? 1 : 0;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                case NET_SO_KEEPALIVE:
+                    if (sock->type == NET_SOCK_STREAM && *optlen >= sizeof(int))
+                    {
+                        *((int *)optval) = sock->keepalive ? 1 : 0;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                case NET_SO_BROADCAST:
+                    if (sock->type == NET_SOCK_DGRAM && *optlen >= sizeof(int))
+                    {
+                        *((int *)optval) = sock->broadcast ? 1 : 0;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                case NET_SO_RCVBUF:
+                    if (*optlen >= sizeof(int))
+                    {
+                        *((int *)optval) = sock->rcv_buf_size;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                case NET_SO_SNDBUF:
+                    if (*optlen >= sizeof(int))
+                    {
+                        *((int *)optval) = sock->snd_buf_size;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                default:
+                    return -(int32_t)22;
+            }
+            break;
+
+        case NET_IPPROTO_TCP:
+            switch (optname)
+            {
+                case NET_TCP_NODELAY:
+                    if (sock->type == NET_SOCK_STREAM && *optlen >= sizeof(int))
+                    {
+                        /* nodelay = true 表示禁用 Nagle 算法 */
+                        *((int *)optval) = tcb->nagle_enabled ? 0 : 1;
+                        *optlen = sizeof(int);
+                    }
+                    break;
+
+                default:
+                    return -(int32_t)22;
+            }
+            break;
+
+        default:
+            return -(int32_t)22;
+    }
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 套接字控制操作
+ * @param sock_id     套接字 ID
+ * @param request     请求类型（NET_FIONBIO/NET_FIONREAD）
+ * @param arg         参数
+ * @return KERNEL_OK 成功
+ */
+kernel_status_t net_ioctl(uint32_t sock_id, uint32_t request, void *arg)
+{
+    net_socket_t *sock;
+
+    if (arg == NULL)
+    {
+        return -(int32_t)22;
+    }
+
+    if (sock_id >= NET_MAX_SOCKETS)
+    {
+        return -(int32_t)22;
+    }
+
+    sock = &s_sockets[sock_id];
+
+    if (!sock->in_use)
+    {
+        return -(int32_t)2;
+    }
+
+    switch (request)
+    {
+        case NET_FIONBIO:
+            /* 设置非阻塞模式 */
+            sock->nonblocking = (*((int *)arg) != 0);
+            break;
+
+        case NET_FIONREAD:
+            /* 获取可读字节数 */
+            if (sock->type == NET_SOCK_STREAM)
+            {
+                tcp_tcb_t *tcb = &s_tcp_tcbs[sock_id];
+                *((int *)arg) = (int)tcb->recv_len;
+            }
+            else
+            {
+                /* UDP: 计算接收队列中的数据包数量 */
+                uint32_t count = s_udp_rx_head[sock_id] - s_udp_rx_tail[sock_id];
+                *((int *)arg) = (int)count;
+            }
+            break;
+
+        default:
+            return -(int32_t)22;
+    }
 
     return KERNEL_OK;
 }
