@@ -1583,7 +1583,47 @@ void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
             (s_sockets[i].type == NET_SOCK_DGRAM) &&
             (s_sockets[i].local_addr.port == dst_port))
         {
-            s_sockets[i].rx_count++;
+            /* 将数据包加入接收队列 */
+            uint32_t head = s_udp_rx_head[i];
+            uint32_t next_head = (head + 1U) % UDP_RX_QUEUE_DEPTH;
+            
+            /* 检查队列是否已满 */
+            if (next_head != s_udp_rx_tail[i])
+            {
+                uint32_t data_len;
+                
+                /* 计算数据长度（不包含 UDP 头部） */
+                data_len = (udp_len > (uint16_t)UDP_HDR_SIZE) ?
+                           (uint32_t)udp_len - (uint32_t)UDP_HDR_SIZE : 0U;
+                
+                /* 填充队列条目 */
+                s_udp_rx_queue[i][head].in_use = true;
+                s_udp_rx_queue[i][head].sock_id = i;
+                
+                /* 设置源地址 */
+                s_udp_rx_queue[i][head].src_addr.family = NET_AF_INET;
+                s_udp_rx_queue[i][head].src_addr.port = src_port;
+                u32_to_ipv4(src_ip, &s_udp_rx_queue[i][head].src_addr.addr.ipv4);
+                
+                /* 复制数据 */
+                if (data_len > 0U && data_len < NET_MAX_PACKET_SIZE)
+                {
+                    (void)memcpy(s_udp_rx_queue[i][head].data,
+                                 &data[(uint32_t)UDP_HDR_SIZE], data_len);
+                }
+                s_udp_rx_queue[i][head].len = data_len;
+                
+                /* 更新队列头指针 */
+                s_udp_rx_head[i] = next_head;
+                
+                s_sockets[i].rx_count++;
+                s_sockets[i].rx_bytes += (uint64_t)data_len;
+            }
+            else
+            {
+                /* 队列已满，丢弃数据包 */
+                s_sockets[i].rx_errors++;
+            }
             break;
         }
     }

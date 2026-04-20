@@ -24,23 +24,92 @@ if(CMAKE_CROSSCOMPILING)
         net
         drv_virtio_net
     )
+    
+    # ================================================================
+    # 网络协议栈集成测试
+    # ================================================================
+    add_executable(test_net_integration.elf
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_net_integration.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if_auto.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/ethernet.c
+        # TCP/IP 优化功能
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_cong.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_nagle_sack.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/ip_reass.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/icmp_error.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_cubic.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_timestamp.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_keepalive.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_options.c
+    )
+    
+    target_link_libraries(test_net_integration.elf musl_aisafe crt0)
+    
+    target_include_directories(test_net_integration.elf PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if
+    )
+    
+    target_compile_options(test_net_integration.elf PRIVATE
+        -std=c11
+        -Wall
+        -Wextra
+        -ffreestanding
+        -fno-builtin
+        -fno-common
+        -fno-stack-protector
+        -nostdlib
+        -nostartfiles
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -O2
+        -fno-asynchronous-unwind-tables
+    )
+    
+    target_link_options(test_net_integration.elf PRIVATE
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--no-warn-rwx-segments
+        -Wl,--allow-multiple-definition
+        -Wl,--start-group
+        -lgcc
+        -Wl,--end-group
+    )
 
     # ================================================================
     # 编译用户态服务（musl_aisafe 版本）
     # ================================================================
     foreach(SERVICE_NAME IN LISTS USERLAND_SERVICES)
         if(SERVICE_NAME STREQUAL "net")
-            # 网络协议栈：包含网络接口层
+            # 网络协议栈：包含网络接口层 + TCP/IP 优化功能
             add_executable(${SERVICE_NAME}.elf
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/net_if/net_if.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/net_if/net_if_auto.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/net_if/ethernet.c
+                # 第一阶段 TCP/IP 优化功能
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_cong.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_nagle_sack.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/ip_reass.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/icmp_error.c
+                # 第二阶段 P0 优先级：TCP 拥塞控制（CUBIC）+ TCP 时间戳
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_cubic.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_timestamp.c
+                # 第二阶段 P1 优先级：TCP Keepalive + TCP 选项处理
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_keepalive.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_options.c
             )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层
             add_executable(${SERVICE_NAME}.elf
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if_auto.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/ethernet.c
             )
         else()
@@ -71,6 +140,7 @@ if(CMAKE_CROSSCOMPILING)
             -U_FORTIFY_SOURCE
             -D_FORTIFY_SOURCE=0
             -O2
+            -fno-asynchronous-unwind-tables
         )
 
         target_link_options(${SERVICE_NAME}.elf PRIVATE
@@ -79,6 +149,10 @@ if(CMAKE_CROSSCOMPILING)
             -static
             -Wl,--gc-sections
             -Wl,--no-warn-rwx-segments
+            -Wl,--allow-multiple-definition
+            -Wl,--start-group
+            -lgcc
+            -Wl,--end-group
         )
     endforeach()
 
