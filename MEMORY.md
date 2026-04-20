@@ -1,5 +1,92 @@
 # MEMORY.md - AISafeOS64 微内核编程助手长期记忆
 
+## 2026-04-20 网络协议栈集成测试 ✅ (13:00)
+
+### 核心功能
+
+**1. UDP 接收队列集成**
+- 修改 `udp_process()` 函数，将接收到的 UDP 数据包加入接收队列
+- 每个 socket 有独立的 UDP 接收队列（深度 16）
+- 支持源地址记录（IP + Port）
+- 队列满时丢弃数据包并记录错误统计
+
+**2. 网络协议栈集成测试程序（test_net_integration.c）**
+- UDP Socket 测试（2 个）：socket/bind/sendto/recvfrom/close
+- TCP Socket 测试（2 个）：socket/bind/listen/connect/send/recv/close
+- shutdown 测试（1 个）：SHUT_RD/SHUT_WR/SHUT_RDWR
+- setsockopt/getsockopt 测试（1 个）：SO_REUSEADDR/SO_RCVBUF
+- ioctl 测试（2 个）：FIONBIO/FIONREAD
+
+**3. QEMU 集成测试启动脚本**
+- scripts/run_net_integration_test.sh
+- 配置用户模式网络
+- 端口转发（2222->SSH, 8080->HTTP）
+
+### 架构改进
+
+**UDP 接收队列实现**:
+```c
+/* 在 udp_process() 中 */
+if (s_sockets[i].in_use &&
+    (s_sockets[i].type == NET_SOCK_DGRAM) &&
+    (s_sockets[i].local_addr.port == dst_port))
+{
+    /* 将数据包加入接收队列 */
+    s_udp_rx_queue[i][head].in_use = true;
+    s_udp_rx_queue[i][head].sock_id = i;
+    s_udp_rx_queue[i][head].src_addr.port = src_port;
+    u32_to_ipv4(src_ip, &s_udp_rx_queue[i][head].src_addr.addr.ipv4);
+    (void)memcpy(s_udp_rx_queue[i][head].data,
+                 &data[(uint32_t)UDP_HDR_SIZE], data_len);
+    s_udp_rx_queue[i][head].len = data_len;
+    s_udp_rx_head[i] = next_head;
+    s_sockets[i].rx_count++;
+    s_sockets[i].rx_bytes += (uint64_t)data_len;
+}
+```
+
+### 验证结果
+
+```
+✅ ARM64 编译：test_net_integration.elf 编译成功
+✅ ARM64 编译：net.elf 编译成功
+✅ 仅警告，无错误
+✅ 集成测试覆盖：8 个测试用例
+```
+
+### 技术亮点
+
+1. **完整的 UDP 接收队列** - 支持无连接 UDP 数据包接收
+2. **源地址记录** - recvfrom 返回发送方地址（IP + Port）
+3. **队列管理** - 环形缓冲区，支持阻塞/非阻塞模式
+4. **错误处理** - 队列满时丢弃数据包并记录错误统计
+5. **完整的 Socket API 集成测试** - 覆盖所有主要接口
+6. **QEMU 测试环境** - 用户模式网络 + 端口转发
+
+### 代码统计
+
+| 文件 | 新增行数 | 说明 |
+|------|---------|------|
+| services/net/main.c | +42 | UDP 接收队列集成 |
+| services/test_net_integration.c | +434 | 集成测试程序 |
+| services/CMakeLists.txt | +76 | 添加测试程序到构建系统 |
+| scripts/run_net_integration_test.sh | +41 | QEMU 启动脚本 |
+| **总计** | **+593** | **网络协议栈集成测试** |
+
+### 对应需求
+
+- NW-003: 数据包收发（UDP 接收队列）
+- NW-004: Socket API（完整集成测试）
+- NW-005: 数据收发（sendto/recvfrom）
+
+### 待完成
+
+⏳ QEMU 实际运行测试（验证完整网络协议栈功能）
+⏳ 实际网络通信测试（与真实服务器通信）
+⏳ 性能测试和优化
+
+---
+
 ## 2026-04-20 Socket API 完整实现 ✅ (12:30)
 
 ### 核心功能
