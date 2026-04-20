@@ -80,6 +80,62 @@ if(CMAKE_CROSSCOMPILING)
         -lgcc
         -Wl,--end-group
     )
+    
+    # ================================================================
+    # 网络协议栈与上层服务集成测试
+    # ================================================================
+    add_executable(test_net_integration_services.elf
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_net_integration_services.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/net_if_auto.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if/ethernet.c
+        # TCP/IP 优化功能
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_cong.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_nagle_sack.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/ip_reass.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/icmp_error.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_cubic.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_timestamp.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_keepalive.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/tcp_options.c
+    )
+    
+    target_link_libraries(test_net_integration_services.elf musl_aisafe crt0)
+    
+    target_include_directories(test_net_integration_services.elf PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if
+    )
+    
+    target_compile_options(test_net_integration_services.elf PRIVATE
+        -std=c11
+        -Wall
+        -Wextra
+        -ffreestanding
+        -fno-builtin
+        -fno-common
+        -fno-stack-protector
+        -nostdlib
+        -nostartfiles
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -O2
+        -fno-asynchronous-unwind-tables
+    )
+    
+    target_link_options(test_net_integration_services.elf PRIVATE
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--no-warn-rwx-segments
+        -Wl,--allow-multiple-definition
+        -Wl,--start-group
+        -lgcc
+        -Wl,--end-group
+    )
 
     # ================================================================
     # 编译用户态服务（musl_aisafe 版本）
