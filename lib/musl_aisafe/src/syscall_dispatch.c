@@ -23,6 +23,14 @@
 #include "syscall_arch.h"
 #include "syscall_numbers.h"
 #include "musl_safety.h"
+#include "fs_ipc.h"
+
+/* 其他系统调用函数声明 */
+extern long aisafe_sys_uname(long buf);
+extern long aisafe_sys_pipe2(long pipefd, long flags);
+extern long aisafe_sys_getrlimit(long resource, long rlimit);
+extern long aisafe_sys_setrlimit(long resource, long rlimit);
+extern long aisafe_sys_sysinfo(long info);
 
 /* 仅在 ARM64 交叉编译时使用真正的 syscall_entry.h */
 #if defined(__aarch64__) && !defined(AISAFE_TEST_MODE)
@@ -400,24 +408,27 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return -ENOSYS;
 
     case __NR_getrlimit:
-        return -ENOSYS;
+        return aisafe_sys_getrlimit(a0, a1);
 
     case __NR_setrlimit:
-        return -ENOSYS;
+        return aisafe_sys_setrlimit(a0, a1);
 
     /* ================================================================
      * 文件 I/O
      * ================================================================ */
     case __NR_write:
-        /* stdout(1)/stderr(2) 通过内核调试输出 */
-        if (a0 == 1 || a0 == 2)
         {
-            /* fd, buf, len → SYS_DEBUG_PRINT(buf, len) */
-            aisafe_svc2(AISAFE_SYS_DEBUG_PRINT, a1, a2);
-            return a2;
+            /* stdout(1)/stderr(2) 通过内核调试输出 */
+            if (a0 == 1 || a0 == 2)
+            {
+                /* fd, buf, len → SYS_DEBUG_PRINT(buf, len) */
+                aisafe_svc2(AISAFE_SYS_DEBUG_PRINT, a1, a2);
+                return a2;
+            }
+            /* 其他文件描述符通过 FS 服务 */
+            long ret = fs_write((int)a0, (const void *)a1, (size_t)a2);
+            return ret;
         }
-        /* 其他文件描述符暂不支持 */
-        return -EBADF;
 
     case __NR_writev:
         if (a0 == 1 || a0 == 2)
@@ -442,16 +453,25 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return -EBADF;
 
     case __NR_read:
-        return -ENOSYS;
+        {
+            long ret = fs_read((int)a0, (void *)a1, (size_t)a2);
+            return ret;
+        }
 
     case __NR_readv:
         return -ENOSYS;
 
     case __NR_openat:
-        return -ENOSYS;
+        {
+            long ret = fs_open((const char *)a1, (int)a2, (unsigned int)a3);
+            return ret;
+        }
 
     case __NR_close:
-        return -ENOSYS;
+        {
+            long ret = fs_close((int)a0);
+            return ret;
+        }
 
     case __NR_lseek:
         return -ENOSYS;
@@ -646,16 +666,16 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return -ENOSYS;
 
     case __NR_pipe2:
-        return -ENOSYS;
+        return aisafe_sys_pipe2(a0, a1);
 
     case __NR_pipe:
         return -ENOSYS;
 
     case __NR_uname:
-        return -ENOSYS;
+        return aisafe_sys_uname(a0);
 
     case __NR_sysinfo:
-        return -ENOSYS;
+        return aisafe_sys_sysinfo(a0);
 
     default:
         return -ENOSYS;

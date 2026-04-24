@@ -26,6 +26,7 @@ set(MUSL_CFLAGS
     -fno-strict-aliasing -fno-stack-protector -fno-common
     -Os -pipe -D_XOPEN_SOURCE=700
     -Wno-all -Wno-extra -Wno-error
+    -mno-outline-atomics  # 禁用 outline atomics
 )
 
 # ==============================================================================
@@ -91,8 +92,10 @@ set(MUSL_MODULES
     multibyte
     search
     sched
-    math
-    locale
+    misc   # 添加 misc 模块（uname 等）
+    linux  # 添加 linux 模块（sysinfo 等）
+    # math - 暂时禁用，避免浮点运算链接问题
+    # locale
 )
 
 # 收集模块基础 .c 文件
@@ -134,6 +137,10 @@ set(_AISAFE_SRCS
     ${MUSL_ASAFE}/src/syscall_dispatch.c
     ${MUSL_ASAFE}/src/musl_safety.c
     ${MUSL_ASAFE}/src/boot_simple.c
+    ${MUSL_ASAFE}/src/softfloat.c  # 软浮点运算实现
+    ${MUSL_ASAFE}/src/fs_ipc.c       # 文件系统 IPC 客户端
+    ${MUSL_ASAFE}/src/other_syscalls.c  # 其他系统调用实现
+    # __syscall_cp 由 musl_upstream 提供
 )
 
 # ==============================================================================
@@ -166,8 +173,8 @@ set(_EXCLUDE_PATTERNS
     "pthread_getattr_np" "pthread_setname" "pthread_getname"
     "pthread_getcpuclockid"
     "synccall"
-    "__unmapself" "__set_thread_area" "__syscall_cp"
-    "syscall_cp" "__timedwait" "__wait"
+    "__unmapself" "__set_thread_area"  # "__syscall_cp" 已移除，使用 AISafeOS64 实现
+    "__timedwait" "__wait"
     "vmlock" "__tls_get_addr" "tls"
     "_Fork" "fork" "vfork" "execve" "fexecve"
     "posix_spawn" "system" "wait" "sigaction" "restore"

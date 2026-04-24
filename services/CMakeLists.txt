@@ -7,7 +7,7 @@
 # - 使用 musl 字符串和内存管理
 # - 每个服务编译为独立的 ELF 文件
 
-if(CMAKE_CROSSCOMPILING)
+if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
     # ================================================================
     # C 运行时（启动代码和初始化）
     # ================================================================
@@ -76,6 +76,47 @@ if(CMAKE_CROSSCOMPILING)
         -Wl,--gc-sections
         -Wl,--no-warn-rwx-segments
         -Wl,--allow-multiple-definition
+        -Wl,--start-group
+        -lgcc
+        -Wl,--end-group
+    )
+    
+    # ================================================================
+    # POSIX API 集成测试
+    # ================================================================
+    add_executable(test_posix_api.elf
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_posix_api.c
+    )
+    
+    target_link_libraries(test_posix_api.elf musl_aisafe crt0)
+    
+    target_include_directories(test_posix_api.elf PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+    )
+    
+    target_compile_options(test_posix_api.elf PRIVATE
+        -std=c11
+        -Wall
+        -Wextra
+        -ffreestanding
+        -fno-builtin
+        -fno-common
+        -fno-stack-protector
+        -nostdlib
+        -nostartfiles
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -O2
+        -fno-asynchronous-unwind-tables
+    )
+    
+    target_link_options(test_posix_api.elf PRIVATE
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--no-warn-rwx-segments
         -Wl,--start-group
         -lgcc
         -Wl,--end-group

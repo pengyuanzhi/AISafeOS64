@@ -63,77 +63,11 @@ static int s_exit_code = 0;
 
 /* ========================================================================
  * 标准 IO 重定向到内核系统调用
- * ======================================================================== */
-
-/**
- * @brief 占位：read 实现
+ * ========================================================================
  *
- * @param fd 文件描述符（0-2）
- * @param buf 缓冲区
- * @param count 字节数
- * @return 读取的字节数，-1 表示错误
+ * 注意：以下函数现在由 musl 提供，不再在此处定义。
+ * 如果需要自定义实现，可以使用 weak 属性覆盖。
  */
-int read(int fd, void *buf, size_t count)
-{
-    (void)fd;
-    (void)buf;
-    (void)count;
-
-    /* TODO: 实现标准输入读取 */
-    /* 使用内核系统调用 SYS_READ */
-    return -1;
-}
-
-/**
- * @brief 占位：write 实现
- *
- * @param fd 文件描述符（1-2）
- * @param buf 数据缓冲区
- * @param count 字节数
- * @return 写入的字节数，-1 表示错误
- */
-int write(int fd, const void *buf, size_t count)
-{
-    (void)fd;
-    (void)buf;
-    (void)count;
-
-    /* TODO: 实现标准输出写入 */
-    /* 使用内核系统调用 SYS_WRITE 或 SYS_DEBUG_PRINT */
-    return -1;
-}
-
-/**
- * @brief 占位：close 实现
- *
- * @param fd 文件描述符
- * @return 0 成功，-1 表示错误
- */
-int close(int fd)
-{
-    (void)fd;
-
-    /* TODO: 实现文件关闭 */
-    /* 使用内核系统调用 SYS_CLOSE */
-    return 0;
-}
-
-/**
- * @brief 占位：isatty 实现
- *
- * @param fd 文件描述符
- * @return 1 如果是终端，0 如果不是
- */
-int isatty(int fd)
-{
-    /* 标准输入输出/标准错误总是终端 */
-    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
-    {
-        return 1;
-    }
-
-    return 0;
-}
 
 /* ========================================================================
  * exit 实现
