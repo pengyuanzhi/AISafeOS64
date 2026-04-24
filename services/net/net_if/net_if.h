@@ -128,4 +128,25 @@ int64_t net_if_recv_frame(const char *name, void *buf, uint64_t size);
  */
 uint32_t net_if_get_count(void);
 
+/**
+ * @brief 通过索引获取接口名称
+ *
+ * @param index 接口索引
+ * @param name  输出接口名称
+ * @param len   名称缓冲区大小
+ *
+ * @return 0 成功，负数错误码
+ */
+int32_t net_if_get_name(uint32_t index, char *name, uint32_t len);
+
+/**
+ * @brief 通过索引获取 MAC 地址
+ *
+ * @param index    接口索引
+ * @param mac_addr  输出 MAC 地址
+ *
+ * @return 0 成功，负数错误码
+ */
+int32_t net_if_get_mac_addr(uint32_t index, uint8_t mac_addr[6]);
+
 #endif /* SERVICES_NET_NET_IF_NET_IF_H */

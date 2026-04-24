@@ -218,6 +218,22 @@ void hal_dcache_clean_and_invalidate(uint64_t start, uint64_t size)
     }
 }
 
+/**
+ * @brief 数据同步屏障 (Inner Shareable)
+ */
+void hal_dsb_ish(void)
+{
+    __asm__ volatile("dsb ish" ::: "memory");
+}
+
+/**
+ * @brief 数据同步屏障 (Full System)
+ */
+void hal_dsb_sy(void)
+{
+    __asm__ volatile("dsb sy" ::: "memory");
+}
+
 /* ========== UART 接收接口实现 ========== */
 
 /**
@@ -412,6 +428,14 @@ void hal_tlb_invalidate_asid(uint64_t asid)
 void hal_wfe(void)
 {
     __asm__ volatile("wfe" ::: "memory");
+}
+
+/**
+ * @brief 等待中断（低功耗 WFI）
+ */
+void hal_wfi(void)
+{
+    __asm__ volatile("wfi" ::: "memory");
 }
 
 /**

@@ -34,7 +34,7 @@
  * ========================================================================
 
  */
-#define virtio_dsb()   __asm__ volatile("dsb ish" ::: "memory")
+#define virtio_dsb()   hal_dsb_ish()
 
 /**
  * @brief WFI 指令：让出 CPU 给 QEMU 主循环处理异步 I/O
@@ -43,7 +43,7 @@
  *          完成回调作为 BH 调度。WFI 使 cpu_exec 退出，让主循环运行 BH，
  *          更新 used ring 后通过 GIC 中断唤醒 CPU。
  */
-#define virtio_wfi()   __asm__ volatile("wfi" ::: "memory")
+#define virtio_wfi()   hal_wfi()
 
 #if CONFIG_DEBUG_VERBOSE
 /**

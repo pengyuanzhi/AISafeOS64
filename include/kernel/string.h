@@ -3,6 +3,7 @@
  * @brief   内核字符串和内存操作函数声明
  * @author  AISafe64 Team
  * @date    2026-04-04
+#include <stdbool.h>
  * @version 1.0
  *
  * @details 本文件声明了内核所需的字符串和内存操作函数，
@@ -258,6 +259,25 @@ uint32_t kernel_strtoul(const char *nptr, char **endptr, int32_t base);
 
 #define strtol    kernel_strtol
 #define strtoul   kernel_strtoul
+
+/* ========================================================================
+ * 格式化输出函数（简化的 snprintf）
+ * ======================================================================== */
+
+/**
+ * @brief 简化的格式化输出（只支持字符串和整数）
+ * @param str 目标缓冲区
+ * @param size 缓冲区大小
+ * @param fmt 格式字符串
+ * @param ... 可变参数
+ * @return 写入的字符数
+ */
+int kernel_snprintf(char *str, size_t size, const char *fmt, ...);
+
+/**
+ * @brief snprintf 标准名称别名（兼容性）
+ */
+#define snprintf kernel_snprintf
 
 #endif /* __KERNEL_STRING_NO_ALIAS */
 

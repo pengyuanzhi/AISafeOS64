@@ -23,21 +23,8 @@
 #include <stdint.h>
 #include <string.h>
 
-/* 网络接口层定义（内联避免头文件依赖） */
-
-/** @brief 网络接口操作接口 */
-typedef struct net_if_ops
-{
-    int32_t (*init)(void);
-    int64_t (*send_frame)(const void *buf, uint64_t size);
-    int64_t (*recv_frame)(void *buf, uint64_t size);
-    int32_t (*close)(void);
-    int (*is_running)(void);
-} net_if_ops_t;
-
-/* 网络接口层函数声明 */
-int32_t net_if_register(const char *name, const char *driver,
-                        const net_if_ops_t *ops, const uint8_t mac_addr[6]);
+/* 网络接口自动发现接口 */
+#include "../net/net_if/net_if_auto.h"
 
 /* ========================================================================
  * VirtIO MMIO 寄存器定义
@@ -521,7 +508,7 @@ int64_t virtio_net_recv_eth_frame(void *buf, uint64_t size);
  * ======================================================================== */
 
 /** @brief 网络接口操作接口 */
-static const net_if_ops_t s_virtio_net_ops =
+static const net_if_ops_auto_t s_virtio_net_ops =
 {
     .init        = NULL,  /* TODO: 如果需要，可以添加 */
     .send_frame  = virtio_net_send_eth_frame,
@@ -615,9 +602,9 @@ int32_t main(void)
         return ret;
     }
 
-    /* 注册到网络接口层 */
-    ret = net_if_register("eth0", "virtio-net", &s_virtio_net_ops,
-                           s_priv.config.mac);
+    /* 注册到网络接口自动发现机制 */
+    ret = net_if_auto_register("eth0", "virtio-net", &s_virtio_net_ops,
+                                s_priv.config.mac);
     if (ret != 0)
     {
         return ret;

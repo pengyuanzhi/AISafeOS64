@@ -1050,6 +1050,211 @@ PSCI CPU_ON → 从核入口 (smp_boot.S)
 | path/ | 606 | 设备路径、服务注册 |
 | dev/ | 806 | 驱动框架 |
 
+### 13.2.1 用户态服务管理器（services/manager/）
+
+#### 设计目标
+
+微内核设计要求服务启动和管理应该是**动态的、可配置的、解耦的**，而不是硬编码在内核启动代码中。
+
+**核心原则**：
+1. **动态服务启动** - 服务注册表管理服务启动，不硬编码顺序
+2. **依赖管理** - 服务声明依赖关系，内核按依赖顺序启动
+3. **IPC 通信** - 服务之间通过 IPC 通信，而不是全局变量共享
+4. **服务发现** - 服务注册和发现机制
+5. **故障隔离** - 单个服务崩溃不影响其他服务
+
+#### 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  内核 (kernel/arch/arm64/entry.c)                           │
+│  - 服务启动管理器接口                                        │
+│  - IPC 通信框架                                             │
+│  - 中断处理                                                  │
+│  - 线程创建 API                                              │
+└─────────────────────────────────────────────────────────────┘
+           ↓ 服务启动（动态）
+┌─────────────────────────────────────────────────────────────┐
+│  服务管理器 (services/manager/manager.c)                    │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 服务注册表 (service_registry_t)                      │   │
+│  │ - 服务列表（name → service_info）                    │   │
+│  │ - 状态管理（RUNNING/STOPPED/CRASHED）                │   │
+│  │ - 依赖解析（dependency_resolver）                     │   │
+│  │ - 启动顺序调度（start_scheduler）                    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 服务 API                                               │   │
+│  │ - service_register(name, entry, deps)               │   │
+│  │ - service_start(name)                                │   │
+│  │ - service_stop(name)                                 │   │
+│  │ - service_restart(name)                               │   │
+│  │ - service_list()                                     │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+           ↓ IPC 通信
+┌─────────────────────────────────────────────────────────────┐
+│  用户态服务 (services/)                                      │
+│  - fs (文件系统)                                             │
+│  - proc (进程管理)                                           │
+│  - net (网络协议栈)                                          │
+│  - drv_virtio_net (VirtIO 驱动)                             │
+│  - path (路径管理)                                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 核心模块
+
+**1. 服务注册表（service_registry_t）**
+
+```c
+/** @brief 服务信息 */
+typedef struct
+{
+    char                name[32];              /**< @brief 服务名称 */
+    void (*entry)(void);                      /**< @brief 服务入口函数 */
+    uint32_t            tid;                   /**< @brief 线程 ID */
+    bool                running;               /**< @brief 运行状态 */
+    uint32_t            dependency_count;      /**< @brief 依赖数量 */
+    char *dependencies[MAX_DEPENDENCIES];    /**< @brief 依赖的服务列表 */
+    char *features[MAX_FEATURES];            /**< @brief 服务特性 */
+} service_info_t;
+
+/** @brief 服务注册表 */
+typedef struct
+{
+    service_info_t     services[MAX_SERVICES]; /**< @brief 服务列表 */
+    uint32_t           service_count;         /**< @brief 服务数量 */
+    service_info_t    *ready_list;            /**< @brief 就绪服务列表 */
+    uint32_t           ready_count;           /**< @brief 就绪服务数量 */
+} service_registry_t;
+```
+
+**2. 依赖解析器（dependency_resolver_t）**
+
+```c
+/** @brief 依赖解析结果 */
+typedef enum
+{
+    DEP_OK = 0,                /**< @brief 解析成功 */
+    DEP_ERROR_NOT_FOUND,       /**< @brief 服务未找到 */
+    DEP_ERROR_CIRCULAR,        /**< @brief 循环依赖 */
+    DEP_ERROR_MISSING,         /**< @brief 依赖缺失 */
+    DEP_ERROR_CYCLE,           /**< @brief 循环依赖 */
+} dep_result_t;
+
+/** @brief 依赖解析器 */
+typedef struct
+{
+    dep_result_t (*resolve)(service_registry_t *registry, const char *service_name);
+    bool (*is_resolved)(service_registry_t *registry, const char *service_name);
+} dependency_resolver_t;
+```
+
+**3. 服务管理器 API**
+
+```c
+/** @brief 注册服务 */
+int32_t service_register(const char *name, void (*entry)(void),
+                          const char *dependencies[MAX_DEPENDENCIES],
+                          const char *features[MAX_FEATURES]);
+
+/** @brief 启动服务 */
+int32_t service_start(const char *name);
+
+/** @brief 停止服务 */
+int32_t service_stop(const char *name);
+
+/** @brief 重启服务 */
+int32_t service_restart(const char *name);
+
+/** @brief 获取服务列表 */
+uint32_t service_list(char names[][32], uint32_t max_count);
+
+/** @brief 获取服务状态 */
+bool service_is_running(const char *name);
+
+/** @brief 添加服务依赖 */
+int32_t service_add_dependency(const char *service, const char *dependent);
+```
+
+#### 服务配置文件（services/services.conf）
+
+```ini
+[services]
+# 服务启动顺序（依赖顺序）
+order = path, mem, proc, fs, drv_virtio_net, net
+
+# 服务特性
+[features]
+fs.features = vfs, mount, attribute, permission
+net.features = ipv4, icmp, udp, tcp, socket
+
+# 依赖声明
+drv_virtio_net.depends = fs
+net.depends = drv_virtio_net
+```
+
+#### 启动流程
+
+```
+1. 内核初始化完成
+2. 加载服务配置文件 (services/services.conf)
+3. 扫描 services/ 目录，注册所有服务（service_register）
+4. 依赖解析（dependency_resolver）
+5. 按依赖顺序启动服务（service_start）
+6. 通知所有服务启动完成（service_ready）
+7. 进入主循环，等待服务间 IPC 通信
+```
+
+#### 通信模式
+
+**IPC 层** (`services/ipc/`):
+- **Channel API** - 简单请求-响应模式
+- **Endpoint API** - 服务端注册和客户端查找
+- **Notification API** - 事件通知
+
+**数据结构**:
+- 共享内存区
+- IPC 环形缓冲区
+- 线程安全队列
+
+#### 服务间通信示例
+
+**文件系统服务 → 进程管理服务**:
+```c
+// FS 服务通过 IPC 请求进程管理器
+channel_send(fs_endpoint, CMD_FORK_PROCESS, &fork_info, &reply);
+```
+
+**VirtIO Net 驱动 → 网络协议栈**:
+```c
+// drv_virtio_net 驱动注册到网络接口层（本地函数调用）
+net_if_register("eth0", "virtio-net", &s_virtio_net_ops, mac_addr);
+
+// 网络协议栈通过 IPC 与驱动通信（如果需要）
+channel_send(net_endpoint, CMD_RECV_PACKET, &rx_buf, &size);
+```
+
+#### 待实现功能
+
+- [ ] 服务管理器核心模块（manager.c）
+- [ ] 服务注册表（service_registry.c）
+- [ ] 依赖解析器（dependency_resolver.c）
+- [ ] 服务配置文件解析（config_parser.c）
+- [ ] IPC 通信层（ipc/channel.c, ipc/endpoint.c, ipc/notification.c）
+- [ ] 内核启动集成（kernel/arch/arm64/entry.c）
+- [ ] 服务管理 CLI 工具（bin/servicectl）
+
+#### 对应需求
+
+- **DR-007**: 动态服务加载
+- **DR-008**: 服务依赖管理
+- **IPC-001**: IPC 通信框架
+- **IPC-002**: Channel 模型
+- **IPC-003**: Endpoint 模型
+- **IPC-004**: Notification 模型
+
 ### 13.3 驱动（drivers/）
 
 | 驱动 | 代码行数 | 说明 |

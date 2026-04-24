@@ -44,7 +44,7 @@ typedef struct
 {
     uint32_t type;     /**< @brief 消息类型 */
     uint32_t len;      /**< @brief 数据长度 */
-    uint64_t data[4];  /**< @brief 数据负载 */
+    uint64_t data[8];  /**< @brief 数据负载（从 4 扩展到 8，支持 PROC_MSG_MMAP 等消息）*/
 } service_msg_t;
 
 #define PROC_SIG_MAX                31U

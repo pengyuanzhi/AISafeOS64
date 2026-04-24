@@ -13,9 +13,13 @@
  * @note MISRA-C:2012 合规
  */
 
-#include "musl_safety.h"
+#include <stdint.h>
+#include <stddef.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "musl_safety.h"
 
 /* ========================================================================
  * 常量定义

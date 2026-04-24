@@ -206,6 +206,18 @@ void hal_dcache_invalidate(uint64_t start, uint64_t size);
 void hal_dcache_clean_and_invalidate(uint64_t start, uint64_t size);
 
 /**
+ * @brief 数据同步屏障 (Inner Shareable)
+ * @details 确保所有之前的缓存操作和数据访问在所有 inner shareable 域的观察者可见
+ */
+void hal_dsb_ish(void);
+
+/**
+ * @brief 系统同步屏障 (Full System)
+ * @details 确保所有之前的缓存操作和数据访问在整个系统可见
+ */
+void hal_dsb_sy(void);
+
+/**
  * @brief 使整个 TLB 无效
  */
 static inline void hal_tlb_invalidate_all(void)
@@ -306,6 +318,12 @@ void hal_tlb_invalidate_asid(uint64_t asid);
  * @details 暂停 CPU 执行直到事件信号到达或中断发生
  */
 void hal_wfe(void);
+
+/**
+ * @brief 等待中断（低功耗 WFI）
+ * @details 暂停 CPU 执行直到中断发生
+ */
+void hal_wfi(void);
 
 /**
  * @brief 发送事件

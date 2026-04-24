@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <stddef.h>
 
 /* 测试计数器 */
 static int g_test_passed = 0;
@@ -26,7 +27,6 @@ static int g_test_failed = 0;
 static void test_start(const char *name)
 {
     printf("[MUSL] %s ... ", name);
-    fflush(stdout);
 }
 
 static void test_pass(void)

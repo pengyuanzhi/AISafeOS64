@@ -3,6 +3,11 @@
  * @brief   内核字符串和内存操作函数实现
  * @author  AISafe64 Team
  * @date    2026-04-04
+#include <stdarg.h>
+#ifndef __VA_LIST_DEFINED
+#define __VA_LIST_DEFINED
+typedef void *va_list;
+#endif/
  * @version 1.0
  *
  * @details 本文件实现了内核所需的字符串和内存操作函数，
@@ -924,3 +929,8 @@ uint32_t kernel_strtoul(const char *nptr, char **endptr, int32_t base)
 
     return result;
 }
+
+/**
+ * @brief 简化的 snprintf 实现（只支持格式化字符串，不支持浮点）
+ */
+

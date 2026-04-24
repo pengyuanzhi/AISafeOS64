@@ -209,3 +209,76 @@ uint32_t net_if_get_count(void)
 {
     return s_net_if_count;
 }
+
+/**
+ * @brief 通过索引获取接口名称
+ *
+ * @param index 接口索引
+ * @param name  输出接口名称
+ * @param len   名称缓冲区大小
+ *
+ * @return 0 成功，负数错误码
+ */
+int32_t net_if_get_name(uint32_t index, char *name, uint32_t len)
+{
+    if (name == NULL)
+    {
+        return -22; /* EINVAL */
+    }
+
+    if (index >= s_net_if_count)
+    {
+        return -2; /* ENODEV */
+    }
+
+    if (len < NET_IF_NAME_LEN)
+    {
+        return -22; /* EINVAL */
+    }
+
+    if (!s_net_if_table[index].in_use)
+    {
+        return -2; /* ENODEV */
+    }
+
+    (void)strncpy(name, s_net_if_table[index].name, NET_IF_NAME_LEN - 1);
+    name[NET_IF_NAME_LEN - 1] = '\0';
+
+    return 0;
+}
+
+/**
+ * @brief 通过索引获取 MAC 地址
+ *
+ * @param index    接口索引
+ * @param mac_addr  输出 MAC 地址
+ *
+ * @return 0 成功，负数错误码
+ */
+int32_t net_if_get_mac_addr(uint32_t index, uint8_t mac_addr[6])
+{
+    if (mac_addr == NULL)
+    {
+        return -22; /* EINVAL */
+    }
+
+    if (index >= s_net_if_count)
+    {
+        return -2; /* ENODEV */
+    }
+
+    if (!s_net_if_table[index].in_use)
+    {
+        return -2; /* ENODEV */
+    }
+
+    /* 目前没有保存 MAC 地址，返回 00:00:00:00:00:00 */
+    mac_addr[0] = 0x00U;
+    mac_addr[1] = 0x00U;
+    mac_addr[2] = 0x00U;
+    mac_addr[3] = 0x00U;
+    mac_addr[4] = 0x00U;
+    mac_addr[5] = 0x00U;
+
+    return 0;
+}
