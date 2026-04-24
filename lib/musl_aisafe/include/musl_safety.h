@@ -1,7 +1,7 @@
 /**
  * @file    musl_safety.h
  * @brief   AISafeOS64 musl 功能安全包装接口
- * @version 1.0
+ * @version 2.0
  *
  * @details 对标准 musl 的功能安全改造：
  *          - 参数验证：每个 syscall 路径添加参数边界检查
@@ -25,25 +25,7 @@
 /* ========================================================================
  * 权限位定义（sys/stat.h 的子集）
  * ======================================================================== */
-
-#define S_IRUSR 00400  /* 读权限，所有者 */
-#define S_IWUSR 00200  /* 写权限，所有者 */
-#define S_IXUSR 00100  /* 执行权限，所有者 */
-#define S_IRWXU (S_IRUSR|S_IWUSR|S_IXUSR)  /* 所有者所有权限 */
-
-#define S_IRGRP 00040  /* 读权限，组 */
-#define S_IWGRP 00020  /* 写权限，组 */
-#define S_IXGRP 00010  /* 执行权限，组 */
-#define S_IRWXG (S_IRGRP|S_IWGRP|S_IXGRP)  /* 组所有权限 */
-
-#define S_IROTH 00004  /* 读权限，其他 */
-#define S_IWOTH 00002  /* 写权限，其他 */
-#define S_IXOTH 00001  /* 执行权限，其他 */
-#define S_IRWXO (S_IROTH|S_IWOTH|S_IXOTH)  /* 其他所有权限 */
-
-#define S_ISUID 004000  /* 设置用户 ID */
-#define S_ISGID 002000  /* 设置组 ID */
-#define S_ISVTX 001000  /* 粘滞位 */
+/* 注意：这些宏由 musl_upstream 提供，无需重复定义 */
 
 /* ========================================================================
  * 类型定义
@@ -103,6 +85,15 @@ int musl_validate_mode(mode_t mode);
 /* ========================================================================
  * 审计日志接口
  * ======================================================================== */
+
+/**
+ * @brief 审计日志输出函数（格式化）
+ * @param fmt 格式化字符串
+ * @param ... 变参
+ * @return 0 表示成功，负值表示失败
+ * @note 通过内核调试接口输出
+ */
+int musl_audit_log_printf(const char *fmt, ...);
 
 /**
  * @brief 初始化审计日志系统

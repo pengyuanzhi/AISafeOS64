@@ -1,7 +1,7 @@
 /**
  * @file    other_syscalls.c
  * @brief   AISafeOS64 musl 适配层 — 其他系统调用实现
- * @version 1.0
+ * @version 2.0
  *
  * @details 实现其他系统调用：pipe2, uname, sysinfo, getrlimit, setrlimit 等
  *
@@ -13,6 +13,134 @@
 #include <kernel/syscall.h>
 #include <stdint.h>
 #include <string.h>
+
+/* ========================================================================
+ * Linux errno 值（与 musl 一致）
+ * ======================================================================== */
+/* 注意：这些宏由 musl_upstream 提供，无需重复定义 */
+
+/* ========================================================================
+ * AISafeOS64 内核系统调用号（与 syscall_dispatch.c 保持一致）
+ * ======================================================================== */
+#define AISAFE_SYS_DEBUG_PRINT      0x0500U
+#define AISAFE_SYS_SYSTEM_INFO       0x0501U
+
+/* ========================================================================
+ * 时间结构体定义
+ * ======================================================================== */
+
+/**
+ * @brief timeval 结构体
+ */
+typedef struct
+{
+    long    tv_sec;     /* 秒 */
+    long    tv_usec;    /* 微秒 */
+} timeval_t;
+
+/**
+ * @brief timespec 结构体
+ */
+typedef struct
+{
+    long    tv_sec;     /* 秒 */
+    long    tv_nsec;    /* 纳秒 */
+} timespec_t;
+
+/* ========================================================================
+ * 时间相关系统调用
+ * ======================================================================== */
+
+/**
+ * @brief gettimeofday 系统调用
+ *
+ * @param tv timeval 结构体指针
+ * @param tz 时区结构体指针（当前忽略）
+ *
+ * @return 0 表示成功，-1 表示失败
+ *
+ * @note AISafeOS64 临时实现：返回固定时间戳（uptime）
+ */
+long aisafe_sys_gettimeofday(long tv, long tz)
+{
+    static unsigned long s_uptime = 0UL;
+
+    if (tv == 0)
+    {
+        return -EFAULT;
+    }
+
+    /* 模拟 uptime */
+    s_uptime++;
+
+    /* 填充 timeval */
+    timeval_t *tv_ptr = (timeval_t *)tv;
+    tv_ptr->tv_sec = (long)s_uptime;
+    tv_ptr->tv_usec = 0L;
+
+    (void)tz;  /* 忽略时区参数 */
+
+    return 0;
+}
+
+/**
+ * @brief clock_gettime 系统调用
+ *
+ * @param clk_id 时钟类型（CLOCK_REALTIME, CLOCK_MONOTONIC 等）
+ * @param tp timespec 结构体指针
+ *
+ * @return 0 表示成功，-1 表示失败
+ *
+ * @note AISafeOS64 临时实现：返回固定时间戳（uptime）
+ */
+long aisafe_sys_clock_gettime(long clk_id, long tp)
+{
+    static unsigned long s_uptime = 0UL;
+
+    if (tp == 0)
+    {
+        return -EFAULT;
+    }
+
+    /* 模拟 uptime */
+    s_uptime++;
+
+    /* 填充 timespec */
+    timespec_t *tp_ptr = (timespec_t *)tp;
+    tp_ptr->tv_sec = (long)s_uptime;
+    tp_ptr->tv_nsec = 0L;
+
+    (void)clk_id;  /* 忽略时钟类型 */
+
+    return 0;
+}
+
+/**
+ * @brief clock_getres 系统调用
+ *
+ * @param clk_id 时钟类型（CLOCK_REALTIME, CLOCK_MONOTONIC 等）
+ * @param res timespec 结构体指针
+ *
+ * @return 0 表示成功，-1 表示失败
+ *
+ * @note AISafeOS64 实现：返回纳秒精度（1ns）
+ */
+long aisafe_sys_clock_getres(long clk_id, long res)
+{
+    if (res == 0)
+    {
+        return -EFAULT;
+    }
+
+    /* 填充 timespec（纳秒精度） */
+    timespec_t *res_ptr = (timespec_t *)res;
+    res_ptr->tv_sec = 0L;
+    res_ptr->tv_nsec = 1L;  /* 1ns 精度 */
+
+    (void)clk_id;  /* 忽略时钟类型 */
+
+    return 0;
+}
 
 /* ========================================================================
  * Linux errno 值（与 musl 一致）
@@ -112,6 +240,14 @@ long aisafe_sys_uname(long buf)
  * pipe2 实现
  * ======================================================================== */
 
+/* ========================================================================
+ * pipe2 实现
+ * ======================================================================== */
+
+/** @brief 管道标志定义 */
+#define O_CLOEXEC    02000000  /* close-on-exec */
+#define O_NONBLOCK   00004000  /* non-blocking I/O */
+
 /**
  * @brief pipe2 系统调用
  *
@@ -119,10 +255,13 @@ long aisafe_sys_uname(long buf)
  * @param flags 标志（O_CLOEXEC, O_NONBLOCK 等）
  *
  * @return 0 表示成功，-1 表示失败
+ *
+ * @note AISafeOS64 临时实现：返回 -ENOSYS（需要 FS 服务支持）
  */
 long aisafe_sys_pipe2(long pipefd, long flags)
 {
-    /* AISafeOS64 临时实现：返回 -ENOSYS */
+    /* TODO: 通过 FS 服务创建管道 */
+    /* 当前实现：返回 -ENOSYS */
     (void)pipefd;
     (void)flags;
     return -ENOSYS;

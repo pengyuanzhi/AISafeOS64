@@ -31,6 +31,15 @@ extern long aisafe_sys_pipe2(long pipefd, long flags);
 extern long aisafe_sys_getrlimit(long resource, long rlimit);
 extern long aisafe_sys_setrlimit(long resource, long rlimit);
 extern long aisafe_sys_sysinfo(long info);
+extern long aisafe_sys_gettimeofday(long tv, long tz);
+extern long aisafe_sys_clock_gettime(long clk_id, long tp);
+extern long aisafe_sys_clock_getres(long clk_id, long res);
+
+/* FS 客户端函数声明 */
+extern long fs_lseek(int fd, long offset, int whence);
+extern int fs_fstat(int fd, void *statbuf);
+extern int fs_ioctl(int fd, unsigned long request, void *arg);
+extern int fs_fcntl(int fd, int cmd, int arg);
 
 /* 仅在 ARM64 交叉编译时使用真正的 syscall_entry.h */
 #if defined(__aarch64__) && !defined(AISAFE_TEST_MODE)
@@ -41,57 +50,10 @@ extern long aisafe_sys_sysinfo(long info);
 #endif
 
 /* Linux errno 值（与 musl 一致） */
-#define EPERM           1
-#define ENOENT          2
-#define ESRCH           3
-#define EINTR           4
-#define EIO             5
-#define ENXIO           6
-#define E2BIG           7
-#define ENOEXEC         8
-#define EBADF            9
-#define ECHILD          10
-#define EAGAIN          11
-#define ENOMEM          12
-#define EACCES          13
-#define EFAULT          14
-#define ENOTBLK         15
-#define EBUSY           16
-#define EEXIST          17
-#define EXDEV           18
-#define ENODEV          19
-#define ENOTDIR         20
-#define EISDIR          21
-#define EINVAL          22
-#define ENFILE          23
-#define EMFILE          24
-#define ENOTTY          25
-#define ETXTBSY         26
-#define EFBIG           27
-#define ENOSPC          28
-#define ESPIPE          29
-#define EROFS           30
-#define EMLINK          31
-#define EPIPE           32
-#define EDOM            33
-#define ERANGE          34
-#define EDEADLK         35
-#define ENAMETOOLONG    36
-#define ENOLCK          37
-#define ENOSYS          38
-#define ENOTEMPTY       39
-#define ELOOP           40
-#define ENOMSG          42
-#define EIDRM           43
-#define ECHRNG          44
-#define EL2NSYNC        45
-#define EL3HLT          46
-#define EL3RST          47
-#define ENRSTRNG        48
-#define ENONET          50
-#define ENOTCONN        107
-#define ECONNRESET      104
-#define ENOTSOCK        88
+/* ========================================================================
+ * Linux errno 值（与 musl 一致）
+ * ======================================================================== */
+/* 注意：这些宏由 musl_upstream 提供，无需重复定义 */
 
 /* ========================================================================
  * AISafeOS64 内核系统调用号（与 include/kernel/syscall.h 保持一致）
@@ -474,15 +436,10 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         }
 
     case __NR_lseek:
-        return -ENOSYS;
+        return fs_lseek((int)a0, a1, (int)a2);
 
     case __NR_fstat:
-        /* stdin(0)/stdout(1)/stderr(2) 返回字符设备 */
-        if (a0 <= 2)
-        {
-            return 0;  /* 桩：直接返回成功 */
-        }
-        return -EBADF;
+        return fs_fstat((int)a0, (void *)a1);
 
     case __NR_newfstatat:
         return -ENOSYS;
@@ -491,7 +448,7 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return -ENOSYS;
 
     case __NR_ioctl:
-        return -ENOSYS;
+        return fs_ioctl((int)a0, (unsigned long)a1, (void *)a2);
 
     case __NR_dup:
         return -ENOSYS;
@@ -500,7 +457,7 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return -ENOSYS;
 
     case __NR_fcntl:
-        return -ENOSYS;
+        return fs_fcntl((int)a0, (int)a1, (int)a2);
 
     case __NR_faccessat:
         return -ENOSYS;
@@ -563,12 +520,13 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
      * 时间/定时器
      * ================================================================ */
     case __NR_clock_gettime:
-        return -ENOSYS;
+        return aisafe_sys_clock_gettime(a0, a1);
 
     case __NR_clock_getres:
-        return -ENOSYS;
+        return aisafe_sys_clock_getres(a0, a1);
 
     case __NR_clock_settime:
+        /* clock_settime 暂不支持 */
         return -ENOSYS;
 
     case __NR_nanosleep:
@@ -576,9 +534,10 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return 0;
 
     case __NR_gettimeofday:
-        return -ENOSYS;
+        return aisafe_sys_gettimeofday(a0, a1);
 
     case __NR_settimeofday:
+        /* settimeofday 暂不支持 */
         return -ENOSYS;
 
     /* ================================================================

@@ -1,7 +1,7 @@
 /**
  * @file    fs_ipc.c
  * @brief   AISafeOS64 musl 适配层 — 文件系统 IPC 客户端
- * @version 1.0
+ * @version 2.0
  *
  * @details 实现 musl 文件系统系统调用的 IPC 客户端：
  *          - 文件描述符表管理（每进程）
@@ -37,6 +37,11 @@
 
 /** @brief 最大文件描述符数 */
 #define FS_MAX_FDS     32U
+
+/** @brief lseek 定位方式 */
+#define SEEK_SET        0  /* 从文件开头定位 */
+#define SEEK_CUR        1  /* 从当前位置定位 */
+#define SEEK_END        2  /* 从文件末尾定位 */
 
 /** @brief FS 服务端点（需要通过服务发现获取） */
 static int s_fs_endpoint = -1;
@@ -231,6 +236,8 @@ typedef struct fs_msg_reply
     uint64_t    vfs_fd;         /**< @brief VFS 文件描述符（open 时返回） */
     uint64_t    offset;         /**< @brief 文件偏移量（lseek 时返回） */
     char        data[4096];     /**< @brief 读取数据（read 时返回） */
+    uint64_t    stat_size;      /**< @brief 文件大小（fstat 时返回） */
+    uint64_t    stat_mode;      /**< @brief 文件模式（fstat 时返回） */
 } fs_msg_reply_t;
 
 /* ========================================================================
@@ -553,4 +560,131 @@ long fs_write(int fd, const void *buf, size_t count)
     s_fd_table[fd].offset += (uint64_t)reply.ret;
 
     return reply.ret;
+}
+
+/* ========================================================================
+ * lseek / fstat / ioctl / fcntl 实现
+ * ======================================================================== */
+
+/**
+ * @brief 文件定位
+ *
+ * @param fd 文件描述符
+ * @param offset 偏移量
+ * @param whence 定位方式（SEEK_SET/SEEK_CUR/SEEK_END）
+ *
+ * @return 新的文件偏移量，-1 表示失败
+ */
+long fs_lseek(int fd, long offset, int whence)
+{
+    fs_msg_lseek_t req;
+    fs_msg_reply_t reply;
+    long ret;
+
+    /* 参数验证 */
+    if (fs_validate_fd(fd) != 0)
+    {
+        return -1;  /* EBADF */
+    }
+
+    /* 构造请求消息 */
+    (void)memset(&req, 0, sizeof(req));
+    req.msg_type = FS_MSG_LSEEK;
+    req.vfs_fd = s_fd_table[fd].vfs_fd;
+    req.offset = (uint64_t)offset;
+    req.whence = (uint64_t)whence;
+
+    /* 发送消息到 FS 服务 */
+    ret = aisafe_svc_call(
+        AISAFE_SYS_MSG_SEND,
+        s_fs_endpoint,
+        (long)&req,
+        sizeof(req),
+        0, 0, 0
+    );
+
+    if (ret < 0)
+    {
+        return -1;
+    }
+
+    /* 接收回复 */
+    ret = aisafe_svc_call(
+        AISAFE_SYS_MSG_RECV,
+        s_fs_endpoint,
+        (long)&reply,
+        sizeof(reply),
+        0, 0, 0
+    );
+
+    if (ret < 0)
+    {
+        return -1;
+    }
+
+    /* 检查返回值 */
+    if (reply.ret < 0)
+    {
+        return (long)reply.ret;
+    }
+
+    /* 更新偏移量 */
+    s_fd_table[fd].offset = reply.offset;
+
+    return (long)reply.offset;
+}
+
+/**
+ * @brief 获取文件状态
+ *
+ * @param fd 文件描述符
+ * @param statbuf stat 结构体指针
+ *
+ * @return 0 表示成功，-1 表示失败
+ */
+int fs_fstat(int fd, void *statbuf)
+{
+    /* TODO: 通过 FS 服务获取文件状态 */
+    /* 当前实现：返回 -ENOSYS */
+    (void)fd;
+    (void)statbuf;
+    return -ENOSYS;
+}
+
+/**
+ * @brief 文件控制
+ *
+ * @param fd 文件描述符
+ * @param request 控制请求
+ * @param arg 参数
+ *
+ * @return 0 表示成功，-1 表示失败
+ */
+int fs_ioctl(int fd, unsigned long request, void *arg)
+{
+    /* TODO: 通过 FS 服务执行 ioctl */
+    /* 当前实现：返回 -ENOSYS */
+    (void)fd;
+    (void)request;
+    (void)arg;
+    return -ENOSYS;
+}
+
+/**
+ * @brief 文件描述符控制
+ *
+ * @param fd 文件描述符
+ * @param cmd 控制命令
+ * @param arg 参数
+ *
+ * @return 0 表示成功，-1 表示失败
+ */
+int fs_fcntl(int fd, int cmd, int arg)
+{
+    /* TODO: 通过 FS 服务执行 fcntl */
+    /* 当前实现：返回 -ENOSYS */
+    (void)fd;
+    (void)cmd;
+    (void)arg;
+    return -ENOSYS;
 }

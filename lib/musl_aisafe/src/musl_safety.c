@@ -1,7 +1,7 @@
 /**
  * @file    musl_safety.c
  * @brief   AISafeOS64 musl 功能安全改造包装实现
- * @version 1.0
+ * @version 2.0
  *
  * @details 对标准 musl 的功能安全改造：
  *          - 参数验证：每个 syscall 路径添加参数边界检查
@@ -19,7 +19,22 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdarg.h>
 #include "musl_safety.h"
+#include "../arch/aarch64_aisafe/syscall_entry.h"
+
+/* 仅在 ARM64 交叉编译时使用真正的 syscall_entry.h */
+#if defined(__aarch64__) && !defined(AISAFE_TEST_MODE)
+/* 已在上面包含 syscall_entry.h */
+#else
+/* 测试模式：使用桩版本 */
+#include "../arch/aarch64_aisafe/syscall_entry_test.h"
+#endif
+
+/* ========================================================================
+ * AISafeOS64 内核系统调用号
+ * ======================================================================== */
+#define AISAFE_SYS_DEBUG_PRINT      0x0500U
 
 /* ========================================================================
  * 常量定义
@@ -151,6 +166,70 @@ int musl_validate_mode(mode_t mode)
 }
 
 /* ========================================================================
+ * 审计日志缓冲区
+ * ======================================================================== */
+
+/** 审计日志缓冲区大小 */
+#define AUDIT_LOG_BUFFER_SIZE 512U
+
+/** 审计日志缓冲区 */
+static char s_audit_log_buffer[AUDIT_LOG_BUFFER_SIZE];
+
+/* ========================================================================
+ * 审计日志输出函数
+ * ======================================================================== */
+
+/**
+ * @brief 审计日志输出函数（格式化）
+ *
+ * @param fmt 格式化字符串
+ * @param ... 变参
+ *
+ * @return 0 表示成功，负值表示失败
+ *
+ * @note 通过内核调试接口输出
+ */
+int musl_audit_log_printf(const char *fmt, ...)
+{
+    va_list args;
+    int len;
+    long ret;
+
+    /* 检查参数 */
+    if (fmt == NULL)
+    {
+        return -EINVAL;
+    }
+
+    /* 格式化字符串到缓冲区 */
+    va_start(args, fmt);
+    len = vsnprintf(s_audit_log_buffer, AUDIT_LOG_BUFFER_SIZE, fmt, args);
+    va_end(args);
+
+    /* 检查格式化是否成功 */
+    if (len < 0)
+    {
+        return -EINVAL;
+    }
+
+    /* 截断超长的日志 */
+    if (len >= (int)AUDIT_LOG_BUFFER_SIZE)
+    {
+        len = (int)AUDIT_LOG_BUFFER_SIZE - 1;
+    }
+
+    /* 通过内核调试接口输出 */
+    ret = aisafe_svc2(AISAFE_SYS_DEBUG_PRINT, (long)s_audit_log_buffer, (long)len);
+
+    if (ret < 0)
+    {
+        return (int)ret;
+    }
+
+    return 0;
+}
+
+/* ========================================================================
  * 审计日志实现
  * ======================================================================== */
 
@@ -179,15 +258,9 @@ int musl_audit_log_syscall(int syscall_nr, long ret, uintptr_t arg1, uintptr_t a
         return -EAGAIN;
     }
 
-    /* TODO: 实际的审计日志记录 */
-    /* 当前实现：输出到内核调试接口 */
-    /* 将来：写入审计日志文件或发送到审计服务 */
-
-    /* 示例：记录 syscall 信息 */
-    /*
-     * musl_audit_printf("AUDIT: syscall=%d ret=%ld arg1=0x%lx arg2=0x%lx arg3=0x%lx\n",
-     *                  syscall_nr, ret, arg1, arg2, arg3);
-     */
+    /* 记录 syscall 信息 */
+    (void)musl_audit_log_printf("AUDIT: syscall=%d ret=%ld arg1=0x%lx arg2=0x%lx arg3=0x%lx\n",
+                                syscall_nr, ret, arg1, arg2, arg3);
 
     s_audit_log_count++;
 
@@ -222,15 +295,9 @@ int musl_audit_log_event(int event_type, int severity, const char *msg)
         return -EAGAIN;
     }
 
-    /* TODO: 实际的审计日志记录 */
-    /* 当前实现：输出到内核调试接口 */
-    /* 将来：写入审计日志文件或发送到审计服务 */
-
-    /* 示例：记录安全事件 */
-    /*
-     * musl_audit_printf("AUDIT: event=%d severity=%d msg=%s\n",
-     *                  event_type, severity, msg);
-     */
+    /* 记录安全事件 */
+    (void)musl_audit_log_printf("AUDIT: event=%d severity=%d msg=%s\n",
+                                event_type, severity, msg);
 
     s_audit_log_count++;
 
