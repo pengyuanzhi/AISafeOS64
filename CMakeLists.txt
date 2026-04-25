@@ -140,70 +140,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     endforeach()
 
     # ==============================================================================
-    # musl libc 旧版测试（使用 lib/musl_legacy/，保留向后兼容）
+    # musl libc 旧版测试（已删除 - 用户态服务已 100% 迁移到标准 musl）
     # ==============================================================================
+    # 注释：旧版测试 (test_musl_string/stdio/stdlib) 已删除
+    # 理由：用户态服务已全部迁移到 musl_aisafe (标准 musl + 适配层)
+    # 参考：docs/MUSL_MIGRATION_STATUS.md
 
-    # 旧版 musl 头文件目录（已废弃，迁移到标准 musl 后删除）
-    set(MUSL_LEGACY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/lib/musl_legacy/include)
-
-    # 旧版 musl 源文件
-    set(MUSL_LEGACY_STRING_SOURCES
-        lib/musl_legacy/src/string/memcpy.c
-        lib/musl_legacy/src/string/memset.c
-        lib/musl_legacy/src/string/memmove.c
-        lib/musl_legacy/src/string/memcmp.c
-        lib/musl_legacy/src/string/memchr.c
-        lib/musl_legacy/src/string/strlen.c
-        lib/musl_legacy/src/string/strcmp.c
-        lib/musl_legacy/src/string/strncmp.c
-        lib/musl_legacy/src/string/strcpy.c
-        lib/musl_legacy/src/string/strncpy.c
-        lib/musl_legacy/src/string/strcat.c
-        lib/musl_legacy/src/string/strncat.c
-        lib/musl_legacy/src/string/strchr.c
-        lib/musl_legacy/src/string/strrchr.c
-        lib/musl_legacy/src/string/strstr.c
-    )
-
-    set(MUSL_LEGACY_STDIO_SOURCES
-        lib/musl_legacy/src/stdio/vsnprintf.c
-        lib/musl_legacy/src/stdio/sprintf.c
-        lib/musl_legacy/src/stdio/snprintf.c
-    )
-
-    set(MUSL_LEGACY_STDLIB_SOURCES
-        lib/musl_legacy/src/stdlib/atoi.c
-        lib/musl_legacy/src/stdlib/strtol.c
-        lib/musl_legacy/src/stdlib/strtoul.c
-        lib/musl_legacy/src/stdlib/malloc.c
-        lib/musl_legacy/src/stdlib/calloc.c
-        lib/musl_legacy/src/stdlib/realloc.c
-        lib/musl_legacy/src/stdlib/exit.c
-        lib/musl_legacy/src/stdlib/abort.c
-        lib/musl_legacy/src/stdlib/atexit.c
-    )
-
-    set(MUSL_LEGACY_ERRNO_SOURCES
-        lib/musl_legacy/src/errno/errno.c
-    )
-
-    # test_musl_string（旧版）
-    add_executable(test_musl_string tests/test_musl_string.c ${MUSL_LEGACY_STRING_SOURCES} ${MUSL_LEGACY_ERRNO_SOURCES})
-    target_include_directories(test_musl_string PRIVATE ${MUSL_LEGACY_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
-    target_compile_options(test_musl_string PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
-    add_test(NAME test_musl_string COMMAND test_musl_string)
-
-    # test_musl_stdio（旧版）
-    add_executable(test_musl_stdio tests/test_musl_stdio.c ${MUSL_LEGACY_STRING_SOURCES} ${MUSL_LEGACY_STDIO_SOURCES} ${MUSL_LEGACY_ERRNO_SOURCES})
-    target_include_directories(test_musl_stdio PRIVATE ${MUSL_LEGACY_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
-    target_compile_options(test_musl_stdio PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-error)
-    add_test(NAME test_musl_stdio COMMAND test_musl_stdio)
-
-    # test_musl_stdlib（旧版）
-    add_executable(test_musl_stdlib tests/test_musl_stdlib.c ${MUSL_LEGACY_STRING_SOURCES} ${MUSL_LEGACY_STDLIB_SOURCES} ${MUSL_LEGACY_ERRNO_SOURCES})
-    target_include_directories(test_musl_stdlib PRIVATE ${MUSL_LEGACY_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
-    target_compile_options(test_musl_stdlib PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
-    add_test(NAME test_musl_stdlib COMMAND test_musl_stdlib)
 
     # test_musl_safety — musl 功能安全包装测试
     add_executable(test_musl_safety tests/test_musl_safety.c lib/musl_aisafe/src/musl_safety.c)
@@ -213,7 +155,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     # test_syscall_dispatch — musl 系统调用分发器测试
     add_executable(test_syscall_dispatch tests/test_syscall_dispatch.c lib/musl_aisafe/src/syscall_dispatch.c lib/musl_aisafe/src/musl_safety.c)
-    target_include_directories(test_syscall_dispatch PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/arch/aarch64_aisafe ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${CMAKE_SOURCE_DIR}/lib/musl_legacy/include ${TEST_INCLUDE_DIRS})
+    target_include_directories(test_syscall_dispatch PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/arch/aarch64_aisafe ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${TEST_INCLUDE_DIRS})
     target_compile_options(test_syscall_dispatch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_syscall_dispatch COMMAND test_syscall_dispatch)
 
