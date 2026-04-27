@@ -116,12 +116,13 @@ foreach(mod ${MUSL_MODULES})
     list(APPEND _ARCH_SRCS ${_mod_arch})
 endforeach()
 
-# malloc 模块（使用 lite_malloc，不用 mallocng）
+# malloc 模块（使用确定性内存分配器 det_malloc 替换 lite_malloc）
+# 注：det_malloc 提供确定性分配行为，满足 ISO 26262 ASIL-D 要求
+# lite_malloc 通过 brk/mmap 系统调用分配，行为不确定
 file(GLOB _MALLOC_SRCS
     ${MUSL_UPSTREAM}/src/malloc/calloc.c
     ${MUSL_UPSTREAM}/src/malloc/free.c
     ${MUSL_UPSTREAM}/src/malloc/libc_calloc.c
-    ${MUSL_UPSTREAM}/src/malloc/lite_malloc.c
     ${MUSL_UPSTREAM}/src/malloc/memalign.c
     ${MUSL_UPSTREAM}/src/malloc/posix_memalign.c
     ${MUSL_UPSTREAM}/src/malloc/realloc.c
@@ -134,8 +135,10 @@ file(GLOB _LDSO_ARCH ${MUSL_UPSTREAM}/src/ldso/aarch64/*.s)
 
 # AISafeOS64 适配层
 set(_AISAFE_SRCS
+    ${MUSL_ASAFE}/src/det_malloc.c         # 确定性内存分配器（替换 lite_malloc）
     ${MUSL_ASAFE}/src/syscall_dispatch.c
     ${MUSL_ASAFE}/src/musl_safety.c
+    ${MUSL_ASAFE}/src/misra_wrapper.c  # MISRA C:2012 合规包装
     ${MUSL_ASAFE}/src/boot_simple.c
     ${MUSL_ASAFE}/src/softfloat.c  # 软浮点运算实现
     ${MUSL_ASAFE}/src/fs_ipc.c       # 文件系统 IPC 客户端

@@ -164,6 +164,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_musl_posix PRIVATE ${MUSL_LEGACY_INCLUDE_DIR} ${TEST_INCLUDE_DIRS})
     target_compile_options(test_musl_posix PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_musl_posix COMMAND test_musl_posix)
+
+    # test_musl_det_malloc — 确定性内存分配器测试
+    add_executable(test_musl_det_malloc tests/test_musl_det_malloc.c lib/musl_aisafe/src/det_malloc.c)
+    target_include_directories(test_musl_det_malloc PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_musl_det_malloc PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_musl_det_malloc COMMAND test_musl_det_malloc)
+
+    # test_misra_wrapper — MISRA C:2012 合规包装测试
+    add_executable(test_misra_wrapper tests/test_misra_wrapper.c lib/musl_aisafe/src/misra_wrapper.c)
+    target_include_directories(test_misra_wrapper PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_misra_wrapper PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_misra_wrapper COMMAND test_misra_wrapper)
 endif()
 
 # ==============================================================================
