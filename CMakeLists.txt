@@ -176,6 +176,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_misra_wrapper PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${TEST_INCLUDE_DIRS})
     target_compile_options(test_misra_wrapper PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_misra_wrapper COMMAND test_misra_wrapper)
+
+    # test_userland_services — 用户态服务集成测试框架
+    add_executable(test_userland_services tests/test_userland_services.c)
+    target_include_directories(test_userland_services PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_userland_services PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_userland_services COMMAND test_userland_services)
 endif()
 
 # ==============================================================================
