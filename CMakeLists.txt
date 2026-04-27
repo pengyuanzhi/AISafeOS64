@@ -188,6 +188,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_userland_services_ipc PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_userland_services_ipc PRIVATE -std=c11 -Wall -Wextra -Wno-unused-parameter -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_userland_services_ipc COMMAND test_userland_services_ipc)
+
+    # test_userland_services_extended — 用户态服务测试扩展（Phase 3）
+    add_executable(test_userland_services_extended tests/test_userland_services_extended.c tests/ipc_stubs.c)
+    target_include_directories(test_userland_services_extended PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_userland_services_extended PRIVATE -std=c11 -Wall -Wextra -Wno-unused-variable -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_userland_services_extended COMMAND test_userland_services_extended)
 endif()
 
 # ==============================================================================
