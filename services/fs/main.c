@@ -17,6 +17,7 @@
  */
 
 #include "fs_ops.h"
+#include "fs_server_ipc.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -69,10 +70,8 @@ int main(void)
         return -1;
     }
 
-    for (;;)
-    {
-        /* TODO: 通过 IPC 接收并处理 FS 请求 */
-    }
+    /* 启动 FS 服务器 IPC 处理 */
+    fs_server_main();
 
     return 0;
 }

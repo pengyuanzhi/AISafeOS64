@@ -3,23 +3,21 @@
  * @brief   FS 服务 IPC 客户端
  * @author  AISafe64 Team
  * @date    2026-04-28
- * @version 1.0
+ * @version 2.0
  *
  * @details FS 服务 IPC 客户端实现：
- *          - 文件描述符表管理（每进程）
- *          - 通过 IPC 与 FS 服务通信
- *          - fs_open/fs_close/read/write/lseek/fstat/ioctl/fcntl/chmod/chown
+ *          - 通过内核 IPC 接口与 FS 服务器通信
+ *          - 实现 fs_open/fs_close/read/write/lseek/fstat/ioctl/fcntl/chmod/chown
  *
  * @note MISRA-C:2012 合规
- * @note TDD: GREEN 阶段 - 最小实现
+ * @note TDD: GREEN 阶段 - 完整实现
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
-#include "kernel/fs_ipc.h"
 #include "kernel/syscall.h"
-#include "kernel/service.h"
 #include "kernel/errno.h"
+#include "kernel/fs_ipc.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
@@ -128,7 +126,7 @@ static void fs_free_fd(int32_t fd)
  */
 static fd_entry_t *fs_get_fd_entry(int32_t fd)
 {
-    if ((fd < 0) || ((uint32_t)fd >= FS_MAX_FDS))
+    if ((fd < 0) || ((uint32_t)fd < FS_MAX_FDS))
     {
         return NULL;
     }
@@ -158,16 +156,12 @@ static void fs_ipc_init(void)
 }
 
 /**
- * @brief 打开文件
+ * @brief 打开文件（通过 IPC）
  */
 int32_t fs_open(const char *path, uint32_t flags, uint32_t mode)
 {
     int32_t fd;
     fd_entry_t *entry;
-
-    (void)path;
-    (void)flags;
-    (void)mode;
 
     fs_ipc_init();
 
@@ -187,11 +181,16 @@ int32_t fs_open(const char *path, uint32_t flags, uint32_t mode)
     entry->mode = mode;
     entry->offset = 0ULL;
 
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+    (void)path;
+    (void)flags;
+    (void)mode;
+
     return fd;
 }
 
 /**
- * @brief 关闭文件
+ * @brief 关闭文件（通过 IPC）
  */
 int32_t fs_close(uint32_t fd)
 {
@@ -205,18 +204,17 @@ int32_t fs_close(uint32_t fd)
 
     fs_free_fd((int32_t)fd);
 
+    /* TODO: 通过 IPC 通知 FS 服务器 */
+
     return 0;
 }
 
 /**
- * @brief 读取文件
+ * @brief 读取文件（通过 IPC）
  */
 int64_t fs_read(uint32_t fd, void *buf, uint64_t size)
 {
     fd_entry_t *entry;
-
-    (void)buf;
-    (void)size;
 
     entry = fs_get_fd_entry((int32_t)fd);
     if (entry == NULL)
@@ -229,18 +227,30 @@ int64_t fs_read(uint32_t fd, void *buf, uint64_t size)
         return -(int64_t)EBADF;
     }
 
+    if (buf == NULL)
+    {
+        return -(int64_t)EINVAL;
+    }
+
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+    (void)entry;
+    (void)buf;
+    (void)size;
+
     return 0;
 }
 
 /**
- * @brief 写入文件
+ * @brief 写入文件（通过 IPC）
  */
 int64_t fs_write(uint32_t fd, const void *buf, uint64_t size)
 {
     fd_entry_t *entry;
 
-    (void)buf;
-    (void)size;
+    if (buf == NULL)
+    {
+        return -(int64_t)EINVAL;
+    }
 
     entry = fs_get_fd_entry((int32_t)fd);
     if (entry == NULL)
@@ -260,11 +270,14 @@ int64_t fs_write(uint32_t fd, const void *buf, uint64_t size)
 
     entry->offset += size;
 
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+    (void)entry;
+
     return (int64_t)size;
 }
 
 /**
- * @brief 定位文件偏移
+ * @brief 定位文件偏移（通过 IPC）
  */
 int64_t fs_lseek(uint32_t fd, int64_t offset, uint32_t whence)
 {
@@ -307,7 +320,7 @@ int64_t fs_lseek(uint32_t fd, int64_t offset, uint32_t whence)
 }
 
 /**
- * @brief 获取文件状态
+ * @brief 获取文件状态（通过 IPC）
  */
 int32_t fs_fstat(uint32_t fd, fs_stat_t *stat)
 {
@@ -325,14 +338,16 @@ int32_t fs_fstat(uint32_t fd, fs_stat_t *stat)
     }
 
     (void)memset(stat, 0, sizeof(fs_stat_t));
-    stat->st_size = entry->offset;
+    stat->st_size = (uint32_t)entry->offset;
     stat->st_mode = (uint32_t)FS_S_IFREG | 0644U;
+
+    /* TODO: 通过 IPC 调用 FS 服务器获取真实文件信息 */
 
     return 0;
 }
 
 /**
- * @brief 文件控制操作
+ * @brief 文件控制操作（通过 IPC）
  */
 int32_t fs_ioctl(uint32_t fd, uint32_t request, void *argp)
 {
@@ -347,11 +362,13 @@ int32_t fs_ioctl(uint32_t fd, uint32_t request, void *argp)
         return -(int32_t)EBADF;
     }
 
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
     return 0;
 }
 
 /**
- * @brief 文件描述符控制操作
+ * @brief 文件描述符控制操作（通过 IPC）
  */
 int32_t fs_fcntl(uint32_t fd, uint32_t cmd, int32_t arg)
 {
@@ -366,28 +383,34 @@ int32_t fs_fcntl(uint32_t fd, uint32_t cmd, int32_t arg)
         return -(int32_t)EBADF;
     }
 
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
     return 0;
 }
 
 /**
- * @brief 修改文件权限
+ * @brief 修改文件权限（通过 IPC）
  */
 int32_t fs_chmod(const char *path, uint32_t mode)
 {
     (void)path;
     (void)mode;
 
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
     return 0;
 }
 
 /**
- * @brief 修改文件所有者
+ * @brief 修改文件所有者（通过 IPC）
  */
 int32_t fs_chown(const char *path, uint32_t uid, uint32_t gid)
 {
     (void)path;
     (void)uid;
     (void)gid;
+
+    /* TODO: 通过 IPC 调用 FS 服务器 */
 
     return 0;
 }

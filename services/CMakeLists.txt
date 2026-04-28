@@ -250,10 +250,11 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_options.c
             )
         elseif(SERVICE_NAME STREQUAL "fs")
-            # FS 服务：包含 IPC 客户端 + 文件系统抽象层
+            # FS 服务：包含 IPC 客户端 + IPC 服务器端 + 文件系统抽象层
             add_executable(${SERVICE_NAME}.elf
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ipc/fs_ipc.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_server_ipc.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_ops.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs.c
             )
