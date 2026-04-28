@@ -21,6 +21,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
         init
         mem
         proc
+        fs
         net
         drv_virtio_net
     )
@@ -123,6 +124,53 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
     )
     
     # ================================================================
+    # FS IPC 接口测试
+    # ================================================================
+    add_executable(test_fs_ipc.elf
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_fs_ipc.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ipc/fs_ipc.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops/fs_ops.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs/ramfs.c
+    )
+    
+    target_link_libraries(test_fs_ipc.elf musl_aisafe crt0)
+    
+    target_include_directories(test_fs_ipc.elf PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ipc
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs
+    )
+    
+    target_compile_options(test_fs_ipc.elf PRIVATE
+        -std=c11
+        -Wall
+        -Wextra
+        -ffreestanding
+        -fno-builtin
+        -fno-common
+        -fno-stack-protector
+        -nostdlib
+        -nostartfiles
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -O2
+        -fno-asynchronous-unwind-tables
+    )
+    
+    target_link_options(test_fs_ipc.elf PRIVATE
+        -nostdlib
+        -nostartfiles
+        -static
+        -Wl,--gc-sections
+        -Wl,--no-warn-rwx-segments
+        -Wl,--start-group
+        -lgcc
+        -Wl,--end-group
+    )
+    
+    # ================================================================
     # 网络协议栈与上层服务集成测试
     # ================================================================
     add_executable(test_net_integration_services.elf
@@ -201,6 +249,14 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_keepalive.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/tcp_options.c
             )
+        elseif(SERVICE_NAME STREQUAL "fs")
+            # FS 服务：包含 IPC 客户端 + 文件系统抽象层
+            add_executable(${SERVICE_NAME}.elf
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/main.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ipc/fs_ipc.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_ops.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs.c
+            )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层
             add_executable(${SERVICE_NAME}.elf
@@ -222,6 +278,9 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include
             ${CMAKE_CURRENT_SOURCE_DIR}/net/net_if
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ipc
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs
         )
 
         target_compile_options(${SERVICE_NAME}.elf PRIVATE
