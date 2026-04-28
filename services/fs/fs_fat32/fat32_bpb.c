@@ -5,159 +5,187 @@
  * @date    2026-04-28
  * @version 1.0
  *
- * @details FAT32 BPB（BIOS Parameter Block）解析实现
+ * @details FAT32 BPB 解析实现：
+ *          - 从扇区 0 读取引导扇区
+ *          - 验证 BPB 签名和关键字段
+ *          - 计算数据区起始扇区和总簇数
  *
  * @note MISRA-C:2012 合规
- * @note TDD: GREEN 阶段 - 最小实现
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
 #include "fat32_bpb.h"
 #include <string.h>
-#include <stdbool.h>
+#include <stdint.h>
 
 /* ========================================================================
- * FAT32 BPB 解析接口实现
+ * BPB 验证辅助函数
+ * ======================================================================== */
+
+/** @brief 有效的扇区大小值 */
+static const uint16_t s_valid_sector_sizes[] =
+{
+    512U, 1024U, 2048U, 4096U
+};
+
+/** @brief 有效扇区大小数量 */
+#define VALID_SECTOR_SIZES_COUNT  4U
+
+/** @brief 有效的每簇扇区数 */
+static const uint8_t s_valid_sec_per_clust[] =
+{
+    1U, 2U, 4U, 8U, 16U, 32U, 64U, 128U
+};
+
+/** @brief 有效每簇扇区数数量 */
+#define VALID_SEC_PER_CLUST_COUNT  8U
+
+/**
+ * @brief 验证扇区大小是否有效
+ *
+ * @param bytes_per_sec 每扇区字节数
+ *
+ * @return true 有效，false 无效
+ */
+static bool is_valid_sector_size(uint16_t bytes_per_sec)
+{
+    uint32_t i;
+    bool valid = false;
+
+    for (i = 0U; i < VALID_SECTOR_SIZES_COUNT; i++)
+    {
+        if (bytes_per_sec == s_valid_sector_sizes[i])
+        {
+            valid = true;
+            break;
+        }
+    }
+
+    return valid;
+}
+
+/**
+ * @brief 验证每簇扇区数是否有效
+ *
+ * @param sec_per_clust 每簇扇区数
+ *
+ * @return true 有效，false 无效
+ */
+static bool is_valid_sec_per_clust(uint8_t sec_per_clust)
+{
+    uint32_t i;
+    bool valid = false;
+
+    for (i = 0U; i < VALID_SEC_PER_CLUST_COUNT; i++)
+    {
+        if (sec_per_clust == s_valid_sec_per_clust[i])
+        {
+            valid = true;
+            break;
+        }
+    }
+
+    return valid;
+}
+
+/* ========================================================================
+ * BPB 解析实现
  * ======================================================================== */
 
 /**
  * @brief 解析 FAT32 BPB
  */
-int32_t fat32_parse_bpb(const uint8_t *bpb, fat32_volume_info_t *volume_info)
+int32_t fat32_bpb_parse(fat32_context_t *ctx)
 {
-    const fat32_bpb_t *fat_bpb;
-    const fat32_ebpb_t *fat_ebpb;
+    fat32_bpb_t *bpb;
+    int32_t ret;
+    uint32_t data_sectors;
 
-    if (bpb == NULL)
+    /* 参数验证 */
+    if (ctx == NULL)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (volume_info == NULL)
+    if (ctx->block_read == NULL)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    fat_bpb = (const fat32_bpb_t *)bpb;
-    fat_ebpb = (const fat32_ebpb_t *)(bpb + 90U);
-
-    /* 提取 BPB 参数 */
-    volume_info->bytes_per_sec = fat_bpb->bytes_per_sec;
-    volume_info->sec_per_clust = fat_bpb->sec_per_clust;
-    volume_info->bytes_per_clust = (uint32_t)fat_bpb->bytes_per_sec *
-                               (uint32_t)fat_bpb->sec_per_clust;
-    volume_info->res_sec = fat_bpb->res_sec;
-    volume_info->fat_copies = fat_bpb->fat_copies;
-    volume_info->bytes_per_fat = fat_ebpb->bytes_per_fat;
-    volume_info->root_cluster = fat_ebpb->root_cluster;
-
-    /* 计算 FAT 表起始扇区号 */
-    volume_info->fat_start_sec = (uint32_t)fat_bpb->res_sec + 1U;
-
-    /* 计算数据区起始扇区号 */
+    /* 读取引导扇区（扇区 0）到缓冲区 */
+    ret = ctx->block_read(0ULL, ctx->sector_buf, 1U);
+    if (ret != 0)
     {
-        uint32_t fat_sec = (volume_info->bytes_per_fat + (FAT32_BYTES_PER_SEC - 1U)) /
-                         FAT32_BYTES_PER_SEC;
-        volume_info->data_start_sec = volume_info->fat_start_sec +
-                                    ((uint32_t)fat_bpb->fat_copies * fat_sec);
+        return -5; /* -EIO */
     }
 
-    /* 计算总簇数 */
+    /* 检查引导扇区签名（偏移 510-511） */
+    if ((ctx->sector_buf[510] != 0x55U) ||
+        (ctx->sector_buf[511] != 0xAAU))
     {
-        /* 简化实现：假设总扇区数为 65536 */
-        uint32_t tot_sec = 65536U;
-        uint32_t data_sec = tot_sec - volume_info->data_start_sec;
-        volume_info->tot_clusters = data_sec / (uint32_t)fat_bpb->sec_per_clust;
+        return -22; /* -EINVAL: 无效签名 */
     }
 
-    volume_info->valid = true;
+    /* 强制转换为 BPB 结构 */
+    bpb = (fat32_bpb_t *)ctx->sector_buf;
+
+    /* 验证关键字段 */
+    if (!is_valid_sector_size(bpb->bytes_per_sec))
+    {
+        return -22; /* -EINVAL */
+    }
+
+    if (!is_valid_sec_per_clust(bpb->sec_per_clust))
+    {
+        return -22; /* -EINVAL */
+    }
+
+    if (bpb->fat_sz32 == 0U)
+    {
+        return -22; /* -EINVAL */
+    }
+
+    if (bpb->root_cluster < 2U)
+    {
+        return -22; /* -EINVAL */
+    }
+
+    /* 计算并填充上下文参数 */
+    ctx->bytes_per_sec  = (uint32_t)bpb->bytes_per_sec;
+    ctx->sec_per_clust  = (uint32_t)bpb->sec_per_clust;
+    ctx->cluster_size   = ctx->bytes_per_sec * ctx->sec_per_clust;
+    ctx->rsvd_sec_cnt   = (uint32_t)bpb->rsvd_sec_cnt;
+    ctx->num_fats       = (uint32_t)bpb->num_fats;
+    ctx->fat_sz32       = bpb->fat_sz32;
+    ctx->root_cluster   = bpb->root_cluster;
+
+    /* 总扇区数：优先使用 32 位值 */
+    if (bpb->total_sec32 != 0U)
+    {
+        ctx->total_sectors = bpb->total_sec32;
+    }
+    else
+    {
+        ctx->total_sectors = (uint32_t)bpb->total_sec16;
+    }
+
+    /* 数据区起始扇区 = 保留扇区 + FAT表数 * FAT表大小 */
+    ctx->data_sec_start = ctx->rsvd_sec_cnt +
+                          (ctx->num_fats * ctx->fat_sz32);
+
+    /* 总簇数 = (总扇区数 - 数据区起始) / 每簇扇区数 */
+    if (ctx->total_sectors > ctx->data_sec_start)
+    {
+        data_sectors = ctx->total_sectors - ctx->data_sec_start;
+        ctx->total_clusters = data_sectors / ctx->sec_per_clust;
+    }
+    else
+    {
+        ctx->total_clusters = 0U;
+    }
+
+    ctx->mounted = true;
 
     return 0;
-}
-
-/**
- * @brief 验证 FAT32 BPB
- */
-bool fat32_validate_bpb(const uint8_t *bpb)
-{
-    const fat32_bpb_t *fat_bpb;
-
-    if (bpb == NULL)
-    {
-        return false;
-    }
-
-    fat_bpb = (const fat32_bpb_t *)bpb;
-
-    /* 检查扇区大小 */
-    if (fat_bpb->bytes_per_sec != FAT32_BYTES_PER_SEC)
-    {
-        return false;
-    }
-
-    /* 检查每簇扇区数 */
-    if (fat_bpb->sec_per_clust == 0U)
-    {
-        return false;
-    }
-
-    if (fat_bpb->sec_per_clust > 128U)
-    {
-        return false;
-    }
-
-    /* 检查 FAT 表副本数 */
-    if (fat_bpb->fat_copies == 0U)
-    {
-        return false;
-    }
-
-    if (fat_bpb->fat_copies > 2U)
-    {
-        return false;
-    }
-
-    /* 检查文件系统类型 */
-    if ((fat_bpb->fs_type[0] != 'F') ||
-        (fat_bpb->fs_type[1] != 'A') ||
-        (fat_bpb->fs_type[2] != 'T') ||
-        (fat_bpb->fs_type[3] != '3') ||
-        (fat_bpb->fs_type[4] != '2') ||
-        (fat_bpb->fs_type[7] != ' '))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-/**
- * @brief 计算簇的扇区号
- */
-uint32_t fat32_cluster_to_sec(const fat32_volume_info_t *volume_info,
-                               uint32_t cluster)
-{
-    uint32_t cluster_offset;
-
-    if (volume_info == NULL)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    if (cluster < FAT32_MIN_CLUSTER)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    if (cluster > FAT32_MAX_CLUSTER)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    /* 计算簇在数据区的偏移（扇区数） */
-    cluster_offset = (cluster - FAT32_MIN_CLUSTER) * volume_info->sec_per_clust;
-
-    /* 计算实际的扇区号 */
-    return volume_info->data_start_sec + cluster_offset;
 }

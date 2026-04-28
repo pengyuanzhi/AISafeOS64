@@ -1,258 +1,262 @@
 /**
  * @file    fat32_fat.c
- * @brief   FAT32 FAT 表和簇管理实现
+ * @brief   FAT32 FAT 表操作实现
  * @author  AISafe64 Team
  * @date    2026-04-28
  * @version 1.0
  *
- * @details FAT32 FAT 表解析和簇管理实现（简化版）
+ * @details FAT32 FAT 表操作实现：
+ *          - FAT 表项读取和写入（支持主表和副本）
+ *          - 空闲簇线性扫描分配
+ *          - 簇释放标记为 FREE
+ *          - 簇链追踪直到 EOC
  *
  * @note MISRA-C:2012 合规
- * @note TDD: GREEN 阶段 - 最小实现
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
 #include "fat32_fat.h"
 #include <string.h>
-#include <stdbool.h>
+#include <stdint.h>
 
 /* ========================================================================
- * FAT 表上下文（简化版）
- * ======================================================================== */
-
-/** @brief FAT 表缓存（简化版：仅用于测试） */
-static uint32_t s_fat_cache[1024U];
-
-/** @brief FAT 表初始化标志 */
-static bool s_fat_initialized = false;
-
-/* ========================================================================
- * FAT 表初始化
- * ======================================================================== */
-
-/**
- * @brief 初始化 FAT 表上下文
- */
-int32_t fat32_fat_init(fat32_fat_context_t *context,
-                       const fat32_volume_info_t *volume_info)
-{
-    if (context == NULL)
-    {
-        return -1;
-    }
-
-    if (volume_info == NULL)
-    {
-        return -1;
-    }
-
-    /* 初始化上下文 */
-    context->volume_info = volume_info;
-    context->free_clusters = volume_info->tot_clusters;
-    context->next_free = FAT32_MIN_CLUSTER;
-    context->initialized = true;
-
-    /* 初始化 FAT 表缓存（简化版） */
-    if (!s_fat_initialized)
-    {
-        uint32_t i;
-
-        for (i = 0U; i < 1024U; i++)
-        {
-            s_fat_cache[i] = FAT32_FREE_CLUSTER;
-        }
-
-        s_fat_initialized = true;
-    }
-
-    return 0;
-}
-
-/* ========================================================================
- * FAT 表项读写
+ * FAT 表操作实现
  * ======================================================================== */
 
 /**
  * @brief 读取 FAT 表项
  */
-uint32_t fat32_read_fat_entry(const fat32_fat_context_t *context,
-                                uint32_t cluster)
+int32_t fat32_fat_read_entry(fat32_context_t *ctx, uint32_t cluster,
+                              uint32_t *value)
 {
-    if (context == NULL)
+    uint32_t sec_num;
+    uint32_t offset;
+    uint32_t entries_per_sec;
+    int32_t ret;
+
+    if ((ctx == NULL) || (value == NULL))
     {
-        return 0xFFFFFFFFU;
+        return -22; /* -EINVAL */
     }
 
-    if (!context->initialized)
+    if (!ctx->mounted)
     {
-        return 0xFFFFFFFFU;
+        return -22; /* -EINVAL */
     }
 
-    if (cluster < FAT32_MIN_CLUSTER)
+    if (cluster > (ctx->total_clusters + 1U))
     {
-        return 0xFFFFFFFFU;
+        return -22; /* -EINVAL */
     }
 
-    if (cluster > FAT32_MAX_CLUSTER)
+    /* 每个 FAT 表项 4 字节 */
+    entries_per_sec = ctx->bytes_per_sec / 4U;
+    sec_num = ctx->rsvd_sec_cnt + (cluster / entries_per_sec);
+    offset  = (cluster % entries_per_sec) * 4U;
+
+    /* 读取 FAT 扇区 */
+    ret = ctx->block_read((uint64_t)sec_num, ctx->sector_buf, 1U);
+    if (ret != 0)
     {
-        return 0xFFFFFFFFU;
+        return -5; /* -EIO */
     }
 
-    /* TODO: 从实际设备读取 FAT 表项 */
-    /* 简化实现：从缓存读取 */
-    if (cluster < 1024U)
+    /* 提取 32 位 FAT 表项（掩码保留低 28 位） */
     {
-        return s_fat_cache[cluster];
+        uint32_t raw_val;
+        (void)memcpy(&raw_val, &ctx->sector_buf[offset], sizeof(uint32_t));
+        *value = raw_val & 0x0FFFFFFFU;
     }
 
-    return FAT32_EOC_CLUSTER;
+    return 0;
 }
 
 /**
  * @brief 写入 FAT 表项
  */
-int32_t fat32_write_fat_entry(const fat32_fat_context_t *context,
-                                uint32_t cluster,
-                                uint32_t value)
+int32_t fat32_fat_write_entry(fat32_context_t *ctx, uint32_t cluster,
+                               uint32_t value)
 {
-    if (context == NULL)
+    uint32_t sec_num;
+    uint32_t offset;
+    uint32_t entries_per_sec;
+    uint32_t fat_idx;
+    int32_t ret;
+
+    if (ctx == NULL)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (!context->initialized)
+    if (!ctx->mounted)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (cluster < FAT32_MIN_CLUSTER)
+    if (cluster > (ctx->total_clusters + 1U))
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (cluster > FAT32_MAX_CLUSTER)
+    /* 掩码保留低 28 位 */
+    value &= 0x0FFFFFFFU;
+
+    /* 计算 FAT 表项位置 */
+    entries_per_sec = ctx->bytes_per_sec / 4U;
+    sec_num = ctx->rsvd_sec_cnt + (cluster / entries_per_sec);
+    offset  = (cluster % entries_per_sec) * 4U;
+
+    /* 更新所有 FAT 副本 */
+    for (fat_idx = 0U; fat_idx < ctx->num_fats; fat_idx++)
     {
-        return -1;
-    }
+        uint32_t target_sec = sec_num + (fat_idx * ctx->fat_sz32);
 
-    /* TODO: 写入实际设备的 FAT 表项 */
-    /* 简化实现：写入缓存 */
-    if (cluster < 1024U)
-    {
-        s_fat_cache[cluster] = value;
-        return 0;
-    }
-
-    return -1;
-}
-
-/* ========================================================================
- * 簇状态检查
- * ======================================================================== */
-
-/**
- * @brief 检查簇是否是链的末尾
- */
-bool fat32_is_eoc(uint32_t cluster)
-{
-    /* FAT32 EOC 值范围：0x0FFFFFF8 - 0x0FFFFFFF */
-    return (cluster >= 0x0FFFFFF8U) && (cluster <= 0x0FFFFFFFU);
-}
-
-/**
- * @brief 检查簇是否损坏
- */
-bool fat32_is_bad(uint32_t cluster)
-{
-    return (cluster == FAT32_BAD_CLUSTER);
-}
-
-/* ========================================================================
- * 簇分配和释放
- * ======================================================================== */
-
-/**
- * @brief 分配一个自由簇
- */
-uint32_t fat32_alloc_cluster(fat32_fat_context_t *context)
-{
-    uint32_t cluster;
-
-    if (context == NULL)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    if (!context->initialized)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    if (context->free_clusters == 0U)
-    {
-        return 0xFFFFFFFFU;
-    }
-
-    /* 从 next_free 开始查找自由簇 */
-    cluster = context->next_free;
-
-    while (cluster <= context->volume_info->tot_clusters)
-    {
-        uint32_t fat_entry;
-
-        fat_entry = fat32_read_fat_entry(context, cluster);
-
-        if (fat_entry == FAT32_FREE_CLUSTER)
+        /* 读取当前扇区 */
+        ret = ctx->block_read((uint64_t)target_sec, ctx->sector_buf, 1U);
+        if (ret != 0)
         {
-            /* 找到自由簇 */
-            if (fat32_write_fat_entry(context, cluster, FAT32_EOC_CLUSTER) == 0)
-            {
-                context->free_clusters--;
-                context->next_free = cluster + 1U;
-                return cluster;
-            }
+            return -5; /* -EIO */
         }
 
-        cluster++;
+        /* 修改 FAT 表项（保留高 4 位） */
+        {
+            uint32_t old_val;
+            (void)memcpy(&old_val, &ctx->sector_buf[offset], sizeof(uint32_t));
+            old_val = (old_val & 0xF0000000U) | value;
+            (void)memcpy(&ctx->sector_buf[offset], &old_val, sizeof(uint32_t));
+        }
+
+        /* 写回扇区 */
+        ret = ctx->block_write((uint64_t)target_sec, ctx->sector_buf, 1U);
+        if (ret != 0)
+        {
+            return -5; /* -EIO */
+        }
     }
 
-    /* 磁盘已满 */
-    return 0xFFFFFFFFU;
+    return 0;
 }
 
 /**
- * @brief 释放簇
+ * @brief 分配一个空闲簇
  */
-int32_t fat32_free_cluster(fat32_fat_context_t *context,
-                           uint32_t cluster)
+int32_t fat32_alloc_cluster(fat32_context_t *ctx, uint32_t *cluster)
 {
-    if (context == NULL)
+    uint32_t i;
+    uint32_t value;
+    int32_t ret;
+
+    if ((ctx == NULL) || (cluster == NULL))
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (!context->initialized)
+    /* 从簇 2 开始线性扫描 */
+    for (i = 2U; i <= (ctx->total_clusters + 1U); i++)
     {
-        return -1;
+        ret = fat32_fat_read_entry(ctx, i, &value);
+        if (ret != 0)
+        {
+            return ret;
+        }
+
+        if (fat32_is_free(value))
+        {
+            /* 标记为 EOC */
+            ret = fat32_fat_write_entry(ctx, i, FAT32_CLUSTER_EOC);
+            if (ret != 0)
+            {
+                return ret;
+            }
+
+            *cluster = i;
+            return 0;
+        }
     }
 
-    if (cluster < FAT32_MIN_CLUSTER)
+    return -12; /* -ENOMEM */
+}
+
+/**
+ * @brief 释放一个簇
+ */
+int32_t fat32_free_cluster(fat32_context_t *ctx, uint32_t cluster)
+{
+    if (ctx == NULL)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    if (cluster > FAT32_MAX_CLUSTER)
+    if (cluster < 2U)
     {
-        return -1;
+        return -22; /* -EINVAL */
     }
 
-    /* 释放簇：写入 FREE 标记 */
-    if (fat32_write_fat_entry(context, cluster, FAT32_FREE_CLUSTER) == 0)
+    return fat32_fat_write_entry(ctx, cluster, FAT32_CLUSTER_FREE);
+}
+
+/**
+ * @brief 获取簇链
+ */
+int32_t fat32_get_cluster_chain(fat32_context_t *ctx, uint32_t start,
+                                 uint32_t *chain, uint32_t max_len,
+                                 uint32_t *out_len)
+{
+    uint32_t current;
+    uint32_t value;
+    uint32_t count;
+    int32_t ret;
+
+    if ((ctx == NULL) || (chain == NULL) || (out_len == NULL))
     {
-        context->free_clusters++;
-        return 0;
+        return -22; /* -EINVAL */
     }
 
-    return -1;
+    if (max_len == 0U)
+    {
+        return -22; /* -EINVAL */
+    }
+
+    *out_len = 0U;
+    count = 0U;
+    current = start;
+
+    for (;;)
+    {
+        if (current < 2U)
+        {
+            return -22; /* -EINVAL */
+        }
+
+        if (count >= max_len)
+        {
+            *out_len = count;
+            return 0;
+        }
+
+        chain[count] = current;
+        count++;
+
+        ret = fat32_fat_read_entry(ctx, current, &value);
+        if (ret != 0)
+        {
+            return ret;
+        }
+
+        if (fat32_is_eoc(value))
+        {
+            break;
+        }
+
+        if (fat32_is_bad(value))
+        {
+            return -5; /* -EIO */
+        }
+
+        current = value;
+    }
+
+    *out_len = count;
+    return 0;
 }
