@@ -38,7 +38,7 @@ typedef struct
 {
     char                name[NET_IF_AUTO_NAME_LEN];     /**< @brief 接口名称 */
     char                driver[NET_IF_AUTO_NAME_LEN];    /**< @brief 驱动名称 */
-    net_if_ops_auto_t    ops;                             /**< @brief 操作接口 */
+    net_if_ops_auto_t    ops_copy;                         /**< @brief 操作接口副本 */
     uint8_t             mac_addr[6];                      /**< @brief MAC 地址 */
     bool                in_use;                           /**< @brief 使用标记 */
 } net_if_auto_entry_t;
@@ -126,7 +126,7 @@ int32_t net_if_auto_register(const char *name, const char *driver,
     iface->name[NET_IF_AUTO_NAME_LEN - 1U] = '\0';
     (void)strncpy(iface->driver, driver, NET_IF_AUTO_NAME_LEN - 1U);
     iface->driver[NET_IF_AUTO_NAME_LEN - 1U] = '\0';
-    iface->ops = *ops;  /* 复制操作接口 */
+    iface->ops_copy = *ops;  /* 复制操作接口 */
     
     /* 复制 MAC 地址 */
     if (mac_addr != NULL)
@@ -211,7 +211,7 @@ const net_if_ops_auto_t *net_if_auto_get_ops(const char *name)
     idx = find_interface(name);
     if (idx >= 0)
     {
-        return &s_net_if_auto_table[idx].ops;
+        return &s_net_if_auto_table[idx].ops_copy;
     }
 
     return NULL;

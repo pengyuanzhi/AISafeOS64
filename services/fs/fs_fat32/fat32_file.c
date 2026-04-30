@@ -93,9 +93,23 @@ int32_t fat32_open(fat32_instance_t *inst, const char *path)
         return -22; /* -EINVAL */
     }
 
-    /* 在根目录查找文件 */
-    ret = fat32_lookup_file(&inst->context, inst->context.root_cluster,
-                            path, &entry);
+    /* 跳过路径前导 '/' */
+    {
+        const char *filename = path;
+        while (*filename == '/')
+        {
+            filename++;
+        }
+
+        if (*filename == '\0')
+        {
+            return -22; /* -EINVAL: 空文件名 */
+        }
+
+        /* 在根目录查找文件 */
+        ret = fat32_lookup_file(&inst->context, inst->context.root_cluster,
+                                filename, &entry);
+    }
     if (ret != 0)
     {
         return ret;
@@ -120,12 +134,80 @@ int32_t fat32_open(fat32_instance_t *inst, const char *path)
 
 /**
  * @brief 关闭文件
+ *
+ * @details 关闭文件时将更新后的文件大小写回目录项
  */
 int32_t fat32_close(fat32_instance_t *inst, uint32_t fd)
 {
+    fat32_file_handle_t *fh;
+
     if (inst == NULL)
     {
         return -22; /* -EINVAL */
+    }
+
+    if (fd >= FAT32_MAX_OPEN_FILES)
+    {
+        return -9; /* -EBADF */
+    }
+
+    fh = &inst->files[fd];
+    if (!fh->in_use)
+    {
+        return -9; /* -EBADF */
+    }
+
+    /* 将文件大小更新到目录项 */
+    if (fh->first_cluster >= 2U)
+    {
+        uint32_t root_sec = inst->context.data_sec_start;
+        uint32_t sec_idx;
+        uint32_t entry_idx;
+        bool found = false;
+
+        /* 遍历根目录查找匹配的目录项 */
+        for (sec_idx = 0U; sec_idx < inst->context.sec_per_clust; sec_idx++)
+        {
+            int32_t ret;
+            ret = inst->context.block_read(
+                (uint64_t)(root_sec + sec_idx),
+                inst->context.sector_buf, 1U);
+            if (ret != 0)
+            {
+                break;
+            }
+
+            for (entry_idx = 0U;
+                 entry_idx < FAT32_DIR_ENTRIES_PER_SEC;
+                 entry_idx++)
+            {
+                fat32_dir_entry_t *dir_entry;
+                dir_entry = (fat32_dir_entry_t *)&inst->context.sector_buf[
+                    entry_idx * FAT32_DIR_ENTRY_SIZE];
+
+                if (fat32_dir_entry_is_empty(dir_entry))
+                {
+                    break;
+                }
+
+                if (fat32_dir_entry_cluster(dir_entry) == fh->first_cluster)
+                {
+                    /* 找到匹配的目录项，更新文件大小 */
+                    dir_entry->file_size = fh->file_size;
+
+                    ret = inst->context.block_write(
+                        (uint64_t)(root_sec + sec_idx),
+                        inst->context.sector_buf, 1U);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                break;
+            }
+        }
     }
 
     return free_file_handle(inst, fd);

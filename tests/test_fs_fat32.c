@@ -884,13 +884,16 @@ void test_fat32_file_read_multi_cluster(void)
     fat32_instance_t inst;
     int32_t fd;
     int64_t bytes_read;
-    char buf[1024];
+    char buf[2048];
     int32_t ret;
     uint32_t i;
 
     mock_disk_init();
 
-    /* 构建多簇链: 3 -> 4 -> 5 -> EOC */
+    /* 创建目录项，文件大小 = 3 * 512 = 1536 */
+    mock_disk_create_file("BIGFILE TXT", 3U, 1536U, FAT32_ATTR_ARCHIVE);
+
+    /* 构建多簇链: 3 -> 4 -> 5 -> EOC（在 create_file 之后，覆盖 EOC） */
     {
         fat32_bpb_t *bpb = (fat32_bpb_t *)s_mock_disk;
         uint32_t fat_start  = (uint32_t)bpb->rsvd_sec_cnt;
@@ -913,9 +916,6 @@ void test_fat32_file_read_multi_cluster(void)
         (void)memcpy(&s_mock_disk[(uint64_t)(fat_start + bpb->fat_sz32) * FAT32_SECTOR_SIZE],
                      fat0, (size_t)(bpb->fat_sz32 * FAT32_SECTOR_SIZE));
     }
-
-    /* 创建目录项，文件大小 = 3 * 512 = 1536 */
-    mock_disk_create_file("BIGFILE TXT", 3U, 1536U, FAT32_ATTR_ARCHIVE);
 
     /* 初始化并打开文件 */
     (void)memset(&inst, 0, sizeof(inst));

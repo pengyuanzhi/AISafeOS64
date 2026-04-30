@@ -23,14 +23,19 @@
  * BPB 验证辅助函数
  * ======================================================================== */
 
-/** @brief 有效的扇区大小值 */
-static const uint16_t s_valid_sector_sizes[] =
+/**
+ * @brief 验证扇区大小是否有效
+ *
+ * @details 对于 FAT32，仅接受 512 字节扇区
+ *
+ * @param bytes_per_sec 每扇区字节数
+ *
+ * @return true 有效，false 无效
+ */
+static bool is_valid_sector_size(uint16_t bytes_per_sec)
 {
-    512U, 1024U, 2048U, 4096U
-};
-
-/** @brief 有效扇区大小数量 */
-#define VALID_SECTOR_SIZES_COUNT  4U
+    return (bytes_per_sec == 512U);
+}
 
 /** @brief 有效的每簇扇区数 */
 static const uint8_t s_valid_sec_per_clust[] =
@@ -40,30 +45,6 @@ static const uint8_t s_valid_sec_per_clust[] =
 
 /** @brief 有效每簇扇区数数量 */
 #define VALID_SEC_PER_CLUST_COUNT  8U
-
-/**
- * @brief 验证扇区大小是否有效
- *
- * @param bytes_per_sec 每扇区字节数
- *
- * @return true 有效，false 无效
- */
-static bool is_valid_sector_size(uint16_t bytes_per_sec)
-{
-    uint32_t i;
-    bool valid = false;
-
-    for (i = 0U; i < VALID_SECTOR_SIZES_COUNT; i++)
-    {
-        if (bytes_per_sec == s_valid_sector_sizes[i])
-        {
-            valid = true;
-            break;
-        }
-    }
-
-    return valid;
-}
 
 /**
  * @brief 验证每簇扇区数是否有效

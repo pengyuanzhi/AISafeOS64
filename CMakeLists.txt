@@ -154,7 +154,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME test_musl_safety COMMAND test_musl_safety)
 
     # test_syscall_dispatch — musl 系统调用分发器测试
-    add_executable(test_syscall_dispatch tests/test_syscall_dispatch.c lib/musl_aisafe/src/syscall_dispatch.c lib/musl_aisafe/src/musl_safety.c)
+    add_executable(test_syscall_dispatch tests/test_syscall_dispatch.c lib/musl_aisafe/src/syscall_dispatch.c lib/musl_aisafe/src/musl_safety.c lib/musl_aisafe/src/fs_ipc.c lib/musl_aisafe/src/extra_syscalls.c)
     target_include_directories(test_syscall_dispatch PRIVATE ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/arch/aarch64_aisafe ${CMAKE_SOURCE_DIR}/lib/musl_aisafe/include ${TEST_INCLUDE_DIRS})
     target_compile_options(test_syscall_dispatch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_syscall_dispatch COMMAND test_syscall_dispatch)

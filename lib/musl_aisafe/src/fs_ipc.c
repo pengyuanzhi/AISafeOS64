@@ -43,6 +43,9 @@
 #define SEEK_CUR        1  /* 从当前位置定位 */
 #define SEEK_END        2  /* 从文件末尾定位 */
 
+/** @brief fcntl 目录文件描述符 */
+#define AT_FDCWD       -100  /* 当前工作目录 */
+
 /** @brief FS 服务端点（需要通过服务发现获取） */
 static int s_fs_endpoint = -1;
 

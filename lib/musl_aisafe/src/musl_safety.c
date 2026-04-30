@@ -49,6 +49,23 @@
 /** 最大文件描述符 */
 #define MAX_FD (1024 * 16)  /* 16384 */
 
+/* 文件权限位定义 */
+#define S_IRUSR  00400U  /* 用户读 */
+#define S_IWUSR  00200U  /* 用户写 */
+#define S_IXUSR  00100U  /* 用户执行 */
+#define S_IRWXU  00700U  /* 用户读写执行 */
+#define S_IRGRP  00040U  /* 组读 */
+#define S_IWGRP  00020U  /* 组写 */
+#define S_IXGRP  00010U  /* 组执行 */
+#define S_IRWXG  00070U  /* 组读写执行 */
+#define S_IROTH  00004U  /* 其他读 */
+#define S_IWOTH  00002U  /* 其他写 */
+#define S_IXOTH  00001U  /* 其他执行 */
+#define S_IRWXO  00007U  /* 其他读写执行 */
+#define S_ISUID  004000U /* set-user-id */
+#define S_ISGID  002000U /* set-group-id */
+#define S_ISVTX  001000U /* sticky */
+
 /* ========================================================================
  * 审计日志状态
  * ======================================================================== */

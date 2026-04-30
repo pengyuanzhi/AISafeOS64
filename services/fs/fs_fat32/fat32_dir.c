@@ -22,26 +22,6 @@
 #include <stdint.h>
 
 /* ========================================================================
- * 辅助函数
- * ======================================================================== */
-
-/**
- * @brief 大写转小写
- *
- * @param c 输入字符
- *
- * @return 转换后的字符
- */
-static char to_lower(char c)
-{
-    if ((c >= 'A') && (c <= 'Z'))
-    {
-        return (char)((int32_t)c + 32);
-    }
-    return c;
-}
-
-/* ========================================================================
  * 目录项操作实现
  * ======================================================================== */
 
@@ -78,7 +58,7 @@ int32_t fat32_dir_extract_name(const fat32_dir_entry_t *entry,
         }
         if (pos < (buf_size - 1U))
         {
-            name_out[pos] = to_lower((char)ch);
+            name_out[pos] = (char)ch;
             pos++;
         }
     }
@@ -117,7 +97,7 @@ int32_t fat32_dir_extract_name(const fat32_dir_entry_t *entry,
             }
             if (pos < (buf_size - 1U))
             {
-                name_out[pos] = to_lower((char)ch);
+                name_out[pos] = (char)ch;
                 pos++;
             }
         }

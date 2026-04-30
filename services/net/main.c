@@ -907,7 +907,8 @@ kernel_status_t net_init(void)
                     if (ret_up == KERNEL_OK)
                     {
                         /* 接口启动成功 */
-                        /* TODO: 保存接口 ID 和操作接口的映射关系 */
+                        /* 保存操作接口到接口表 */
+                        s_interfaces[(uint32_t)if_id].ops_auto = *ops;
                     }
                 }
             }
