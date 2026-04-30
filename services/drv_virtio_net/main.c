@@ -41,7 +41,7 @@
 
 /** @brief VirtIO MMIO 寄存器偏移 */
 #define VIRTIO_MMIO_MAGIC             0x000U
-#define VIRTIO_MMIO_VERSION           0x004U
+#define VIRTIO_MMIO_VERSION_REG       0x004U
 #define VIRTIO_MMIO_DEVICE_ID         0x008U
 #define VIRTIO_MMIO_VENDOR_ID         0x00CU
 #define VIRTIO_MMIO_DEVICE_FEATURES   0x010U
@@ -261,8 +261,14 @@ static int64_t virtq_tx_submit(const void *buf, uint64_t size)
 
     /* 分配描述符 */
     desc = s_priv.tx_desc;
-    desc_idx = (uint16_t)virtq_alloc_desc(desc, &s_priv.tx_free_idx);
-    if (desc_idx < 0)
+    {
+        int32_t ret_desc = virtq_alloc_desc(desc, &s_priv.tx_free_idx);
+        desc_idx = (uint16_t)ret_desc;
+        if (ret_desc < 0)
+        {
+            return -12; /* ENOMEM */
+        }
+    }
     {
         return -12; /* ENOMEM */
     }
@@ -356,7 +362,7 @@ static int32_t virtio_net_probe(uint64_t mmio_base, uint32_t irq)
     }
 
     /* 检查版本 */
-    version = mmio_read32(mmio_base, VIRTIO_MMIO_VERSION);
+    version = mmio_read32(mmio_base, VIRTIO_MMIO_VERSION_REG);
     if (version != VIRTIO_MMIO_VERSION)
     {
         return -2; /* 不支持的版本 */
@@ -407,6 +413,8 @@ static int32_t virtio_net_probe(uint64_t mmio_base, uint32_t irq)
 static int32_t virtio_virtq_init(uint16_t queue_sel, virtq_desc_t *desc_table,
                                   virtq_avail_t *avail_ring, virtq_used_t *used_ring)
 {
+    (void)avail_ring;  /* 未使用参数 */
+    (void)used_ring;    /* 未使用参数 */
     uint32_t queue_num_max;
     uint32_t pfn;
 
