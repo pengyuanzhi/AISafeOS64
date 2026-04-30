@@ -194,6 +194,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_userland_services_extended PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_userland_services_extended PRIVATE -std=c11 -Wall -Wextra -Wno-unused-variable -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_userland_services_extended COMMAND test_userland_services_extended)
+
+    # test_fs_server_ipc — FS 服务 IPC 服务器端处理测试
+    add_executable(test_fs_server_ipc tests/test_fs_server_ipc.c)
+    target_include_directories(test_fs_server_ipc PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_fs_server_ipc PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_fs_server_ipc COMMAND test_fs_server_ipc)
+
+    # test_net_service — Net 服务主循环测试
+    add_executable(test_net_service tests/test_net_service.c)
+    target_include_directories(test_net_service PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_net_service PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_net_service COMMAND test_net_service)
 endif()
 
 # ==============================================================================

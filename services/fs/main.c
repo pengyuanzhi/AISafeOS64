@@ -20,6 +20,7 @@
 #include "fs_server_ipc.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* ========================================================================
  * RAMFS 外部声明

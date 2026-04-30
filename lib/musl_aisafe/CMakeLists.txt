@@ -119,13 +119,14 @@ endforeach()
 # malloc 模块（使用确定性内存分配器 det_malloc 替换 lite_malloc）
 # 注：det_malloc 提供确定性分配行为，满足 ISO 26262 ASIL-D 要求
 # lite_malloc 通过 brk/mmap 系统调用分配，行为不确定
+# 注意：排除 free.c/calloc.c/realloc.c，因为这些在 det_malloc.c 中已定义
 file(GLOB _MALLOC_SRCS
-    ${MUSL_UPSTREAM}/src/malloc/calloc.c
-    ${MUSL_UPSTREAM}/src/malloc/free.c
+    # ${MUSL_UPSTREAM}/src/malloc/calloc.c     # 由 det_malloc.c 提供
+    # ${MUSL_UPSTREAM}/src/malloc/free.c       # 由 det_malloc.c 提供
     ${MUSL_UPSTREAM}/src/malloc/libc_calloc.c
     ${MUSL_UPSTREAM}/src/malloc/memalign.c
     ${MUSL_UPSTREAM}/src/malloc/posix_memalign.c
-    ${MUSL_UPSTREAM}/src/malloc/realloc.c
+    # ${MUSL_UPSTREAM}/src/malloc/realloc.c     # 由 det_malloc.c 提供
     ${MUSL_UPSTREAM}/src/malloc/reallocarray.c
     ${MUSL_UPSTREAM}/src/malloc/replaced.c
 )

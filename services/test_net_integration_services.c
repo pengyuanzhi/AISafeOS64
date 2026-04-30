@@ -18,6 +18,7 @@
 
 #include <kernel/netstack.h>
 #include <kernel/types.h>
+#include <net_if_auto.h>
 #include <stdio.h>
 #include <string.h>
 

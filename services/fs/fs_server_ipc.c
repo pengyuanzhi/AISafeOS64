@@ -20,50 +20,126 @@
 #include "fs_ops.h"
 #include "fs_ipc_types.h"
 #include <kernel/fs_ipc.h>
+#include <errno.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 
 /* ========================================================================
- * 内核 IPC 系统调用桩
+ * 前向声明
  * ======================================================================== */
 
-/** @brief IPC 通道 ID（简化版，直接使用硬编码） */
-static uint64_t s_fs_channel_id = 0;
+/**
+ * @brief SVC 调用辅助函数（3 参数版本）
+ */
+static inline int64_t svc_call_3(uint64_t nr, int64_t a0, int64_t a1, int64_t a2);
 
-/** @brief IPC 连接 ID（简化版） */
-static uint64_t s_fs_conn_id = 0;
+/* ========================================================================
+ * 内核 IPC 系统调用接口
+ * ======================================================================== */
+
+/** @brief IPC 通道 ID */
+static uint64_t s_fs_channel_id = 0U;
+
+/** @brief IPC 连接 ID */
+static uint64_t s_fs_conn_id = 0U;
+
+/* 内核 IPC 系统调用号（与 include/kernel/syscall.h 一致） */
+#define AISAFE_SYS_CHANNEL_CREATE       0x0100U
+#define AISAFE_SYS_CHANNEL_DESTROY      0x0101U
+#define AISAFE_SYS_CONNECT_ATTACH       0x0102U
+#define AISAFE_SYS_MSG_SEND             0x0104U
+#define AISAFE_SYS_MSG_RECV             0x0105U
+#define AISAFE_SYS_MSG_REPLY            0x0106U
 
 /**
- * @brief 简化的 IPC 消息接收
+ * @brief 通过 SVC 调用内核 IPC 接收
+ *
+ * @param buf     接收缓冲区
+ * @param size    缓冲区大小
+ * @param msg_id_out 输出消息 ID
+ *
+ * @return 接收到的字节数，负数表示错误
  */
 static int32_t fs_ipc_recv(void *buf, uint64_t size, uint64_t *msg_id_out)
 {
-    /* 简化实现：阻塞等待直到有消息 */
-    /* 实际实现应调用内核 SYS_MSG_RECV 系统调用 */
+    int64_t ret;
 
-    (void)buf;
-    (void)size;
-    (void)msg_id_out;
+    if (buf == NULL || msg_id_out == NULL)
+    {
+        return -14;  /* -EFAULT */
+    }
 
-    /* 简化实现：返回 -EAGAIN 表示没有消息 */
-    return -11;  /* -EAGAIN */
+    /* 调用内核 SYS_MSG_RECV 系统调用 */
+    ret = svc_call_3(AISAFE_SYS_MSG_RECV,
+                     (int64_t)s_fs_channel_id,
+                     (int64_t)buf,
+                     (int64_t)size);
+
+    if (ret < 0)
+    {
+        return (int32_t)ret;
+    }
+
+    /* 从消息头提取消息 ID */
+    *msg_id_out = (uint64_t)ret;
+
+    return (int32_t)ret;
 }
 
 /**
- * @brief 简化的 IPC 消息回复
+ * @brief 通过 SVC 调用内核 IPC 回复
+ *
+ * @param msg_id  消息 ID
+ * @param buf     回复缓冲区
+ * @param size    回复大小
+ *
+ * @return 0 成功，负数表示错误
  */
 static int32_t fs_ipc_reply(uint64_t msg_id, const void *buf, uint64_t size)
 {
-    /* 简化实现：发送回复 */
-    /* 实际实现应调用内核 SYS_MSG_REPLY 系统调用 */
+    int64_t ret;
 
-    (void)msg_id;
-    (void)buf;
-    (void)size;
+    if (buf == NULL)
+    {
+        return -14;  /* -EFAULT */
+    }
 
-    return 0;
+    /* 调用内核 SYS_MSG_REPLY 系统调用 */
+    ret = svc_call_3(AISAFE_SYS_MSG_REPLY,
+                     (int64_t)msg_id,
+                     (int64_t)buf,
+                     (int64_t)size);
+
+    return (int32_t)ret;
+}
+
+/**
+ * @brief SVC 调用辅助宏（3 参数版本）
+ *
+ * @param nr   系统调用号
+ * @param a0   参数 0
+ * @param a1   参数 1
+ * @param a2   参数 2
+ *
+ * @return 系统调用返回值
+ */
+static inline int64_t svc_call_3(uint64_t nr, int64_t a0, int64_t a1, int64_t a2)
+{
+    register uint64_t x8 __asm__("x8") = nr;
+    register uint64_t x0 __asm__("x0") = (uint64_t)a0;
+    register uint64_t x1 __asm__("x1") = (uint64_t)a1;
+    register uint64_t x2 __asm__("x2") = (uint64_t)a2;
+
+    __asm__ volatile(
+        "svc #0"
+        : "+r"(x0)
+        : "r"(x8), "r"(x1), "r"(x2)
+        : "memory"
+    );
+
+    return (int64_t)x0;
 }
 
 /* ========================================================================
@@ -505,13 +581,20 @@ static void fs_server_handle_ipc_msg(const fs_ipc_msg_header_t *header,
  */
 void fs_server_init(void)
 {
+    int64_t ret;
+
     if (!s_initialized)
     {
         fs_server_init_fd_table();
-        s_initialized = true;
 
-        /* TODO: 创建 IPC 通道 */
-        /* ret = sys_channel_create(&s_fs_channel_id); */
+        /* 创建 IPC 通道 */
+        ret = svc_call_3(AISAFE_SYS_CHANNEL_CREATE, 0, 0, 0);
+        if (ret >= 0)
+        {
+            s_fs_channel_id = (uint64_t)ret;
+        }
+
+        s_initialized = true;
     }
 }
 

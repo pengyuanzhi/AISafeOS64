@@ -20,20 +20,12 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <kernel/netstack.h>
 
 /* ========================================================================
  * 网络接口操作接口（简化版）
  * ======================================================================== */
-
-/** @brief 网络接口操作接口 */
-typedef struct net_if_ops_auto
-{
-    int32_t (*init)(void);                      /**< @brief 初始化网络接口 */
-    int64_t (*send_frame)(const void *buf, uint64_t size); /**< @brief 发送以太网帧 */
-    int64_t (*recv_frame)(void *buf, uint64_t size);      /**< @brief 接收以太网帧 */
-    int32_t (*close)(void);                     /**< @brief 关闭网络接口 */
-    bool (*is_running)(void);                    /**< @brief 获取接口状态 */
-} net_if_ops_auto_t;
+/* 注意：net_if_ops_auto_t 类型定义在 kernel/netstack.h 中 */
 
 /* ========================================================================
  * 内部类型定义

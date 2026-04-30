@@ -725,6 +725,12 @@ static void udp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
                           const uint8_t *data, uint32_t len);
 
 /**
+ * @brief 处理接收到的 ICMP 包
+ */
+static void icmp_process(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
+                           const uint8_t *data, uint32_t len);
+
+/**
  * @brief 处理接收到的 TCP 段
  */
 static void tcp_process_segment(uint32_t if_id, uint32_t src_ip, uint32_t dst_ip,
@@ -3791,13 +3797,21 @@ int main(void)
             {
                 if (s_interfaces[if_id].state == NET_IF_RUNNING)
                 {
-                    (void)net_rx_packet(if_id, rx_tmp,
+                    int32_t rx_ret;
+
+                    rx_ret = net_rx_packet(if_id, rx_tmp,
                         (uint64_t)NET_MAX_PACKET_SIZE);
+
+                    if (rx_ret > 0)
+                    {
+                        /* 成功接收到数据包，处理协议栈 */
+                        /* net_rx_packet 内部已处理以太网帧解析 */
+                    }
                 }
             }
         }
 
-        /* TCP 定时器检查（每 10ms 执行一次） */
+        /* TCP 定时器检查（每 TCP_RETRANSMIT_PERIOD_MS 执行一次） */
         if (s_tcp_timer_accum_ms >= TCP_RETRANSMIT_PERIOD_MS)
         {
             /* TCP 重传定时器检查 */

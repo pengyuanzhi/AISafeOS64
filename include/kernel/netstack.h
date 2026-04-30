@@ -25,8 +25,19 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* 网络接口自动发现接口（仅在服务内部使用） */
-/* #include "net_if_auto.h" */
+/* ========================================================================
+ * 网络接口操作接口（自动发现）
+ * ======================================================================== */
+
+/** @brief 网络接口操作接口（自动发现） */
+typedef struct net_if_ops_auto
+{
+    int32_t (*init)(void);                      /**< @brief 初始化网络接口 */
+    int64_t (*send_frame)(const void *buf, uint64_t size); /**< @brief 发送以太网帧 */
+    int64_t (*recv_frame)(void *buf, uint64_t size);      /**< @brief 接收以太网帧 */
+    int32_t (*close)(void);                     /**< @brief 关闭网络接口 */
+    bool (*is_running)(void);                    /**< @brief 获取接口状态 */
+} net_if_ops_auto_t;
 
 /* ========================================================================
  * 网络常量
@@ -186,7 +197,7 @@ typedef struct
     uint32_t         driver_id;      /**< @brief 关联驱动 ID */
     net_if_stats_t   stats;          /**< @brief 统计信息 */
     bool             in_use;         /**< @brief 使用标记 */
-    /* net_if_ops_auto_t ops_auto;    驱动操作接口（auto 发现） */
+    net_if_ops_auto_t ops_auto;      /**< @brief 驱动操作接口（auto 发现） */
 } net_interface_t;
 
 /* ========================================================================

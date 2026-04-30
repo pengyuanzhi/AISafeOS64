@@ -479,3 +479,40 @@ void det_malloc_stats(size_t *total_pool_size, size_t *used_blocks, size_t *free
         *free_blocks = DET_BLOCK_COUNT - used;
     }
 }
+
+/* ========================================================================
+ * 弱符号包装：提供确定性 malloc 实现
+ * ======================================================================== */
+
+/**
+ * @brief 标准 malloc 包装（使用确定性分配器）
+ * @note 强制使用确定性分配器，覆盖 musl_upstream 的 malloc
+ */
+void *malloc(size_t size)
+{
+    return det_malloc(size);
+}
+
+/**
+ * @brief 标准 free 包装（使用确定性释放器）
+ */
+void free(void *ptr)
+{
+    det_free(ptr);
+}
+
+/**
+ * @brief 标准 calloc 包装（使用确定性分配器）
+ */
+void *calloc(size_t nmemb, size_t size)
+{
+    size_t total_size = nmemb * size;
+    void *ptr = det_malloc(total_size);
+
+    if (ptr != NULL)
+    {
+        (void)memset(ptr, 0, total_size);
+    }
+
+    return ptr;
+}

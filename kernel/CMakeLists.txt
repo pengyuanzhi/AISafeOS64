@@ -151,8 +151,12 @@ list(REMOVE_ITEM KERNEL_SOURCES ${KERNEL_ASM_SOURCES})
 # 为 C 文件设置编译选项
 set(CMAKE_C_FLAGS "-O2 -mgeneral-regs-only -ffreestanding -mno-outline-atomics -ffunction-sections -fdata-sections")
 
-# 为 ASM 文件设置编译选项（空）
+# 为 ASM 文件设置编译选项（汇编器不支持 -D 预处理器选项）
 set(CMAKE_ASM_FLAGS "")
+
+# 为 Release 模式设置优化标志
+set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
+set(CMAKE_ASM_FLAGS_RELEASE "")
 
 # ==============================================================================
 # 构建内核静态库
