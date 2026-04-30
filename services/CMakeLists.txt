@@ -257,6 +257,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_server_ipc.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_ops.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_romfs/romfs.c
             )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层
@@ -282,6 +283,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ipc
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_romfs
         )
 
         target_compile_options(${SERVICE_NAME}.elf PRIVATE

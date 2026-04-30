@@ -29,6 +29,12 @@
 extern const fs_ops_t *ramfs_get_ops(void);
 
 /* ========================================================================
+ * ROMFS 外部声明
+ * ======================================================================== */
+
+extern const fs_ops_t *romfs_get_ops(void);
+
+/* ========================================================================
  * 初始化
  * ======================================================================== */
 
@@ -46,11 +52,25 @@ static int32_t fs_service_init(void)
         return -1;
     }
 
-    /* 挂载 RAMFS 到根目录 */
-    ret = fs_mount("/", FS_FSTYPE_RAMFS, NULL, 0U);
+    /* 注册 ROMFS */
+    ret = fs_register_fs(FS_FSTYPE_ROMFS, romfs_get_ops());
+    if (ret != 0)
+    {
+        return -2;
+    }
+
+    /* 挂载 RAMFS 到 /ram */
+    ret = fs_mount("/ram", FS_FSTYPE_RAMFS, NULL, 0U);
     if (ret < 0)
     {
-        return -1;
+        return -3;
+    }
+
+    /* 挂载 ROMFS 到 /rom */
+    ret = fs_mount("/rom", FS_FSTYPE_ROMFS, NULL, 0U);
+    if (ret < 0)
+    {
+        return -4;
     }
 
     return 0;
