@@ -224,6 +224,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_shm PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_shm PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_shm COMMAND test_shm)
+
+    # test_ring_buffer — 环形缓冲区性能测试
+    add_executable(test_ring_buffer tests/test_ring_buffer.c)
+    target_include_directories(test_ring_buffer PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_ring_buffer PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_ring_buffer COMMAND test_ring_buffer)
 endif()
 
 # ==============================================================================
