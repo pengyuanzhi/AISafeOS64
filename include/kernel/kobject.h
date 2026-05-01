@@ -50,6 +50,7 @@ typedef enum
     KOBJ_DEVICE,               /**< @brief 设备对象 */
     KOBJ_CHANNEL,              /**< @brief IPC 通道 */
     KOBJ_CONNECTION,           /**< @brief IPC 连接 */
+    KOBJ_SHM,                  /**< @brief 共享内存对象 */
     KOBJ_TYPE_COUNT            /**< @brief 类型总数（用于边界检查） */
 } kobj_type_t;
 

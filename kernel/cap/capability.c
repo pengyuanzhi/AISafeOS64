@@ -127,6 +127,12 @@ static const cap_type_rights_t s_cap_type_rights_table[] =
         KOBJ_CONNECTION,
         (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
         (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_SHM (10) */
+    {
+        KOBJ_SHM,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
+        (uint8_t)(CAP_RIGHT_READ)
     }
 };
 

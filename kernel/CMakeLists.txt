@@ -83,6 +83,7 @@ set(KERNEL_MM_SOURCES
     mm/security.c
     mm/kobject.c
     mm/object_pool.c
+    mm/shm.c
 )
 
 # ==============================================================================
