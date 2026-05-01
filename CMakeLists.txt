@@ -242,6 +242,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_slab PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_slab PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_slab COMMAND test_slab)
+
+    # test_context_switch — 上下文切换性能测试
+    add_executable(test_context_switch tests/test_context_switch.c)
+    target_include_directories(test_context_switch PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_context_switch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_context_switch COMMAND test_context_switch)
+
+    # test_syscall_benchmark — 系统调用性能基准测试
+    add_executable(test_syscall_benchmark tests/test_syscall_benchmark.c)
+    target_include_directories(test_syscall_benchmark PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_syscall_benchmark PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_syscall_benchmark COMMAND test_syscall_benchmark)
 endif()
 
 # ==============================================================================
