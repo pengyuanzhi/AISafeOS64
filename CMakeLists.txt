@@ -230,6 +230,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_ring_buffer PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_ring_buffer PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_ring_buffer COMMAND test_ring_buffer)
+
+    # test_ipc_batch — IPC 批量处理测试
+    add_executable(test_ipc_batch tests/test_ipc_batch.c)
+    target_include_directories(test_ipc_batch PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_ipc_batch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_ipc_batch COMMAND test_ipc_batch)
 endif()
 
 # ==============================================================================
