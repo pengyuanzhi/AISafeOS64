@@ -236,6 +236,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_ipc_batch PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_ipc_batch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_ipc_batch COMMAND test_ipc_batch)
+
+    # test_slab — Slab 分配器测试
+    add_executable(test_slab tests/test_slab.c)
+    target_include_directories(test_slab PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_slab PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_slab COMMAND test_slab)
 endif()
 
 # ==============================================================================
