@@ -63,6 +63,7 @@ set(KERNEL_IPC_SOURCES
     ipc/channel.c
     ipc/notification.c
     ipc/ic2.c
+    ipc/ring_buffer.c
 )
 
 # ==============================================================================
