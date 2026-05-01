@@ -30,7 +30,10 @@
 #include <kernel/config.h>
 #include <kernel/smp.h>
 #include <kernel/mmu.h>
+#include <kernel/mm/slab.h>
+#include <kernel/mm/kmalloc.h>
 #include <stdint.h>
+#include <string.h>
 #include "hal.h"
 
 /* 前向声明: ARM64 上下文切换接口（定义在 context.S） */
@@ -45,6 +48,199 @@ extern char __heap_end[];
 
 /* HAL 接口 */
 extern void hal_uart_puts(uint64_t base, const char *str);
+
+/* ========================================================================
+ * 线程栈 Slab 分配器实现
+ * ======================================================================== */
+
+/**
+ * @brief 初始化线程栈 Slab 缓存
+ *
+ * @details 为不同大小的线程栈创建 Slab 缓存
+ *
+ * @return KERNEL_OK 成功
+ * @return -ENOMEM 内存不足
+ */
+static int32_t thread_stack_slab_init(void)
+{
+    int32_t ret;
+    size_t pool_sizes[STACK_SIZE_COUNT] = {
+        STACK_SIZE_4KB * 8,   /* 4KB 栈，每个 Slab 8 个对象 */
+        STACK_SIZE_8KB * 4,   /* 8KB 栈，每个 Slab 4 个对象 */
+        STACK_SIZE_16KB * 2    /* 16KB 栈，每个 Slab 2 个对象 */
+    };
+    const char *cache_names[STACK_SIZE_COUNT] = {
+        "stack_4KB",
+        "stack_8KB",
+        "stack_16KB"
+    };
+
+    for (uint32_t i = 0U; i < STACK_SIZE_COUNT; i++)
+    {
+        ret = slab_create(&g_scheduler.stack_slab.caches[i], pool_sizes[i]);
+        if (ret != KERNEL_OK)
+        {
+            /* 清理已创建的缓存 */
+            for (uint32_t j = 0U; j < i; j++)
+            {
+                (void)slab_destroy(&g_scheduler.stack_slab.caches[j]);
+            }
+            return ret;
+        }
+    }
+
+    g_scheduler.stack_slab.initialized = true;
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 销毁线程栈 Slab 缓存
+ *
+ * @return KERNEL_OK 成功
+ */
+static int32_t thread_stack_slab_destroy(void)
+{
+    if (!g_scheduler.stack_slab.initialized)
+    {
+        return KERNEL_OK;
+    }
+
+    for (uint32_t i = 0U; i < STACK_SIZE_COUNT; i++)
+    {
+        (void)slab_destroy(&g_scheduler.stack_slab.caches[i]);
+    }
+
+    (void)memset(&g_scheduler.stack_slab, 0, sizeof(ThreadStackSlab_t));
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 根据栈大小选择合适的 Slab 缓存
+ *
+ * @param size 栈大小
+ *
+ * @return Slab 缓存索引，如果不支持则返回 -1
+ */
+static int32_t select_stack_cache(uint32_t size)
+{
+    /* 根据栈大小选择合适的缓存 */
+    if (size <= STACK_SIZE_4KB)
+    {
+        return 0; /* 4KB 缓存 */
+    }
+    else if (size <= STACK_SIZE_8KB)
+    {
+        return 1; /* 8KB 缓存 */
+    }
+    else if (size <= STACK_SIZE_16KB)
+    {
+        return 2; /* 16KB 缓存 */
+    }
+    else
+    {
+        return -1; /* 不支持的大小 */
+    }
+}
+
+/**
+ * @brief 使用 Slab 分配器分配栈空间
+ *
+ * @param size 请求的栈大小（字节）
+ *
+ * @return 成功返回栈顶地址，失败返回 0
+ */
+static vaddr_t stack_alloc_slab(uint32_t size)
+{
+    int32_t cache_idx;
+    void *stack_ptr;
+    vaddr_t stack_top;
+
+    if (!g_scheduler.stack_slab.initialized)
+    {
+        return 0U;
+    }
+
+    /* 选择合适的 Slab 缓存 */
+    cache_idx = select_stack_cache(size);
+    if (cache_idx < 0)
+    {
+        /* 大小不支持，回退到 bump allocator */
+        return stack_alloc(size);
+    }
+
+    /* 从 Slab 缓存分配 */
+    stack_ptr = slab_alloc(&g_scheduler.stack_slab.caches[cache_idx]);
+    if (stack_ptr == NULL)
+    {
+        return 0U;
+    }
+
+    /* 计算 栈顶地址 */
+    stack_top = (vaddr_t)((uintptr_t)stack_ptr + size);
+
+    return stack_top;
+}
+
+/**
+ * @brief 释放栈空间回 Slab 分配器
+ *
+ * @param stack_base 栈基址
+ * @param size 栈大小
+ */
+static void stack_free_slab(vaddr_t stack_base, uint32_t size)
+{
+    int32_t cache_idx;
+
+    if (!g_scheduler.stack_slab.initialized)
+    {
+        return;
+    }
+
+    /* 选择合适的 Slab 缓存 */
+    cache_idx = select_stack_cache(size);
+    if (cache_idx < 0)
+    {
+        /* 大小不支持，无法释放 */
+        return;
+    }
+
+    /* 释放回 Slab 缓存 */
+    (void)slab_free(&g_scheduler.stack_slab.caches[cache_idx], (void *)(uintptr_t)stack_base);
+}
+
+/**
+ * @brief 导出的栈分配接口（供 thread.c 调用）
+ *
+ * @param size 请求的栈大小（字节）
+ *
+ * @return 成功返回栈顶地址，失败返回 0
+ */
+vaddr_t stack_alloc_by_scheduler(uint32_t size)
+{
+    /* 优先使用 Slab 分配器 */
+    vaddr_t stack_top = stack_alloc_slab(size);
+    if (stack_top != 0U)
+    {
+        return stack_top;
+    }
+
+    /* Slab 分配失败，回退到 bump allocator */
+    return stack_alloc(size);
+}
+
+/**
+ * @brief 导出的栈释放接口（供 thread.c 调用）
+ *
+ * @param stack_base 栈基址
+ * @param size 栈大小
+ */
+void stack_free_by_scheduler(vaddr_t stack_base, uint32_t size)
+{
+    /* 优先使用 Slab 分配器释放 */
+    stack_free_slab(stack_base, size);
+}
 
 /* ========================================================================
  * 全局调度器实例
@@ -158,10 +354,18 @@ kernel_status_t scheduler_init(void)
     uint32_t cpu_id;
     uint32_t i;
     uint32_t j;
+    int32_t ret;
 
     if (g_scheduler.initialized)
     {
         return KERNEL_OK;
+    }
+
+    /* 初始化线程栈 Slab 缓存 */
+    ret = thread_stack_slab_init();
+    if (ret != KERNEL_OK)
+    {
+        return -ENOMEM;
     }
 
     /* 初始化所有 CPU 的就绪队列 */

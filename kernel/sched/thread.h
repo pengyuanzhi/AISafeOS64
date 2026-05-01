@@ -218,4 +218,12 @@ KThread_t *kthread_get_current(void);
  */
 thread_id_t kthread_get_current_tid(void);
 
+/**
+ * @brief 清理 DEAD 线程的栈空间
+ *
+ * @details 遍历所有线程，清理 DEAD 线程的栈空间
+ *          释放后清零栈基址和大小字段
+ */
+void kthread_cleanup_dead_stacks(void);
+
 #endif /* KERNEL_SCHED_THREAD_H */

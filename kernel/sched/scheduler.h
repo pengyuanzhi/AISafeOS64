@@ -27,6 +27,7 @@
 #include <kernel/compiler.h>
 #include <stdbool.h>
 #include "thread.h"
+#include <kernel/mm/slab.h>
 
 /* ========================================================================
  * 每 CPU 就绪队列
@@ -62,10 +63,44 @@ typedef struct
  *
  * @details 包含所有 CPU 的就绪队列和全局线程表
  */
+/* ========================================================================
+ * 线程栈 Slab 缓存配置
+ * ======================================================================== */
+
+/**
+ * @brief 线程栈大小类别
+ */
+typedef enum
+{
+    STACK_SIZE_4KB = 4096,      /**< @brief 4KB 栈 */
+    STACK_SIZE_8KB = 8192,      /**< @brief 8KB 栈 */
+    STACK_SIZE_16KB = 16384,    /**< @brief 16KB 栈 */
+    STACK_SIZE_COUNT            /**< @brief 栈大小类别数量 */
+} stack_size_class_t;
+
+/**
+ * @brief 线程栈 Slab 缓存集合
+ */
+typedef struct
+{
+    slab_cache_t caches[STACK_SIZE_COUNT]; /**< @brief 不同大小栈的 Slab 缓存 */
+    bool initialized;                    /**< @brief Slab 缓存初始化标志 */
+} ThreadStackSlab_t;
+
+/* ========================================================================
+ * 全局调度器结构
+ * ======================================================================== */
+
+/**
+ * @brief 全局调度器实例
+ *
+ * @details 包含所有 CPU 的就绪队列、全局线程表和线程栈 Slab 缓存
+ */
 typedef struct
 {
     PerCPUReadyQueue_t cpu_queues[CONFIG_MAX_CPUS]; /**< @brief 每 CPU 就绪队列 */
     KThread_t thread_table[CONFIG_MAX_THREADS];      /**< @brief 全局线程控制块表 */
+    ThreadStackSlab_t stack_slab;                    /**< @brief 线程栈 Slab 缓存 */
     bool initialized;                                 /**< @brief 调度器初始化标志 */
 } Scheduler_t;
 

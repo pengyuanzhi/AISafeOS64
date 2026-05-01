@@ -231,6 +231,36 @@ void kthread_exit(void)
 }
 
 /* ========================================================================
+ * 线程栈清理
+ * ======================================================================== */
+
+/**
+ * @brief 清理 DEAD 线程的栈空间
+ *
+ * @details 遍历所有线程，清理 DEAD 线程的栈空间
+ *          释放后清零栈基址和大小字段
+ */
+void kthread_cleanup_dead_stacks(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < CONFIG_MAX_THREADS; i++)
+    {
+        KThread_t *thread = &g_scheduler.thread_table[i];
+
+        if (thread->state == KTHREAD_STATE_DEAD && thread->stack_base != 0U)
+        {
+            /* 释放栈空间 */
+            stack_free_by_scheduler(thread->stack_base, thread->stack_size);
+
+            /* 清零栈字段 */
+            thread->stack_base = 0U;
+            thread->stack_size = 0U;
+        }
+    }
+}
+
+/* ========================================================================
  * 线程挂起
  * ======================================================================== */
 
