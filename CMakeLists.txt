@@ -206,6 +206,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_net_service PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_net_service PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_net_service COMMAND test_net_service)
+
+    # test_net_integration_full — 网络协议栈与 VirtIO Net 完整集成测试
+    add_executable(test_net_integration_full tests/test_net_integration_full.c)
+    target_include_directories(test_net_integration_full PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_net_integration_full PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_net_integration_full COMMAND test_net_integration_full)
 endif()
 
 # ==============================================================================
