@@ -218,6 +218,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_performance_benchmark PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_performance_benchmark PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_performance_benchmark COMMAND test_performance_benchmark)
+
+    # test_shm — 共享内存和零拷贝 IPC 测试
+    add_executable(test_shm tests/test_shm.c)
+    target_include_directories(test_shm PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_shm PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_shm COMMAND test_shm)
 endif()
 
 # ==============================================================================
