@@ -212,6 +212,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_net_integration_full PRIVATE ${TEST_INCLUDE_DIRS})
     target_compile_options(test_net_integration_full PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_net_integration_full COMMAND test_net_integration_full)
+
+    # test_performance_benchmark — 内核性能基准测试
+    add_executable(test_performance_benchmark tests/test_performance_benchmark.c)
+    target_include_directories(test_performance_benchmark PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_performance_benchmark PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_performance_benchmark COMMAND test_performance_benchmark)
 endif()
 
 # ==============================================================================
