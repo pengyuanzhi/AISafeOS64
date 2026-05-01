@@ -64,6 +64,7 @@ set(KERNEL_IPC_SOURCES
     ipc/notification.c
     ipc/ic2.c
     ipc/ring_buffer.c
+    ipc/ipc_batch.c
 )
 
 # ==============================================================================
@@ -85,6 +86,7 @@ set(KERNEL_MM_SOURCES
     mm/kobject.c
     mm/object_pool.c
     mm/shm.c
+    mm/slab.c
 )
 
 # ==============================================================================

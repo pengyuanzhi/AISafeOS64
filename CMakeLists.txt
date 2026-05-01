@@ -249,11 +249,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_context_switch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_context_switch COMMAND test_context_switch)
 
-    # test_syscall_benchmark — 系统调用性能基准测试
-    add_executable(test_syscall_benchmark tests/test_syscall_benchmark.c)
-    target_include_directories(test_syscall_benchmark PRIVATE ${TEST_INCLUDE_DIRS})
-    target_compile_options(test_syscall_benchmark PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
-    add_test(NAME test_syscall_benchmark COMMAND test_syscall_benchmark)
+    # test_smp — SMP 多核优化测试
+    add_executable(test_smp tests/test_smp.c)
+    target_include_directories(test_smp PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_smp PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    target_link_libraries(test_smp pthread)
+    add_test(NAME test_smp COMMAND test_smp)
 endif()
 
 # ==============================================================================
