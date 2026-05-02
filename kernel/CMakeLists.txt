@@ -69,6 +69,7 @@ set(KERNEL_IPC_SOURCES
     ipc/ipc_batch.c
     ipc/sharded_message_queue.c
     ipc/zero_copy.c
+    ipc/dynamic_link.c
 )
 
 # ==============================================================================
