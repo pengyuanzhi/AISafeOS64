@@ -67,6 +67,7 @@ set(KERNEL_IPC_SOURCES
     ipc/ic2.c
     ipc/ring_buffer.c
     ipc/ipc_batch.c
+    ipc/sharded_message_queue.c
 )
 
 # ==============================================================================
