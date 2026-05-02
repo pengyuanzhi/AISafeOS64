@@ -31,10 +31,9 @@
 #include <kernel/config.h>
 #include <kernel/compiler.h>
 #include <kernel/spinlock.h>
-#include <hal.h>
+#include <kernel/rbtree.h>
 #include <stdint.h>
 #include <string.h>
-#include "hal.h"
 
 /* ========================================================================
  * ASID 管理
@@ -79,6 +78,15 @@ static asid_t asid_alloc(void)
 
     return result;
 }
+
+/* ========================================================================
+ * VMA 比较函数声明（用于红黑树）
+ * ======================================================================== */
+
+/**
+ * @brief VMA 比较函数（用于红黑树插入）
+ */
+static bool vma_less(const struct rb_node *node_a, const struct rb_node *node_b);
 
 /**
  * @brief 释放 ASID
@@ -197,8 +205,7 @@ kernel_status_t vmspace_subsys_init(void)
     s_kernel_space.pgd = NULL; /* 由 page_table_subsys_init 设置 */
     s_kernel_space.asid = ASID_INVALID;
     s_kernel_space.vma_count = 0U;
-    s_kernel_space.vma_list.next = &s_kernel_space.vma_list;
-    s_kernel_space.vma_list.prev = &s_kernel_space.vma_list;
+    s_kernel_space.vma_rb_root.node = NULL;
     s_kernel_space.brk_base = 0U;
     s_kernel_space.brk_current = 0U;
     s_kernel_space.stack_top = 0U;
@@ -259,8 +266,7 @@ kernel_status_t vmspace_create(vm_space_t **space)
     /* 初始化地址空间 */
     new_space->asid = new_asid;
     new_space->vma_count = 0U;
-    new_space->vma_list.next = &new_space->vma_list;
-    new_space->vma_list.prev = &new_space->vma_list;
+    new_space->vma_rb_root.node = NULL;
     new_space->brk_base = USER_SPACE_BASE;
     new_space->brk_current = USER_SPACE_BASE;
     new_space->stack_top = 0U;
@@ -305,34 +311,37 @@ void vmspace_destroy(vm_space_t *space)
 
     ticket_lock_acquire(&space->lock);
 
-    /* 遍历并释放所有 VMA */
-    pos = space->vma_list.next;
-    while (pos != &space->vma_list)
+    /* 遍历并释放所有 VMA（使用红黑树遍历） */
     {
-        vma_t *vma = container_of(pos, vma_t, node);
-        next = pos->next;
+        struct rb_node *rb_node = rb_first(&space->vma_rb_root);
+        struct rb_node *next_rb_node;
 
-        /* 解除映射并释放物理页 */
-        if (vma->start != 0U)
+        while (rb_node != NULL)
         {
-            vaddr_t addr;
-            for (addr = vma->start; addr < vma->end; addr += PAGE_SIZE_4K)
+            vma_t *vma = rb_entry(rb_node, vma_t, rb_node);
+            next_rb_node = rb_next(rb_node);
+
+            /* 解除映射并释放物理页 */
+            if (vma->start != 0U)
             {
-                paddr_t paddr;
-                if (page_table_lookup(space->pgd, addr, &paddr) == KERNEL_OK)
+                vaddr_t addr;
+                for (addr = vma->start; addr < vma->end; addr += PAGE_SIZE_4K)
                 {
-                    page_table_unmap(space->pgd, addr);
-                    phys_mem_free_page(paddr);
+                    paddr_t paddr;
+                    if (page_table_lookup(space->pgd, addr, &paddr) == KERNEL_OK)
+                    {
+                        page_table_unmap(space->pgd, addr);
+                        phys_mem_free_page(paddr);
+                    }
                 }
             }
+
+            /* 从红黑树移除并释放 VMA */
+            rb_delete(&space->vma_rb_root, rb_node);
+            vma_free(vma);
+
+            rb_node = next_rb_node;
         }
-
-        /* 从链表移除并释放 VMA */
-        pos->prev->next = pos->next;
-        pos->next->prev = pos->prev;
-        vma_free(vma);
-
-        pos = next;
     }
 
     space->vma_count = 0U;
@@ -526,27 +535,11 @@ vaddr_t vmspace_map(vm_space_t *space,
     vma->type = type;
     vma->phys_base = paddr;
     vma->shmem_id = KOBJ_ID_INVALID;
-    vma->node.next = &vma->node;
-    vma->node.prev = &vma->node;
 
-    /* 插入 VMA 链表（按地址排序） */
+    /* 插入 VMA 到红黑树（按地址排序） */
     ticket_lock_acquire(&space->lock);
     {
-        struct list_head *insert_pos = space->vma_list.next;
-        while (insert_pos != &space->vma_list)
-        {
-            vma_t *existing = container_of(insert_pos, vma_t, node);
-            if (vma->start < existing->start)
-            {
-                break;
-            }
-            insert_pos = insert_pos->next;
-        }
-        vma->node.next = insert_pos;
-        vma->node.prev = insert_pos->prev;
-        insert_pos->prev->next = &vma->node;
-        insert_pos->prev = &vma->node;
-
+        rb_insert(&space->vma_rb_root, &vma->rb_node, vma_less);
         space->vma_count++;
     }
     ticket_lock_release(&space->lock);
@@ -595,9 +588,8 @@ kernel_status_t vmspace_unmap(vm_space_t *space,
         }
     }
 
-    /* 从 VMA 链表移除 */
-    vma->node.prev->next = vma->node.next;
-    vma->node.next->prev = vma->node.prev;
+    /* 从红黑树移除 VMA */
+    rb_delete(&space->vma_rb_root, &vma->rb_node);
     space->vma_count--;
 
     ticket_lock_release(&space->lock);
@@ -662,25 +654,75 @@ kernel_status_t vmspace_protect(vm_space_t *space,
 }
 
 /* ========================================================================
+ * VMA 比较函数（用于红黑树）
+ * ======================================================================== */
+
+/**
+ * @brief VMA 比较函数（用于红黑树查找）
+ *
+ * @details 按 start 地址比较 VMA。
+ *
+ * @param key     查找的虚拟地址
+ * @param node    红黑树节点（VMA 节点）
+ *
+ * @return <0 如果 key < node->start，0 如果 key 在 [start, end) 内，>0 如果 key >= node->end
+ */
+static int32_t vma_compare(const void *key, const struct rb_node *node)
+{
+    const vaddr_t vaddr = *(const vaddr_t *)key;
+    const vma_t *vma = rb_entry(node, vma_t, rb_node);
+
+    if (vaddr < vma->start)
+    {
+        return -1;
+    }
+    else if (vaddr >= vma->end)
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+/**
+ * @brief VMA 比较函数（用于红黑树插入）
+ *
+ * @details 按 start 地址比较 VMA，用于插入时的位置查找。
+ *
+ * @param node_a  第一个 VMA 节点
+ * @param node_b  第二个 VMA 节点
+ *
+ * @return true 如果 node_a < node_b（start 地址比较）
+ */
+static bool vma_less(const struct rb_node *node_a, const struct rb_node *node_b)
+{
+    const vma_t *vma_a = rb_entry(node_a, vma_t, rb_node);
+    const vma_t *vma_b = rb_entry(node_b, vma_t, rb_node);
+
+    return (vma_a->start < vma_b->start);
+}
+
+/* ========================================================================
  * 查找 VMA
  * ======================================================================== */
 
 vma_t *vmspace_find_vma(vm_space_t *space, vaddr_t vaddr)
 {
-    struct list_head *pos;
+    struct rb_node *node;
 
     if (space == NULL)
     {
         return NULL;
     }
 
-    for (pos = space->vma_list.next; pos != &space->vma_list; pos = pos->next)
+    /* 使用红黑树查找 VMA，复杂度 O(log n) */
+    node = rb_search(&space->vma_rb_root, &vaddr, vma_compare);
+
+    if (node != NULL)
     {
-        vma_t *vma = container_of(pos, vma_t, node);
-        if ((vaddr >= vma->start) && (vaddr < vma->end))
-        {
-            return vma;
-        }
+        return rb_entry(node, vma_t, rb_node);
     }
 
     return NULL;

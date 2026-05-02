@@ -87,6 +87,7 @@ set(KERNEL_MM_SOURCES
     mm/object_pool.c
     mm/shm.c
     mm/slab.c
+    mm/rbtree.c
 )
 
 # ==============================================================================

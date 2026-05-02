@@ -25,6 +25,7 @@
 #include <kernel/list.h>
 #include <kernel/page_table.h>
 #include <kernel/spinlock.h>
+#include <kernel/rbtree.h>
 #include <stdint.h>
 
 /* ========================================================================
@@ -102,6 +103,7 @@ typedef enum
  *
  * @details VMA 描述了一段连续的虚拟地址范围及其属性。
  *          每个地址空间由多个 VMA 组成，VMA 之间按地址排序。
+ *          使用红黑树管理，查找复杂度 O(log n)。
  */
 typedef struct
 {
@@ -111,7 +113,7 @@ typedef struct
     vma_type_t      type;           /**< @brief VMA 类型 */
     paddr_t         phys_base;      /**< @brief 对应的物理地址基址（直接映射时） */
     kobj_id_t       shmem_id;       /**< @brief 共享内存对象 ID（VMA_TYPE_SHARED） */
-    struct list_head node;          /**< @brief VMA 链表节点 */
+    struct rb_node  rb_node;        /**< @brief VMA 红黑树节点 */
 } vma_t;
 
 /* ========================================================================
@@ -122,14 +124,15 @@ typedef struct
  * @brief 虚拟地址空间
  *
  * @details 每个进程/线程拥有独立的虚拟地址空间。
- *          包含一个顶层页表（PGD）、VMA 列表和 ASID。
+ *          包含一个顶层页表（PGD）、VMA 红黑树和 ASID。
+ *          使用红黑树管理 VMA，查找复杂度 O(log n)。
  */
 typedef struct
 {
     page_table_t    *pgd;           /**< @brief 顶层页表（L0） */
     asid_t          asid;           /**< @brief 地址空间标识 */
     uint32_t        vma_count;      /**< @brief VMA 数量 */
-    struct list_head vma_list;      /**< @brief VMA 链表（按地址排序） */
+    struct rb_root  vma_rb_root;    /**< @brief VMA 红黑树根 */
     vaddr_t         brk_base;       /**< @brief 堆基址 */
     vaddr_t         brk_current;    /**< @brief 当前堆顶 */
     vaddr_t         stack_top;      /**< @brief 栈顶地址 */
