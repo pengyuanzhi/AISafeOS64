@@ -1,5 +1,5 @@
 /**
- * @file    per_cpu_pool.c
+ * @file    pcpu_pool.c
  * @brief   Per-CPU 内存池实现
  * @author  AISafe64 Team
  * @date    2026-05-02
@@ -17,7 +17,7 @@
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
-#include <kernel/per_cpu_pool.h>
+#include <kernel/pcpu_pool.h>
 #include <kernel/timer.h>
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
@@ -31,12 +31,12 @@
 /**
  * @brief 全局 Per-CPU 内存池系统
  */
-static per_cpu_pool_system_t s_per_cpu_pool_system CACHE_ALIGN(64);
+static pcpu_pool_system_t s_pcpu_pool_system CACHE_ALIGN(64);
 
 /**
  * @brief Per-CPU 内存池系统初始化标志
  */
-static bool s_per_cpu_pool_initialized = false;
+static bool s_pcpu_pool_initialized = false;
 
 /* ========================================================================
  * 内部辅助函数
@@ -49,21 +49,21 @@ static bool s_per_cpu_pool_initialized = false;
  *
  * @param pool  内存池
  *
- * @return 空闲块索引，失败返回 PER_CPU_POOL_MAX_BLOCKS
+ * @return 空闲块索引，失败返回 PCPU_POOL_MAX_BLOCKS
  */
-static uint32_t per_cpu_pool_find_free_block(per_cpu_pool_t *pool)
+static uint32_t pcpu_pool_find_free_block(pcpu_pool_t *pool)
 {
     uint32_t i;
 
-    for (i = 0U; i < PER_CPU_POOL_MAX_BLOCKS; i++)
+    for (i = 0U; i < PCPU_POOL_MAX_BLOCKS; i++)
     {
-        if (pool->blocks[i].status == PER_CPU_BLOCK_FREE)
+        if (pool->blocks[i].status == PCPU_BLOCK_FREE)
         {
             return i;
         }
     }
 
-    return PER_CPU_POOL_MAX_BLOCKS;
+    return PCPU_POOL_MAX_BLOCKS;
 }
 
 /**
@@ -74,14 +74,14 @@ static uint32_t per_cpu_pool_find_free_block(per_cpu_pool_t *pool)
  * @param pool  内存池
  * @param ptr   指针
  *
- * @return 块索引，失败返回 PER_CPU_POOL_MAX_BLOCKS
+ * @return 块索引，失败返回 PCPU_POOL_MAX_BLOCKS
  */
-static uint32_t per_cpu_pool_find_block(per_cpu_pool_t *pool, void *ptr)
+static uint32_t pcpu_pool_find_block(pcpu_pool_t *pool, void *ptr)
 {
     uint32_t i;
     uintptr_t ptr_val = (uintptr_t)ptr;
 
-    for (i = 0U; i < PER_CPU_POOL_MAX_BLOCKS; i++)
+    for (i = 0U; i < PCPU_POOL_MAX_BLOCKS; i++)
     {
         uintptr_t block_ptr = (uintptr_t)&pool->blocks[i].data;
 
@@ -91,7 +91,7 @@ static uint32_t per_cpu_pool_find_block(per_cpu_pool_t *pool, void *ptr)
         }
     }
 
-    return PER_CPU_POOL_MAX_BLOCKS;
+    return PCPU_POOL_MAX_BLOCKS;
 }
 
 /**
@@ -104,7 +104,7 @@ static uint32_t per_cpu_pool_find_block(per_cpu_pool_t *pool, void *ptr)
  *
  * @return 借用的块指针，失败返回 NULL
  */
-static void *per_cpu_pool_borrow(per_cpu_pool_system_t *sys, uint32_t local_id)
+static void *pcpu_pool_borrow(pcpu_pool_system_t *sys, uint32_t local_id)
 {
     uint32_t i;
     uint32_t best_cpu_id = CONFIG_MAX_CPUS;
@@ -131,16 +131,16 @@ static void *per_cpu_pool_borrow(per_cpu_pool_system_t *sys, uint32_t local_id)
     }
 
     /* 从该 CPU 借用一个块 */
-    per_cpu_pool_t *borrow_pool = &sys->pools[best_cpu_id];
-    uint32_t block_idx = per_cpu_pool_find_free_block(borrow_pool);
+    pcpu_pool_t *borrow_pool = &sys->pools[best_cpu_id];
+    uint32_t block_idx = pcpu_pool_find_free_block(borrow_pool);
 
-    if (block_idx >= PER_CPU_POOL_MAX_BLOCKS)
+    if (block_idx >= PCPU_POOL_MAX_BLOCKS)
     {
         return NULL;
     }
 
     /* 借用块 */
-    borrow_pool->blocks[block_idx].status = PER_CPU_BLOCK_ALLOCATED;
+    borrow_pool->blocks[block_idx].status = PCPU_BLOCK_ALLOCATED;
     borrow_pool->blocks[block_idx].alloc_count++;
     borrow_pool->free_count--;
     borrow_pool->allocated_count++;
@@ -157,12 +157,12 @@ static void *per_cpu_pool_borrow(per_cpu_pool_system_t *sys, uint32_t local_id)
  * @brief 初始化 Per-CPU 内存池系统
  *
  * @param sys   Per-CPU 内存池系统
- * @param size  每个内存池的大小（必须为 PER_CPU_POOL_SIZE 的倍数）
+ * @param size  每个内存池的大小（必须为 PCPU_POOL_SIZE 的倍数）
  *
  * @return KERNEL_OK 成功
  * @return -EINVAL 参数无效
  */
-kernel_status_t per_cpu_pool_system_init(per_cpu_pool_system_t *sys,
+kernel_status_t pcpu_pool_system_init(pcpu_pool_system_t *sys,
                                         uint32_t size)
 {
     uint32_t i;
@@ -173,30 +173,30 @@ kernel_status_t per_cpu_pool_system_init(per_cpu_pool_system_t *sys,
         return -(int32_t)EINVAL;
     }
 
-    if (size < PER_CPU_POOL_SIZE)
+    if (size < PCPU_POOL_SIZE)
     {
         return -(int32_t)EINVAL;
     }
 
-    if ((size % PER_CPU_POOL_SIZE) != 0U)
+    if ((size % PCPU_POOL_SIZE) != 0U)
     {
         return -(int32_t)EINVAL;
     }
 
-    (void)memset(sys, 0U, sizeof(per_cpu_pool_system_t));
+    (void)memset(sys, 0U, sizeof(pcpu_pool_system_t));
 
     for (i = 0U; i < CONFIG_MAX_CPUS; i++)
     {
-        (void)memset(&sys->pools[i], 0U, sizeof(per_cpu_pool_t));
+        (void)memset(&sys->pools[i], 0U, sizeof(pcpu_pool_t));
 
-        for (j = 0U; j < PER_CPU_POOL_MAX_BLOCKS; j++)
+        for (j = 0U; j < PCPU_POOL_MAX_BLOCKS; j++)
         {
-            sys->pools[i].blocks[j].status = PER_CPU_BLOCK_FREE;
+            sys->pools[i].blocks[j].status = PCPU_BLOCK_FREE;
             sys->pools[i].blocks[j].alloc_count = 0U;
             sys->pools[i].free_count = 0U;
         }
 
-        sys->pools[i].free_count = PER_CPU_POOL_MAX_BLOCKS;
+        sys->pools[i].free_count = PCPU_POOL_MAX_BLOCKS;
         sys->pools[i].allocated_count = 0U;
         sys->pools[i].total_allocations = 0ULL;
         sys->pools[i].total_frees = 0ULL;
@@ -205,16 +205,16 @@ kernel_status_t per_cpu_pool_system_init(per_cpu_pool_system_t *sys,
     }
 
     sys->total_size = size * CONFIG_MAX_CPUS;
-    sys->total_free = PER_CPU_POOL_MAX_BLOCKS * CONFIG_MAX_CPUS;
+    sys->total_free = PCPU_POOL_MAX_BLOCKS * CONFIG_MAX_CPUS;
     sys->total_allocated = 0U;
     sys->total_allocations = 0ULL;
     sys->total_frees = 0ULL;
     sys->balance_count = 0U;
 
-    s_per_cpu_pool_initialized = true;
+    s_pcpu_pool_initialized = true;
 
     printk("Per-CPU Pool System initialized: %u CPUs, %u bytes per pool\n",
-           CONFIG_MAX_CPUS, PER_CPU_POOL_SIZE);
+           CONFIG_MAX_CPUS, PCPU_POOL_SIZE);
 
     return KERNEL_OK;
 }
@@ -226,14 +226,14 @@ kernel_status_t per_cpu_pool_system_init(per_cpu_pool_system_t *sys,
  *          如果本地池不足，尝试从其他 CPU 池借用。
  *
  * @param sys   Per-CPU 内存池系统
- * @param size  分配大小（必须 <= PER_CPU_POOL_BLOCK_SIZE）
+ * @param size  分配大小（必须 <= PCPU_POOL_BLOCK_SIZE）
  *
  * @return 分配的指针，失败返回 NULL
  */
-void *per_cpu_pool_alloc(per_cpu_pool_system_t *sys, uint32_t size)
+void *pcpu_pool_alloc(pcpu_pool_system_t *sys, uint32_t size)
 {
     uint32_t cpu_id;
-    per_cpu_pool_t *pool;
+    pcpu_pool_t *pool;
     uint32_t block_idx;
     void *ptr = NULL;
 
@@ -247,12 +247,12 @@ void *per_cpu_pool_alloc(per_cpu_pool_system_t *sys, uint32_t size)
         return NULL;
     }
 
-    if (size > PER_CPU_POOL_BLOCK_SIZE)
+    if (size > PCPU_POOL_BLOCK_SIZE)
     {
         return NULL;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return NULL;
     }
@@ -266,12 +266,12 @@ void *per_cpu_pool_alloc(per_cpu_pool_system_t *sys, uint32_t size)
     pool = &sys->pools[cpu_id];
 
     /* 从本地池分配 */
-    block_idx = per_cpu_pool_find_free_block(pool);
+    block_idx = pcpu_pool_find_free_block(pool);
 
-    if (block_idx >= PER_CPU_POOL_MAX_BLOCKS)
+    if (block_idx >= PCPU_POOL_MAX_BLOCKS)
     {
         /* 本地池不足，尝试借用 */
-        ptr = per_cpu_pool_borrow(sys, cpu_id);
+        ptr = pcpu_pool_borrow(sys, cpu_id);
 
         if (ptr == NULL)
         {
@@ -282,7 +282,7 @@ void *per_cpu_pool_alloc(per_cpu_pool_system_t *sys, uint32_t size)
     }
     else
     {
-        pool->blocks[block_idx].status = PER_CPU_BLOCK_ALLOCATED;
+        pool->blocks[block_idx].status = PCPU_BLOCK_ALLOCATED;
         pool->blocks[block_idx].alloc_count++;
         pool->free_count--;
         pool->allocated_count++;
@@ -310,12 +310,12 @@ void *per_cpu_pool_alloc(per_cpu_pool_system_t *sys, uint32_t size)
  * @return KERNEL_OK 成功
  * @return -EINVAL 参数无效
  */
-kernel_status_t per_cpu_pool_free(per_cpu_pool_system_t *sys,
+kernel_status_t pcpu_pool_free(pcpu_pool_system_t *sys,
                                   void *ptr,
                                   uint32_t size)
 {
     uint32_t cpu_id;
-    per_cpu_pool_t *pool;
+    pcpu_pool_t *pool;
     uint32_t block_idx;
 
     if (sys == NULL)
@@ -333,12 +333,12 @@ kernel_status_t per_cpu_pool_free(per_cpu_pool_system_t *sys,
         return -(int32_t)EINVAL;
     }
 
-    if (size > PER_CPU_POOL_BLOCK_SIZE)
+    if (size > PCPU_POOL_BLOCK_SIZE)
     {
         return -(int32_t)EINVAL;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return -(int32_t)EINVAL;
     }
@@ -352,14 +352,14 @@ kernel_status_t per_cpu_pool_free(per_cpu_pool_system_t *sys,
     pool = &sys->pools[cpu_id];
 
     /* 找到块索引 */
-    block_idx = per_cpu_pool_find_block(pool, ptr);
+    block_idx = pcpu_pool_find_block(pool, ptr);
 
-    if (block_idx >= PER_CPU_POOL_MAX_BLOCKS)
+    if (block_idx >= PCPU_POOL_MAX_BLOCKS)
     {
         return -(int32_t)EINVAL;
     }
 
-    pool->blocks[block_idx].status = PER_CPU_BLOCK_FREE;
+    pool->blocks[block_idx].status = PCPU_BLOCK_FREE;
     pool->blocks[block_idx].free_count++;
     pool->free_count++;
     pool->allocated_count--;
@@ -380,7 +380,7 @@ kernel_status_t per_cpu_pool_free(per_cpu_pool_system_t *sys,
  *
  * @param sys  Per-CPU 内存池系统
  */
-void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
+void pcpu_pool_balance(pcpu_pool_system_t *sys)
 {
     uint32_t i;
     uint32_t j;
@@ -390,7 +390,7 @@ void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
         return;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return;
     }
@@ -398,11 +398,11 @@ void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
     /* 遍历所有 CPU */
     for (i = 0U; i < CONFIG_MAX_CPUS; i++)
     {
-        per_cpu_pool_t *from_pool = &sys->pools[i];
+        pcpu_pool_t *from_pool = &sys->pools[i];
         uint32_t borrow_count = 0U;
 
         /* 找到需要借用的 CPU（空闲块 < 阈值）*/
-        if (from_pool->free_count < PER_CPU_POOL_BALANCE_THRESHOLD)
+        if (from_pool->free_count < PCPU_POOL_BALANCE_THRESHOLD)
         {
             /* 从其他 CPU 借用 */
             for (j = 0U; j < CONFIG_MAX_CPUS; j++)
@@ -412,18 +412,18 @@ void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
                     continue;
                 }
 
-                per_cpu_pool_t *to_pool = &sys->pools[j];
+                pcpu_pool_t *to_pool = &sys->pools[j];
 
                 /* 找到可以借出的 CPU（空闲块 > 阈值）*/
-                if (to_pool->free_count > PER_CPU_POOL_BALANCE_THRESHOLD)
+                if (to_pool->free_count > PCPU_POOL_BALANCE_THRESHOLD)
                 {
-                    uint32_t block_idx = per_cpu_pool_find_free_block(to_pool);
+                    uint32_t block_idx = pcpu_pool_find_free_block(to_pool);
 
-                    if (block_idx < PER_CPU_POOL_MAX_BLOCKS)
+                    if (block_idx < PCPU_POOL_MAX_BLOCKS)
                     {
                         /* 转移块 */
-                        to_pool->blocks[block_idx].status = PER_CPU_BLOCK_ALLOCATED;
-                        from_pool->blocks[borrow_count].status = PER_CPU_BLOCK_ALLOCATED;
+                        to_pool->blocks[block_idx].status = PCPU_BLOCK_ALLOCATED;
+                        from_pool->blocks[borrow_count].status = PCPU_BLOCK_ALLOCATED;
                         from_pool->blocks[borrow_count].alloc_count++;
 
                         to_pool->free_count--;
@@ -436,7 +436,7 @@ void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
 
                         borrow_count++;
 
-                        if (borrow_count >= PER_CPU_POOL_BALANCE_THRESHOLD)
+                        if (borrow_count >= PCPU_POOL_BALANCE_THRESHOLD)
                         {
                             break;
                         }
@@ -458,7 +458,7 @@ void per_cpu_pool_balance(per_cpu_pool_system_t *sys)
  *
  * @return 本地 CPU 内存池指针
  */
-per_cpu_pool_t *per_cpu_pool_get_local(per_cpu_pool_system_t *sys)
+pcpu_pool_t *pcpu_pool_get_local(pcpu_pool_system_t *sys)
 {
     uint32_t cpu_id;
 
@@ -467,7 +467,7 @@ per_cpu_pool_t *per_cpu_pool_get_local(per_cpu_pool_system_t *sys)
         return NULL;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return NULL;
     }
@@ -489,7 +489,7 @@ per_cpu_pool_t *per_cpu_pool_get_local(per_cpu_pool_system_t *sys)
  *
  * @return 指定 CPU 内存池指针，失败返回 NULL
  */
-per_cpu_pool_t *per_cpu_pool_get_cpu(per_cpu_pool_system_t *sys,
+pcpu_pool_t *pcpu_pool_get_cpu(pcpu_pool_system_t *sys,
                                       uint32_t cpu_id)
 {
     if (sys == NULL)
@@ -502,7 +502,7 @@ per_cpu_pool_t *per_cpu_pool_get_cpu(per_cpu_pool_system_t *sys,
         return NULL;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return NULL;
     }
@@ -525,7 +525,7 @@ per_cpu_pool_t *per_cpu_pool_get_cpu(per_cpu_pool_system_t *sys,
  * @return KERNEL_OK 成功
  * @return -EINVAL 参数无效
  */
-kernel_status_t per_cpu_pool_get_stats(per_cpu_pool_system_t *sys,
+kernel_status_t pcpu_pool_get_stats(pcpu_pool_system_t *sys,
                                        uint32_t cpu_id,
                                        uint32_t *free_count,
                                        uint32_t *allocated_count,
@@ -551,7 +551,7 @@ kernel_status_t per_cpu_pool_get_stats(per_cpu_pool_system_t *sys,
         return -(int32_t)EINVAL;
     }
 
-    if (!s_per_cpu_pool_initialized)
+    if (!s_pcpu_pool_initialized)
     {
         return -(int32_t)EINVAL;
     }
