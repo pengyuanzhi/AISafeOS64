@@ -22,7 +22,6 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <kernel/kernel.h>
 
 /* ========================================================================
  * 配置

@@ -28,6 +28,7 @@
 #include <kernel/object_pool.h>
 #include <kernel/errno.h>
 #include <kernel/barrier.h>
+#include <kernel/mm/slab.h>
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
@@ -66,6 +67,16 @@ static uint32_t s_cspace_free_count;
  *          可直接用于链表操作。
  */
 static cap_t s_cap_table_pool[CONFIG_MAX_CSPACES][CSPACE_MAX_CAPACITY];
+
+/**
+ * @brief 能力表 Slab 缓存集合
+ */
+static struct
+{
+    slab_cache_t caches[CSPACE_MAX_CAPACITY / 64U + 1U];
+    bool initialized;
+} s_cap_table_slab;
+
 
 /**
  * @brief CSpace 子系统全局锁
@@ -276,6 +287,22 @@ kernel_status_t cspace_subsys_init(void)
     (void)memset(s_cspace_hash, 0U, sizeof(s_cspace_hash));
     (void)memset(s_hash_nodes, 0U, sizeof(s_hash_nodes));
 
+    /* 初始化能力表 Slab 缓存 */
+    for (uint32_t i = 0U; i < (CSPACE_MAX_CAPACITY / 64U + 1U); i++)
+    {
+        int32_t ret_slab = slab_create(&s_cap_table_slab.caches[i], 0U);
+        if (ret_slab != KERNEL_OK)
+        {
+            /* 清理已创建的缓存 */
+            for (uint32_t j = 0U; j < i; j++)
+            {
+                (void)slab_destroy(&s_cap_table_slab.caches[j]);
+            }
+            return -(int32_t)ENOMEM;
+        }
+    }
+    s_cap_table_slab.initialized = true;
+
     return KERNEL_OK;
 }
 
@@ -285,6 +312,30 @@ kernel_status_t cspace_subsys_init(void)
  * @details 从静态池分配 CSpace，初始化能力表，
  *          在 slot 0 创建根能力（指向自身，全部权限）。
  */
+
+/**
+ * @brief 销毁能力表 Slab 缓存
+ *
+ * @return KERNEL_OK 成功
+ */
+static kernel_status_t cspace_slab_destroy(void)
+{
+    uint32_t i;
+
+    if (!s_cap_table_slab.initialized)
+    {
+        return KERNEL_OK;
+    }
+
+    for (i = 0U; i < (CSPACE_MAX_CAPACITY / 64U + 1U); i++)
+    {
+        (void)slab_destroy(&s_cap_table_slab.caches[i]);
+    }
+
+    (void)memset(&s_cap_table_slab, 0U, sizeof(s_cap_table_slab));
+
+    return KERNEL_OK;
+}
 kernel_status_t cspace_create(uint32_t capacity, cspace_t **out_cspace)
 {
     kernel_status_t ret;
@@ -326,12 +377,15 @@ kernel_status_t cspace_create(uint32_t capacity, cspace_t **out_cspace)
     /* 设置能力表容量（使用请求值或最大值中较小者） */
     cspace->capacity = capacity;
 
-    /* 关联预分配的能力表存储 */
+    /* 使用 Slab 分配器分配能力表 */
+    cspace->cap_table = (cap_t *)slab_alloc(&s_cap_table_slab.caches[capacity / 64U]);
+    if (cspace->cap_table == NULL)
     {
-        uint32_t pool_idx;
-        /* 通过指针差计算池索引 */
-        pool_idx = (uint32_t)(cspace - &s_cspace_pool[0U]);
-        cspace->cap_table = &s_cap_table_pool[pool_idx][0U];
+        /* Slab 分配失败，释放回池中 */
+        ticket_lock_acquire(&s_subsys_lock);
+        cspace_pool_free(cspace);
+        ticket_lock_release(&s_subsys_lock);
+        return -(int32_t)ENOMEM;
     }
 
     cspace->used_count = 0U;
@@ -424,6 +478,13 @@ void cspace_destroy(cspace_t *cspace)
 
     /* 从哈希索引表中移除 */
     cspace_hash_unregister(cspace->header.id);
+
+    /* 释放能力表（使用 Slab 分配器） */
+    if (cspace->cap_table != NULL)
+    {
+        slab_free(&s_cap_table_slab.caches[cspace->capacity / 64U], cspace->cap_table);
+        cspace->cap_table = NULL;
+    }
 
     /* 释放回静态池 */
     ticket_lock_acquire(&s_subsys_lock);
