@@ -38,6 +38,7 @@ set(KERNEL_ARCH_SOURCES
     arch/arm64/ipi.c
     arch/arm64/secure_boot.c
     arch/arm64/smp_boot.c
+    arch/arm64/icache_optimize.c
 )
 
 # ==============================================================================
@@ -89,6 +90,7 @@ set(KERNEL_MM_SOURCES
     mm/shm.c
     mm/slab.c
     mm/rbtree.c
+    mm/hot_data_cache.c
 )
 
 # ==============================================================================

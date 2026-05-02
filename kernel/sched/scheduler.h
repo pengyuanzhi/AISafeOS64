@@ -25,6 +25,7 @@
 #include <kernel/bitmap.h>
 #include <kernel/list.h>
 #include <kernel/compiler.h>
+#include <kernel/alignment.h>
 #include <stdbool.h>
 #include "thread.h"
 #include <kernel/mm/slab.h>
@@ -44,7 +45,7 @@
  *          - current_thread : 当前正在运行的线程
  *          - idle_thread    : 当前 CPU 的 idle 线程
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     bitmap256_t bitmap;                                       /**< @brief 优先级位图 */
     struct list_head queues[CONFIG_PRIORITY_LEVELS];          /**< @brief 每优先级就绪链表 */

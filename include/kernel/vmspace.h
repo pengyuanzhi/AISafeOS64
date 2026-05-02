@@ -26,6 +26,7 @@
 #include <kernel/page_table.h>
 #include <kernel/spinlock.h>
 #include <kernel/rbtree.h>
+#include <kernel/alignment.h>
 #include <stdint.h>
 
 /* ========================================================================
@@ -105,7 +106,7 @@ typedef enum
  *          每个地址空间由多个 VMA 组成，VMA 之间按地址排序。
  *          使用红黑树管理，查找复杂度 O(log n)。
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     vaddr_t         start;          /**< @brief 起始虚拟地址（页对齐） */
     vaddr_t         end;            /**< @brief 结束虚拟地址（页对齐，不含） */
@@ -127,7 +128,7 @@ typedef struct
  *          包含一个顶层页表（PGD）、VMA 红黑树和 ASID。
  *          使用红黑树管理 VMA，查找复杂度 O(log n)。
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     page_table_t    *pgd;           /**< @brief 顶层页表（L0） */
     asid_t          asid;           /**< @brief 地址空间标识 */

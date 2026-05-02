@@ -26,6 +26,7 @@
 #include <kernel/config.h>
 #include <kernel/list.h>
 #include <kernel/spinlock.h>
+#include <kernel/alignment.h>
 #include <stdint.h>
 
 /* ========================================================================
@@ -119,7 +120,7 @@ typedef struct
  *
  * @note 对应需求: KR-007
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     priority_t  prio;           /**< @brief Pulse 优先级（决定投递顺序） */
     uint8_t     reserved[3];    /**< @brief 保留对齐 */
@@ -153,7 +154,7 @@ typedef enum
  *
  * @note 对应需求: KR-006（通知延迟 < 500ns）
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     kobj_id_t           id;             /**< @brief 通知对象 ID */
     ipc_notify_state_t  state;          /**< @brief 当前状态 */
@@ -191,7 +192,7 @@ typedef enum
  *
  * @note 对应需求: KR-005（同步消息传递）
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     kobj_id_t           id;             /**< @brief 端点 ID */
     ipc_ep_state_t      state;          /**< @brief 端点当前状态 */
@@ -232,7 +233,7 @@ typedef enum
  *
  * @note 对应需求: KR-023
  */
-typedef struct
+typedef struct CACHE_ALIGN(64)
 {
     kobj_id_t           id;             /**< @brief 通道 ID */
     ipc_ch_state_t      state;          /**< @brief 通道状态 */
