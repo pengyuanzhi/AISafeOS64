@@ -45,7 +45,6 @@ set(KERNEL_ARCH_SOURCES
 # 调度器源文件 (sched/)
 # ==============================================================================
 set(KERNEL_SCHED_SOURCES
-sched/stack_guard.c$/a sched/sharded_lock.c/
     sched/scheduler.c
     sched/thread.c
     sched/timer.c
@@ -55,6 +54,7 @@ sched/stack_guard.c$/a sched/sharded_lock.c/
     sched/arinc653.c
     sched/smp.c
     sched/stack_guard.c
+    sched/sharded_lock.c
 )
 
 # ==============================================================================
@@ -69,7 +69,6 @@ set(KERNEL_IPC_SOURCES
     ipc/ipc_batch.c
     ipc/sharded_message_queue.c
     ipc/zero_copy.c
-    ipc/dynamic_link.c
 )
 
 # ==============================================================================
@@ -104,8 +103,7 @@ set(KERNEL_MM_SOURCES
 set(KERNEL_IRQ_SOURCES
     irq/interrupt.c
     irq/syscall_dispatch.c
-    irq/ipi.c
-    irq/ipi_coalesce.c
+    ipi/ipi_coalesce.c
 )
 
 # ==============================================================================
@@ -146,6 +144,7 @@ set(KERNEL_SOURCES
     ${KERNEL_VERIFY_SOURCES}
     ${KERNEL_DRIVER_SOURCES}
     ${KERNEL_ELF_LOADER_SOURCES}
+    dynamic_link.c
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
     ${CMAKE_SOURCE_DIR}/include/kernel/process_impl.c
 )

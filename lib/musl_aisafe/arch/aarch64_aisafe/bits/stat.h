@@ -1,6 +1,9 @@
 #ifndef _MUSL_STAT_H
 #define _MUSL_STAT_H
 
+#include <sys/types.h>
+#include <time.h>
+
 /* struct stat 定义（标准 musl aarch64） */
 struct stat {
 	dev_t st_dev;

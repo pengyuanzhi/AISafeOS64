@@ -111,7 +111,7 @@ static void spinlock_lock(spinlock_t *lock)
     while (spinlock_trylock(lock) == false)
     {
         /* 优化：PAUSE 指令减少功耗 */
-        __builtin_ia32_pause();
+        __asm volatile("wfe");
     }
 }
 
@@ -207,7 +207,7 @@ static void* cache_coherence_thread(void *arg)
     while (atomic_load(&s_sync_flag) == 0)
     {
         /* 等待同步 */
-        __builtin_ia32_pause();
+        __asm volatile("wfe");
     }
 
     /* 读取其他 CPU 的数据 */

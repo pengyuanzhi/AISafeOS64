@@ -1,3 +1,6 @@
+#include <sys/types.h>
+#include <time.h>
+
 struct kstat {
 	dev_t st_dev;
 	ino_t st_ino;
