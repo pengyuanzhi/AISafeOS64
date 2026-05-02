@@ -92,6 +92,7 @@ set(KERNEL_MM_SOURCES
     mm/rbtree.c
     mm/hot_data_cache.c
     mm/buddy_system.c
+    mm/per_cpu_pool.c
 )
 
 # ==============================================================================
