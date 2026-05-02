@@ -44,6 +44,7 @@ set(KERNEL_ARCH_SOURCES
 # 调度器源文件 (sched/)
 # ==============================================================================
 set(KERNEL_SCHED_SOURCES
+sched/stack_guard.c$/a sched/sharded_lock.c/
     sched/scheduler.c
     sched/thread.c
     sched/timer.c
@@ -96,6 +97,8 @@ set(KERNEL_MM_SOURCES
 set(KERNEL_IRQ_SOURCES
     irq/interrupt.c
     irq/syscall_dispatch.c
+    irq/ipi.c
+    irq/ipi_coalesce.c
 )
 
 # ==============================================================================
