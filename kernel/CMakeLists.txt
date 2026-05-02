@@ -91,6 +91,7 @@ set(KERNEL_MM_SOURCES
     mm/slab.c
     mm/rbtree.c
     mm/hot_data_cache.c
+    mm/buddy_system.c
 )
 
 # ==============================================================================
