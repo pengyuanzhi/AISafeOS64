@@ -2911,15 +2911,11 @@ void kernel_main(void)
     /* ---- 第九步：重新武装定时器并启用 IRQ ---- */
     {
         /* 禁用物理定时器（清除 ISTATUS） */
-        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)0U));
-        __asm__ volatile("isb");
+        hal_timer_set_control(0ULL);
 
         /* 读取当前计数器和频率 */
-        uint64_t current = 0ULL;
-        uint64_t freq = 0ULL;
-        __asm__ volatile("mrs %0, cntpct_el0" : "=r"(current));
-        __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
-        __asm__ volatile("isb");
+        uint64_t current = hal_timer_get_count();
+        uint64_t freq = hal_timer_get_freq();
 
         if (freq == 0ULL)
         {
@@ -2928,12 +2924,10 @@ void kernel_main(void)
 
         /* 设置比较值为当前值 + delta */
         uint64_t delta = freq / (uint64_t)CONFIG_TICK_RATE_HZ;
-        __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(current + delta));
-        __asm__ volatile("isb");
+        hal_timer_set_compare(current + delta);
 
         /* 使能定时器（ENABLE=1, IMASK=0） */
-        __asm__ volatile("msr cntp_ctl_el0, %0" :: "r"((uint64_t)1U));
-        __asm__ volatile("isb");
+        hal_timer_set_control(1ULL);
     }
 
     hal_irq_enable();
