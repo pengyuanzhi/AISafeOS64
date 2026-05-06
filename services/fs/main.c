@@ -3,12 +3,12 @@
  * @brief   FS 服务主程序（服务器端）
  * @author  AISafe64 Team
  * @date    2026-04-28
- * @version 1.0
+ * @version 2.0
  *
  * @details FS 服务器端实现：
  *          - IPC 消息处理
  *          - 文件系统操作分发
- *          - RAMFS 注册
+ *          - RAMFS / ROMFS / FAT32 / EXT4 注册
  *
  * @note MISRA-C:2012 合规
  * @note TDD: GREEN 阶段 - 最小实现
@@ -23,16 +23,14 @@
 #include <stddef.h>
 
 /* ========================================================================
- * RAMFS 外部声明
+ * 文件系统外部声明
  * ======================================================================== */
 
 extern const fs_ops_t *ramfs_get_ops(void);
-
-/* ========================================================================
- * ROMFS 外部声明
- * ======================================================================== */
-
 extern const fs_ops_t *romfs_get_ops(void);
+extern const fs_ops_t *fat32_get_ops(void);
+extern const fs_ops_t *ext4_get_ops(void);
+extern const fs_ops_t *devfs_get_ops(void);
 
 /* ========================================================================
  * 初始化
@@ -59,18 +57,39 @@ static int32_t fs_service_init(void)
         return -2;
     }
 
+    /* 注册 FAT32 */
+    ret = fs_register_fs(FS_FSTYPE_FAT32, fat32_get_ops());
+    if (ret != 0)
+    {
+        return -3;
+    }
+
+    /* 注册 EXT4 */
+    ret = fs_register_fs(FS_FSTYPE_EXT4, ext4_get_ops());
+    if (ret != 0)
+    {
+        return -4;
+    }
+
+    /* 注册 DEVFS */
+    ret = fs_register_fs(FS_FSTYPE_DEVFS, devfs_get_ops());
+    if (ret != 0)
+    {
+        return -5;
+    }
+
     /* 挂载 RAMFS 到 /ram */
     ret = fs_mount("/ram", FS_FSTYPE_RAMFS, NULL, 0U);
     if (ret < 0)
     {
-        return -3;
+        return -5;
     }
 
     /* 挂载 ROMFS 到 /rom */
     ret = fs_mount("/rom", FS_FSTYPE_ROMFS, NULL, 0U);
     if (ret < 0)
     {
-        return -4;
+        return -6;
     }
 
     return 0;

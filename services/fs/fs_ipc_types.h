@@ -3,7 +3,7 @@
  * @brief   FS 服务 IPC 消息类型定义
  * @author  AISafe64 Team
  * @date    2026-04-30
- * @version 1.0
+ * @version 2.0
  *
  * @details FS 服务与客户端之间的 IPC 消息类型定义
  *
@@ -51,6 +51,18 @@
 
 /** @brief 修改文件所有者 */
 #define FS_IPC_CHOWN         10U
+
+/** @brief 文件锁操作 */
+#define FS_IPC_FLOCK         11U
+
+/** @brief 创建软链接 */
+#define FS_IPC_SYMLINK       12U
+
+/** @brief 创建硬链接 */
+#define FS_IPC_LINK          13U
+
+/** @brief 读取软链接 */
+#define FS_IPC_READLINK      14U
 
 /* ========================================================================
  * FS IPC 消息头
@@ -198,5 +210,81 @@ typedef struct
     uint64_t st_mtime;       /**< @brief 修改时间 */
     uint64_t st_ctime;       /**< @brief 创建时间 */
 } fs_ipc_fstat_resp_t;
+
+/**
+ * @brief FS 文件锁请求
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    uint32_t fd;             /**< @brief 文件描述符 */
+    uint32_t lock_type;      /**< @brief 锁类型（LOCK_SH/LOCK_EX/LOCK_UN） */
+} fs_ipc_flock_req_t;
+
+/**
+ * @brief FS 文件锁响应
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    int32_t result;          /**< @brief 结果（0 成功，<0 错误码） */
+} fs_ipc_flock_resp_t;
+
+/**
+ * @brief FS 创建软链接请求
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    char oldpath[256];       /**< @brief 旧路径（链接目标） */
+    char newpath[256];       /**< @brief 新路径（链接名称） */
+} fs_ipc_symlink_req_t;
+
+/**
+ * @brief FS 创建软链接响应
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    int32_t result;          /**< @brief 结果（0 成功，<0 错误码） */
+} fs_ipc_symlink_resp_t;
+
+/**
+ * @brief FS 创建硬链接请求
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    char oldpath[256];       /**< @brief 旧路径（现有文件） */
+    char newpath[256];       /**< @brief 新路径（链接名称） */
+} fs_ipc_link_req_t;
+
+/**
+ * @brief FS 创建硬链接响应
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    int32_t result;          /**< @brief 结果（0 成功，<0 错误码） */
+} fs_ipc_link_resp_t;
+
+/**
+ * @brief FS 读取软链接请求
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    char path[256];          /**< @brief 链接路径 */
+} fs_ipc_readlink_req_t;
+
+/**
+ * @brief FS 读取软链接响应
+ */
+typedef struct
+{
+    fs_ipc_msg_header_t header;
+    int32_t result;          /**< @brief 结果（0 成功，<0 错误码） */
+    char target[256];        /**< @brief 链接目标路径 */
+} fs_ipc_readlink_resp_t;
 
 #endif /* FS_IPC_TYPES_H */

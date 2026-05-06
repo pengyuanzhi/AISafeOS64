@@ -414,3 +414,35 @@ int32_t fs_chown(const char *path, uint32_t uid, uint32_t gid)
 
     return 0;
 }
+
+/**
+ * @brief 文件锁操作（通过 IPC）
+ *
+ * @param fd        文件描述符
+ * @param lock_type 锁类型（FS_LOCK_SH/FS_LOCK_EX/FS_LOCK_UN）
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_flock(uint32_t fd, uint32_t lock_type)
+{
+    fd_entry_t *entry;
+
+    entry = fs_get_fd_entry((int32_t)fd);
+    if (entry == NULL)
+    {
+        return -(int32_t)EBADF;
+    }
+
+    /* 验证锁类型 */
+    if ((lock_type != (uint32_t)FS_LOCK_SH) &&
+        (lock_type != (uint32_t)FS_LOCK_EX) &&
+        (lock_type != (uint32_t)FS_LOCK_UN))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* TODO: 通过 IPC 调用 FS 服务器执行锁操作 */
+    /* 服务器端需要根据 vfs_fd 查找 mount_id 和 ino */
+
+    return 0;
+}

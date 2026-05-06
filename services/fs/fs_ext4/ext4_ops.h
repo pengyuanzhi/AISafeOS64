@@ -1,19 +1,19 @@
 /**
- * @file    ext4.h
- * @brief   Ext4 文件系统公共头文件
+ * @file    ext4_ops.h
+ * @brief   Ext4 文件系统 fs_ops 适配层头文件
  * @author  AISafe64 Team
- * @date    2026-05-06
+ * @date    2026-05-07
  * @version 1.0
  *
- * @details Ext4 文件系统公共接口
+ * @details Ext4 文件系统 fs_ops 适配层接口
  *
  * @note MISRA-C:2012 合规
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
-#ifndef EXT4_H
-#define EXT4_H
+#ifndef EXT4_OPS_H
+#define EXT4_OPS_H
 
 #include "fs_ops.h"
 
@@ -24,4 +24,4 @@
  */
 const fs_ops_t *ext4_get_ops(void);
 
-#endif /* EXT4_H */
+#endif /* EXT4_OPS_H */

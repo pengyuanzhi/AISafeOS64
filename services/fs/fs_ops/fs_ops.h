@@ -3,12 +3,13 @@
  * @brief   文件系统抽象层接口
  * @author  AISafe64 Team
  * @date    2026-04-28
- * @version 1.0
+ * @version 2.0
  *
  * @details 文件系统抽象层接口，支持多种文件系统：
  *          - RAMFS: 内存文件系统
  *          - ROMFS: 只读文件系统
  *          - FAT32: FAT32 文件系统
+ *          - EXT4: Ext4 文件系统
  *          - DEVFS: 设备文件系统
  *
  * @note MISRA-C:2012 合规
@@ -36,7 +37,8 @@ typedef enum
     FS_TYPE_DIRECTORY,       /**< @brief 目录 */
     FS_TYPE_DEVICE,          /**< @brief 设备文件 */
     FS_TYPE_SYMLINK,         /**< @brief 符号链接 */
-    FS_TYPE_PIPE             /**< @brief 管道 */
+    FS_TYPE_PIPE,            /**< @brief 管道 */
+    FS_TYPE_HARDLINK         /**< @brief 硬链接 */
 } fs_file_type_t;
 
 /**
@@ -47,6 +49,7 @@ typedef enum
     FS_FSTYPE_RAMFS = 0U,       /**< @brief 内存文件系统 */
     FS_FSTYPE_ROMFS,            /**< @brief 只读文件系统 */
     FS_FSTYPE_FAT32,            /**< @brief FAT32 文件系统 */
+    FS_FSTYPE_EXT4,             /**< @brief Ext4 文件系统 */
     FS_FSTYPE_DEVFS             /**< @brief 设备文件系统 */
 } fs_fstype_t;
 
@@ -194,7 +197,69 @@ typedef struct fs_ops
      */
     int32_t (*sync)(uint32_t mount_id);
 
+    /**
+     * @brief 创建符号链接
+     *
+     * @param mount_id  挂载点 ID
+     * @param target    目标路径
+     * @param linkpath  链接路径
+     *
+     * @return 0 成功，<0 失败
+     */
+    int32_t (*symlink)(uint32_t mount_id, const char *target,
+                        const char *linkpath);
+
+    /**
+     * @brief 创建硬链接
+     *
+     * @param mount_id  挂载点 ID
+     * @param oldpath   原始路径
+     * @param newpath   新路径
+     *
+     * @return 0 成功，<0 失败
+     */
+    int32_t (*link)(uint32_t mount_id, const char *oldpath,
+                     const char *newpath);
+
+    /**
+     * @brief 读取符号链接目标
+     *
+     * @param mount_id 挂载点 ID
+     * @param path     符号链接路径
+     * @param buf      输出缓冲区
+     * @param bufsize  缓冲区大小
+     *
+     * @return 实际读取字节数，<0 失败
+     */
+    int64_t (*readlink)(uint32_t mount_id, const char *path,
+                         char *buf, uint64_t bufsize);
+
 } fs_ops_t;
+
+/* ========================================================================
+ * 文件锁接口
+ * ======================================================================== */
+
+/**
+ * @brief 文件锁类型
+ */
+typedef enum
+{
+    FS_LOCK_SH = 1U,         /**< @brief 共享锁（读锁） */
+    FS_LOCK_EX = 2U,         /**< @brief 排他锁（写锁） */
+    FS_LOCK_UN = 8U          /**< @brief 解锁 */
+} fs_lock_type_t;
+
+/**
+ * @brief 文件锁状态
+ */
+typedef struct
+{
+    bool locked;             /**< @brief 是否加锁 */
+    fs_lock_type_t lock_type;/**< @brief 锁类型 */
+    uint32_t owner_tid;      /**< @brief 锁拥有者线程 ID */
+    uint32_t lock_count;     /**< @brief 锁计数（用于嵌套锁） */
+} fs_file_lock_t;
 
 /* ========================================================================
  * 文件系统管理接口
@@ -231,5 +296,49 @@ int32_t fs_mount(const char *path, fs_fstype_t fstype,
  * @return 0 成功，<0 失败
  */
 int32_t fs_unmount(uint32_t mount_id);
+
+/**
+ * @brief 文件锁操作
+ *
+ * @param mount_id 挂载点 ID
+ * @param ino inode 编号
+ * @param lock_type 锁类型（LOCK_SH/LOCK_EX/LOCK_UN）
+ * @param owner_tid 线程 ID
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_flock(uint32_t mount_id, uint32_t ino,
+                  fs_lock_type_t lock_type, uint32_t owner_tid);
+
+/**
+ * @brief 创建符号链接
+ *
+ * @param target   目标路径
+ * @param linkpath 链接路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_symlink(const char *target, const char *linkpath);
+
+/**
+ * @brief 创建硬链接
+ *
+ * @param oldpath 原始路径
+ * @param newpath 新路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_link(const char *oldpath, const char *newpath);
+
+/**
+ * @brief 读取符号链接目标
+ *
+ * @param path     符号链接路径
+ * @param buf      输出缓冲区
+ * @param bufsize  缓冲区大小
+ *
+ * @return 实际读取字节数，<0 失败
+ */
+int64_t fs_readlink(const char *path, char *buf, uint64_t bufsize);
 
 #endif /* KERNEL_FS_OPS_H */
