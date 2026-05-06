@@ -19,6 +19,8 @@
 
 #include "fs_ops.h"
 #include "fs_ipc_types.h"
+#include "fs_ramfs/ramfs.h"
+#include "fs_romfs/romfs.h"
 #include <kernel/fs_ipc.h>
 #include <errno.h>
 #include <string.h>
@@ -422,6 +424,92 @@ static int32_t fs_server_fstat(uint32_t fd, fs_stat_t *stat)
  * IPC 消息处理
  * ======================================================================== */
 
+/* ========================================================================
+ * 文件锁和链接操作
+ * ======================================================================== */
+
+/**
+ * @brief 文件锁操作
+ */
+static int32_t fs_server_flock(uint32_t fd, uint32_t lock_type)
+{
+    if (fd >= 32U)
+    {
+        return -EBADF;
+    }
+
+    if (!s_fd_table[fd].in_use)
+    {
+        return -EBADF;
+    }
+
+    /* 调用文件锁接口（传入线程ID） */
+    /* TODO: 获取当前线程 ID */
+    uint32_t tid = 0U;
+
+    return fs_flock(s_fd_table[fd].mount_id, s_fd_table[fd].ino,
+                    (fs_lock_type_t)lock_type, tid);
+}
+
+/**
+ * @brief 创建软链接
+ */
+static int32_t fs_server_symlink(const char *oldpath, const char *newpath)
+{
+    fs_inode_t inode;
+    uint32_t mount_id;
+    int32_t ret;
+
+    /* 查找挂载点 */
+    /* TODO: 从路径解析挂载点，这里简化处理 */
+    mount_id = 0U;
+
+    /* 调用 RAMFS 软链接操作 */
+    ret = ramfs_do_symlink(mount_id, oldpath, newpath);
+
+    return ret;
+}
+
+/**
+ * @brief 创建硬链接
+ */
+static int32_t fs_server_link(const char *oldpath, const char *newpath)
+{
+    uint32_t mount_id;
+    int32_t ret;
+
+    /* 查找挂载点 */
+    /* TODO: 从路径解析挂载点，这里简化处理 */
+    mount_id = 0U;
+
+    /* 调用 RAMFS 硬链接操作 */
+    ret = ramfs_do_link(mount_id, oldpath, newpath);
+
+    return ret;
+}
+
+/**
+ * @brief 读取软链接
+ */
+static int32_t fs_server_readlink(const char *path, char *buf, uint64_t bufsize)
+{
+    uint32_t mount_id;
+    int32_t ret;
+
+    /* 查找挂载点 */
+    /* TODO: 从路径解析挂载点，这里简化处理 */
+    mount_id = 0U;
+
+    /* 调用 RAMFS 读取软链接 */
+    ret = ramfs_do_readlink(mount_id, path, buf, bufsize);
+
+    return ret;
+}
+
+/* ========================================================================
+ * IPC 消息处理
+ * ======================================================================== */
+
 /**
  * @brief 处理 FS IPC 消息
  */
@@ -561,6 +649,70 @@ static void fs_server_handle_ipc_msg(const fs_ipc_msg_header_t *header,
             }
 
             *resp_size = sizeof(fs_ipc_fstat_resp_t);
+            break;
+        }
+
+        case FS_IPC_FLOCK:
+        {
+            const fs_ipc_flock_req_t *req = (const fs_ipc_flock_req_t *)req_data;
+            fs_ipc_flock_resp_t *resp = (fs_ipc_flock_resp_t *)resp_data;
+
+            int32_t result = fs_server_flock(req->fd, req->lock_type);
+            resp->header.msg_type = header->msg_type;
+            resp->header.msg_id = header->msg_id;
+            resp->header.status = 0;
+            resp->header.reserved = 0;
+            resp->result = result;
+
+            *resp_size = sizeof(fs_ipc_flock_resp_t);
+            break;
+        }
+
+        case FS_IPC_SYMLINK:
+        {
+            const fs_ipc_symlink_req_t *req = (const fs_ipc_symlink_req_t *)req_data;
+            fs_ipc_symlink_resp_t *resp = (fs_ipc_symlink_resp_t *)resp_data;
+
+            int32_t result = fs_server_symlink(req->oldpath, req->newpath);
+            resp->header.msg_type = header->msg_type;
+            resp->header.msg_id = header->msg_id;
+            resp->header.status = 0;
+            resp->header.reserved = 0;
+            resp->result = result;
+
+            *resp_size = sizeof(fs_ipc_symlink_resp_t);
+            break;
+        }
+
+        case FS_IPC_LINK:
+        {
+            const fs_ipc_link_req_t *req = (const fs_ipc_link_req_t *)req_data;
+            fs_ipc_link_resp_t *resp = (fs_ipc_link_resp_t *)resp_data;
+
+            int32_t result = fs_server_link(req->oldpath, req->newpath);
+            resp->header.msg_type = header->msg_type;
+            resp->header.msg_id = header->msg_id;
+            resp->header.status = 0;
+            resp->header.reserved = 0;
+            resp->result = result;
+
+            *resp_size = sizeof(fs_ipc_link_resp_t);
+            break;
+        }
+
+        case FS_IPC_READLINK:
+        {
+            const fs_ipc_readlink_req_t *req = (const fs_ipc_readlink_req_t *)req_data;
+            fs_ipc_readlink_resp_t *resp = (fs_ipc_readlink_resp_t *)resp_data;
+
+            int32_t result = fs_server_readlink(req->path, resp->target, 256U);
+            resp->header.msg_type = header->msg_type;
+            resp->header.msg_id = header->msg_id;
+            resp->header.status = 0;
+            resp->header.reserved = 0;
+            resp->result = result;
+
+            *resp_size = sizeof(fs_ipc_readlink_resp_t);
             break;
         }
 
