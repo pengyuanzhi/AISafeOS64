@@ -1,9 +1,9 @@
 /**
  * @file    partition.h
- * @brief   磁盘分区管理公共接口
+ * @brief   磁盘分区管理公共接口（更新版本）
  * @author  AISafe64 Team
  * @date    2026-05-07
- * @version 1.0
+ * @version 2.0
  *
  * @details 磁盘分区管理公共接口
  *
@@ -83,6 +83,56 @@ int32_t partition_gpt_parse(partition_disk_t *disk, uint64_t lba,
  */
 int32_t partition_gpt_create_table(partition_disk_t *disk);
 
+/**
+ * @brief 创建 GPT 分区
+ *
+ * @param disk 磁盘描述符
+ * @param partition_name 分区名称
+ * @param start_lba 起始 LBA
+ * @param size_in_sectors 分区大小（扇区数）
+ * @param partition_type 分区类型（GPT_PART_TYPE_*）
+ * @param bootable 是否可引导（GPT 不使用）
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t gpt_create_partition(partition_disk_t *disk,
+                              const char *partition_name,
+                              uint64_t start_lba,
+                              uint64_t size_in_sectors,
+                              uint32_t partition_type,
+                              bool bootable);
+
+/**
+ * @brief 删除 GPT 分区
+ *
+ * @param disk 磁盘描述符
+ * @param partition_number 分区编号
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t gpt_delete_partition(partition_disk_t *disk, uint32_t partition_number);
+
+/**
+ * @brief 调整 GPT 分区大小
+ *
+ * @param disk 磁盘描述符
+ * @param partition_number 分区编号
+ * @param new_size 新大小（扇区数）
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t gpt_resize_partition(partition_disk_t *disk, uint32_t partition_number,
+                              uint64_t new_size);
+
+/**
+ * @brief 同步 GPT 分区表
+ *
+ * @param disk 磁盘描述符
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t gpt_sync_partition_table(partition_disk_t *disk);
+
 /* ========================================================================
  * 通用分区管理接口
  * ======================================================================== */
@@ -115,24 +165,26 @@ int32_t partition_close(partition_disk_t *disk);
 int32_t partition_scan(partition_disk_t *disk);
 
 /**
- * @brief 创建分区
+ * @brief 创建分区（自动选择 MBR/GPT）
  *
  * @param disk 磁盘描述符
+ * @param partition_name 分区名称
  * @param start_lba 起始 LBA
  * @param size_in_sectors 分区大小（扇区数）
- * @param partition_type 分区类型（MBR 类型）
+ * @param partition_type 分区类型（MBR 类型或 GPT_PART_TYPE_*）
  * @param bootable 是否可引导
  *
  * @return 分区编号（>=0 成功），<0 失败
  */
 int32_t partition_create(partition_disk_t *disk,
+                         const char *partition_name,
                          uint64_t start_lba,
                          uint64_t size_in_sectors,
                          uint32_t partition_type,
                          bool bootable);
 
 /**
- * @brief 删除分区
+ * @brief 删除分区（自动选择 MBR/GPT）
  *
  * @param disk 磁盘描述符
  * @param partition_number 分区编号
@@ -142,7 +194,7 @@ int32_t partition_create(partition_disk_t *disk,
 int32_t partition_delete(partition_disk_t *disk, uint32_t partition_number);
 
 /**
- * @brief 调整分区大小
+ * @brief 调整分区大小（自动选择 MBR/GPT）
  *
  * @param disk 磁盘描述符
  * @param partition_number 分区编号
@@ -154,7 +206,7 @@ int32_t partition_resize(partition_disk_t *disk, uint32_t partition_number,
                           uint64_t new_size);
 
 /**
- * @brief 同步分区表
+ * @brief 同步分区表（自动选择 MBR/GPT）
  *
  * @param disk 磁盘描述符
  *
