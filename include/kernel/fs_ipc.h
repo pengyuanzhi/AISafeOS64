@@ -114,6 +114,19 @@
 #define FS_F_SETFL             4U
 
 /* ========================================================================
+ * FS 文件锁类型
+ * ======================================================================== */
+
+/** @brief 共享锁（读锁） */
+#define FS_LOCK_SH             1U
+
+/** @brief 排他锁（写锁） */
+#define FS_LOCK_EX             2U
+
+/** @brief 解锁 */
+#define FS_LOCK_UN             8U
+
+/* ========================================================================
  * FS 文件状态结构体
  * ======================================================================== */
 
@@ -246,5 +259,46 @@ int32_t fs_chmod(const char *path, uint32_t mode);
  * @return 0 成功，<0 失败
  */
 int32_t fs_chown(const char *path, uint32_t uid, uint32_t gid);
+
+/**
+ * @brief 文件锁操作
+ *
+ * @param fd        文件描述符
+ * @param lock_type 锁类型（FS_LOCK_SH/FS_LOCK_EX/FS_LOCK_UN）
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_flock(uint32_t fd, uint32_t lock_type);
+
+/**
+ * @brief 创建符号链接
+ *
+ * @param target   目标路径
+ * @param linkpath 链接路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_symlink(const char *target, const char *linkpath);
+
+/**
+ * @brief 创建硬链接
+ *
+ * @param oldpath 原始路径
+ * @param newpath 新路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_link(const char *oldpath, const char *newpath);
+
+/**
+ * @brief 读取符号链接目标
+ *
+ * @param path     符号链接路径
+ * @param buf      输出缓冲区
+ * @param bufsize  缓冲区大小
+ *
+ * @return 实际读取字节数，<0 失败
+ */
+int64_t fs_readlink(const char *path, char *buf, uint64_t bufsize);
 
 #endif /* KERNEL_FS_IPC_H */

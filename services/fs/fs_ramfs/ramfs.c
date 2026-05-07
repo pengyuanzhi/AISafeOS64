@@ -3,12 +3,13 @@
  * @brief   RAMFS 内存文件系统实现
  * @author  AISafe64 Team
  * @date    2026-04-28
- * @version 2.0
+ * @version 2.1
  *
  * @details RAMFS 内存文件系统实现：
  *          - 纯内存文件系统
  *          - 支持文件/目录操作
  *          - 支持软链接和硬链接
+ *          - 文件名哈希索引（djb2 + 开放寻址）
  *
  * @note MISRA-C:2012 合规
  * @note TDD: GREEN 阶段 - 最小实现
@@ -17,6 +18,7 @@
  */
 
 #include "fs_ops.h"
+#include "ramfs_hash.h"
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -68,6 +70,9 @@ static ramfs_file_t s_files[RAMFS_MAX_FILES];
 /** @brief 下一个 inode 编号 */
 static uint32_t s_next_ino;
 
+/** @brief 文件名哈希表 */
+static ramfs_hash_table_t s_name_hash;
+
 /* ========================================================================
  * 辅助函数
  * ======================================================================== */
@@ -91,21 +96,39 @@ static ramfs_file_t *find_file_by_ino(uint32_t ino)
 }
 
 /**
- * @brief 根据路径查找文件
+ * @brief 根据路径查找文件（使用哈希索引）
+ *
+ * @details 使用哈希表进行 O(1) 平均时间复杂度的文件名查找
  */
 static ramfs_file_t *find_file_by_path(const char *path)
 {
-    uint32_t i;
+    ramfs_file_ref_t *ref_ptr;
 
-    for (i = 0U; i < RAMFS_MAX_FILES; i++)
+    if (path == NULL)
     {
-        if (s_files[i].in_use && strcmp(s_files[i].name, path) == 0)
-        {
-            return &s_files[i];
-        }
+        return NULL;
     }
 
-    return NULL;
+    /* 使用哈希表查找 */
+    ref_ptr = ramfs_hash_lookup(&s_name_hash, path);
+
+    if (ref_ptr == NULL)
+    {
+        return NULL;
+    }
+
+    /* 安全检查：验证索引有效且文件在使用中 */
+    if (ref_ptr->file_index >= RAMFS_MAX_FILES)
+    {
+        return NULL;
+    }
+
+    if (!s_files[ref_ptr->file_index].in_use)
+    {
+        return NULL;
+    }
+
+    return &s_files[ref_ptr->file_index];
 }
 
 /**
@@ -143,6 +166,9 @@ static int32_t ramfs_mount(fs_mount_t *mnt, const char *device)
 
     s_next_ino = 1U;
 
+    /* 初始化哈希表 */
+    (void)ramfs_hash_init(&s_name_hash);
+
     return 0;
 }
 
@@ -152,6 +178,9 @@ static int32_t ramfs_mount(fs_mount_t *mnt, const char *device)
 static int32_t ramfs_unmount(fs_mount_t *mnt)
 {
     (void)mnt;
+
+    /* 清空哈希表 */
+    (void)ramfs_hash_init(&s_name_hash);
 
     return 0;
 }
@@ -207,6 +236,8 @@ static int32_t ramfs_create(uint32_t mount_id, const char *path,
                             uint32_t mode, fs_inode_t *inode)
 {
     ramfs_file_t *file;
+    uint32_t file_index;
+    int32_t hash_ret;
 
     (void)mount_id;
 
@@ -222,12 +253,27 @@ static int32_t ramfs_create(uint32_t mount_id, const char *path,
         return -1;
     }
 
-    /* 分配新文件 */
-    file = alloc_file();
-    if (file == NULL)
+    /* 查找空闲文件表项 */
+    file_index = RAMFS_MAX_FILES;
+    for (uint32_t i = 0U; i < RAMFS_MAX_FILES; i++)
+    {
+        if (!s_files[i].in_use)
+        {
+            file_index = i;
+            break;
+        }
+    }
+
+    if (file_index >= RAMFS_MAX_FILES)
     {
         return -1;
     }
+
+    /* 初始化文件 */
+    file = &s_files[file_index];
+    (void)memset(file, 0, sizeof(ramfs_file_t));
+    file->ino = s_next_ino++;
+    file->nlinks = 1U;
 
     /* 填充文件信息 */
     (void)strncpy(file->name, path, 63U);
@@ -237,6 +283,23 @@ static int32_t ramfs_create(uint32_t mount_id, const char *path,
     file->in_use = true;
     file->is_symlink = false;
     file->target_ino = 0U;
+
+    /* 添加到哈希表 */
+    {
+        ramfs_file_ref_t ref;
+        ref.name[0] = '\0';
+        (void)strncpy(ref.name, file->name, RAMFS_HASH_NAME_MAX - 1U);
+        ref.name[RAMFS_HASH_NAME_MAX - 1U] = '\0';
+        ref.ino = file->ino;
+        ref.file_index = file_index;
+        hash_ret = ramfs_hash_insert(&s_name_hash, &ref);
+    }
+
+    if (hash_ret < 0)
+    {
+        file->in_use = false;
+        return -1;
+    }
 
     if (inode != NULL)
     {
@@ -399,6 +462,9 @@ static int32_t ramfs_unlink(uint32_t mount_id, const char *path)
         return 0;
     }
 
+    /* 从哈希表移除 */
+    (void)ramfs_hash_remove(&s_name_hash, file->name);
+
     /* 删除文件 */
     file->in_use = false;
 
@@ -460,7 +526,7 @@ static int32_t ramfs_symlink(uint32_t mount_id, const char *oldpath,
     (void)strncpy(link->name, newpath, 63U);
     link->name[63U] = '\0';
     link->size = (uint32_t)strlen(oldpath);
-    link->mode = 0777;
+    link->mode = 0x1FFU;  /* rwxrwxrwx = 0777 */
     link->in_use = true;
     link->is_symlink = true;
     link->target_ino = target->ino;
@@ -469,6 +535,19 @@ static int32_t ramfs_symlink(uint32_t mount_id, const char *oldpath,
     /* 将目标路径存入 data 字段 */
     (void)strncpy((char *)link->data, oldpath, RAMFS_MAX_FILE_SIZE - 1U);
     link->data[RAMFS_MAX_FILE_SIZE - 1U] = '\0';
+
+    /* 添加到哈希表 */
+    {
+        ramfs_file_ref_t ref;
+        uint32_t link_index;
+        link_index = (uint32_t)(link - &s_files[0]);
+        ref.name[0] = '\0';
+        (void)strncpy(ref.name, link->name, RAMFS_HASH_NAME_MAX - 1U);
+        ref.name[RAMFS_HASH_NAME_MAX - 1U] = '\0';
+        ref.ino = link->ino;
+        ref.file_index = link_index;
+        (void)ramfs_hash_insert(&s_name_hash, &ref);
+    }
 
     return 0;
 }
@@ -534,6 +613,19 @@ static int32_t ramfs_link(uint32_t mount_id, const char *oldpath,
     /* 增加硬链接计数 */
     target->nlinks++;
     link->nlinks = target->nlinks;
+
+    /* 添加到哈希表 */
+    {
+        ramfs_file_ref_t ref;
+        uint32_t link_index;
+        link_index = (uint32_t)(link - &s_files[0]);
+        ref.name[0] = '\0';
+        (void)strncpy(ref.name, link->name, RAMFS_HASH_NAME_MAX - 1U);
+        ref.name[RAMFS_HASH_NAME_MAX - 1U] = '\0';
+        ref.ino = link->ino;
+        ref.file_index = link_index;
+        (void)ramfs_hash_insert(&s_name_hash, &ref);
+    }
 
     return 0;
 }
