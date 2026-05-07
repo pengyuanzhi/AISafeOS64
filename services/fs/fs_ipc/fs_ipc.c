@@ -446,3 +446,70 @@ int32_t fs_flock(uint32_t fd, uint32_t lock_type)
 
     return 0;
 }
+
+/**
+ * @brief 创建符号链接（通过 IPC）
+ *
+ * @param target   目标路径
+ * @param linkpath 链接路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_symlink(const char *target, const char *linkpath)
+{
+    fs_ipc_init();
+
+    if ((target == NULL) || (linkpath == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
+    return 0;
+}
+
+/**
+ * @brief 创建硬链接（通过 IPC）
+ *
+ * @param oldpath 原始路径
+ * @param newpath 新路径
+ *
+ * @return 0 成功，<0 失败
+ */
+int32_t fs_link(const char *oldpath, const char *newpath)
+{
+    fs_ipc_init();
+
+    if ((oldpath == NULL) || (newpath == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
+    return 0;
+}
+
+/**
+ * @brief 读取符号链接目标（通过 IPC）
+ *
+ * @param path     符号链接路径
+ * @param buf      输出缓冲区
+ * @param bufsize  缓冲区大小
+ *
+ * @return 实际读取字节数，<0 失败
+ */
+int64_t fs_readlink(const char *path, char *buf, uint64_t bufsize)
+{
+    fs_ipc_init();
+
+    if ((path == NULL) || (buf == NULL) || (bufsize == 0U))
+    {
+        return -(int64_t)EINVAL;
+    }
+
+    /* TODO: 通过 IPC 调用 FS 服务器 */
+
+    return 0;
+}

@@ -8,7 +8,7 @@
  * @details FS 服务器端实现：
  *          - IPC 消息处理
  *          - 文件系统操作分发
- *          - RAMFS / ROMFS / FAT32 / EXT4 注册
+ *          - RAMFS / ROMFS / FAT32 / EXT4 / DEVFS 注册
  *
  * @note MISRA-C:2012 合规
  * @note TDD: GREEN 阶段 - 最小实现
@@ -90,6 +90,13 @@ static int32_t fs_service_init(void)
     if (ret < 0)
     {
         return -6;
+    }
+
+    /* 挂载 DEVFS 到 /dev */
+    ret = fs_mount("/dev", FS_FSTYPE_DEVFS, NULL, 0U);
+    if (ret < 0)
+    {
+        return -7;
     }
 
     return 0;

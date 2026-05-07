@@ -309,21 +309,107 @@ static int32_t romfs_sync(uint32_t mount_id)
 }
 
 /* ========================================================================
+ * ROMFS 只读链接支持
+ * ======================================================================== */
+
+/**
+ * @brief ROMFS symlink - 只读文件系统不支持创建
+ */
+static int32_t romfs_symlink(uint32_t mount_id, const char *target,
+                              const char *linkpath)
+{
+    (void)mount_id;
+    (void)target;
+    (void)linkpath;
+
+    /* ROMFS 是只读文件系统，不支持创建符号链接 */
+    return -30;  /* EROFS */
+}
+
+/**
+ * @brief ROMFS link - 只读文件系统不支持创建
+ */
+static int32_t romfs_link(uint32_t mount_id, const char *oldpath,
+                           const char *newpath)
+{
+    (void)mount_id;
+    (void)oldpath;
+    (void)newpath;
+
+    /* ROMFS 是只读文件系统，不支持创建硬链接 */
+    return -30;  /* EROFS */
+}
+
+/**
+ * @brief ROMFS readlink - 读取只读符号链接
+ *
+ * @note ROMFS 可以包含预构建的符号链接（镜像中已存在）
+ */
+static int64_t romfs_readlink(uint32_t mount_id, const char *path,
+                               char *buf, uint64_t bufsize)
+{
+    uint32_t i;
+
+    (void)mount_id;
+
+    if ((path == NULL) || (buf == NULL) || (bufsize == 0U))
+    {
+        return -1;
+    }
+
+    /* 查找 inode */
+    for (i = 0U; i < (ROMFS_MAX_FILES + ROMFS_MAX_DIRS); i++)
+    {
+        if (s_inodes[i].type == (uint32_t)FS_TYPE_SYMLINK)
+        {
+            /* 简化实现：检查路径是否匹配 */
+            /* TODO: 实现完整的路径匹配 */
+            if (s_inodes[i].data_offset < 65536U)
+            {
+                uint64_t len;
+
+                /* 从数据区读取链接目标 */
+                len = 0ULL;
+                while ((len < bufsize) && (len < (uint64_t)s_inodes[i].size) &&
+                       (s_inodes[i].data_offset + (uint32_t)len < 65536U) &&
+                       (s_data[s_inodes[i].data_offset + (uint32_t)len] != '\0'))
+                {
+                    buf[len] = (char)s_data[s_inodes[i].data_offset + (uint32_t)len];
+                    len++;
+                }
+
+                if (len < bufsize)
+                {
+                    buf[len] = '\0';
+                }
+
+                return (int64_t)len;
+            }
+        }
+    }
+
+    return -2;  /* ENOENT */
+}
+
+/* ========================================================================
  * ROMFS 操作接口
  * ======================================================================== */
 
 /** @brief ROMFS 操作接口 */
 static const fs_ops_t s_romfs_ops =
 {
-    .mount  = romfs_mount,
-    .unmount = romfs_unmount,
-    .lookup = romfs_lookup,
-    .create = romfs_create,
-    .read   = romfs_read,
-    .write  = romfs_write,
-    .mkdir  = romfs_mkdir,
-    .unlink = romfs_unlink,
-    .sync   = romfs_sync,
+    .mount    = romfs_mount,
+    .unmount  = romfs_unmount,
+    .lookup   = romfs_lookup,
+    .create   = romfs_create,
+    .read     = romfs_read,
+    .write    = romfs_write,
+    .mkdir    = romfs_mkdir,
+    .unlink   = romfs_unlink,
+    .sync     = romfs_sync,
+    .symlink  = romfs_symlink,
+    .link     = romfs_link,
+    .readlink = romfs_readlink
 };
 
 /* ========================================================================

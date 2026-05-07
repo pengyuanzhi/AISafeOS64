@@ -579,15 +579,18 @@ static int32_t ramfs_readlink(uint32_t mount_id, const char *path,
 
 static const fs_ops_t s_ramfs_ops =
 {
-    .mount   = ramfs_mount,
-    .unmount = ramfs_unmount,
-    .lookup  = ramfs_lookup,
-    .create  = ramfs_create,
-    .read    = ramfs_read,
-    .write   = ramfs_write,
-    .mkdir   = ramfs_mkdir,
-    .unlink  = ramfs_unlink,
-    .sync    = ramfs_sync
+    .mount    = ramfs_mount,
+    .unmount  = ramfs_unmount,
+    .lookup   = ramfs_lookup,
+    .create   = ramfs_create,
+    .read     = ramfs_read,
+    .write    = ramfs_write,
+    .mkdir    = ramfs_mkdir,
+    .unlink   = ramfs_unlink,
+    .sync     = ramfs_sync,
+    .symlink  = ramfs_symlink,
+    .link     = ramfs_link,
+    .readlink = ramfs_readlink
 };
 
 /* ========================================================================
