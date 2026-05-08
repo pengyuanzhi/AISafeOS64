@@ -3,13 +3,14 @@
  * @brief   RAMFS 内存文件系统实现
  * @author  AISafe64 Team
  * @date    2026-04-28
- * @version 2.1
+ * @version 2.2
  *
  * @details RAMFS 内存文件系统实现：
  *          - 纯内存文件系统
  *          - 支持文件/目录操作
  *          - 支持软链接和硬链接
  *          - 文件名哈希索引（djb2 + 开放寻址）
+ *          - inode LRU 缓存加速重复访问
  *
  * @note MISRA-C:2012 合规
  * @note TDD: GREEN 阶段 - 最小实现
@@ -18,6 +19,8 @@
  */
 
 #include "fs_ops.h"
+#include "fs_inode_cache.h"
+#include "fs_page_cache.h"
 #include "ramfs_hash.h"
 #include <string.h>
 #include <stdint.h>
@@ -72,6 +75,12 @@ static uint32_t s_next_ino;
 
 /** @brief 文件名哈希表 */
 static ramfs_hash_table_t s_name_hash;
+
+/** @brief inode 缓存 */
+static inode_cache_t s_inode_cache;
+
+/** @brief 页缓存 */
+static page_cache_t s_page_cache;
 
 /* ========================================================================
  * 辅助函数
@@ -169,6 +178,12 @@ static int32_t ramfs_mount(fs_mount_t *mnt, const char *device)
     /* 初始化哈希表 */
     (void)ramfs_hash_init(&s_name_hash);
 
+    /* 初始化 inode 缓存 */
+    inode_cache_init(&s_inode_cache);
+
+    /* 初始化页缓存 */
+    (void)page_cache_init(&s_page_cache);
+
     return 0;
 }
 
@@ -182,16 +197,24 @@ static int32_t ramfs_unmount(fs_mount_t *mnt)
     /* 清空哈希表 */
     (void)ramfs_hash_init(&s_name_hash);
 
+    /* 清空 inode 缓存 */
+    inode_cache_clear(&s_inode_cache);
+
+    /* 清空页缓存 */
+    page_cache_clear(&s_page_cache);
+
     return 0;
 }
 
 /**
- * @brief RAMFS lookup
+ * @brief RAMFS lookup（集成 inode 缓存）
  */
 static int32_t ramfs_lookup(uint32_t mount_id, const char *path,
                             fs_inode_t *inode)
 {
     ramfs_file_t *file;
+    fs_inode_t cache_inode;
+    int32_t ret;
 
     (void)mount_id;
 
@@ -224,6 +247,15 @@ static int32_t ramfs_lookup(uint32_t mount_id, const char *path,
     else
     {
         inode->type = FS_TYPE_REGULAR;
+    }
+
+    /* 更新 inode 缓存 */
+    (void)memcpy(&cache_inode, inode, sizeof(fs_inode_t));
+    ret = inode_cache_put(&s_inode_cache, &cache_inode);
+    if (ret != 0)
+    {
+        /* 缓存更新失败不影响查找结果 */
+        (void)ret;
     }
 
     return 0;
@@ -308,19 +340,23 @@ static int32_t ramfs_create(uint32_t mount_id, const char *path,
         inode->type = FS_TYPE_REGULAR;
         inode->mode = mode;
         inode->nlinks = 1U;
+
+        /* 将新 inode 写入缓存 */
+        (void)inode_cache_put(&s_inode_cache, inode);
     }
 
     return 0;
 }
 
 /**
- * @brief RAMFS read
+ * @brief RAMFS read（集成页缓存）
  */
 static int64_t ramfs_read(uint32_t mount_id, uint32_t ino,
                           uint64_t offset, void *buf, uint64_t size)
 {
     ramfs_file_t *file;
     uint64_t copy_size;
+    uint8_t *cached_page;
 
     (void)mount_id;
 
@@ -361,14 +397,26 @@ static int64_t ramfs_read(uint32_t mount_id, uint32_t ino,
         copy_size = size;
     }
 
-    /* 拷贝数据 */
-    (void)memcpy(buf, &file->data[offset], (size_t)copy_size);
+    /* 尝试从页缓存读取 */
+    cached_page = page_cache_get(&s_page_cache, ino, 0ULL,
+                                  &file->data[0],
+                                  (uint64_t)file->size);
+    if (cached_page != NULL)
+    {
+        /* 缓存命中：从缓存拷贝数据 */
+        (void)memcpy(buf, &cached_page[offset], (size_t)copy_size);
+    }
+    else
+    {
+        /* 缓存未命中：直接从文件数据拷贝 */
+        (void)memcpy(buf, &file->data[offset], (size_t)copy_size);
+    }
 
     return (int64_t)copy_size;
 }
 
 /**
- * @brief RAMFS write
+ * @brief RAMFS write（集成页缓存）
  */
 static int64_t ramfs_write(uint32_t mount_id, uint32_t ino,
                            uint64_t offset, const void *buf, uint64_t size)
@@ -409,7 +457,7 @@ static int64_t ramfs_write(uint32_t mount_id, uint32_t ino,
         copy_size = size;
     }
 
-    /* 拷贝数据 */
+    /* 拷贝数据到文件 */
     (void)memcpy(&file->data[offset], buf, (size_t)copy_size);
 
     /* 更新文件大小 */
@@ -417,6 +465,14 @@ static int64_t ramfs_write(uint32_t mount_id, uint32_t ino,
     {
         file->size = (uint32_t)(offset + copy_size);
     }
+
+    /* 更新页缓存（标记脏页，延迟写回） */
+    (void)page_cache_put(&s_page_cache, ino, 0ULL,
+                          &file->data[0],
+                          (uint64_t)file->size, true);
+
+    /* 写入后使 inode 缓存无效（inode 数据已变化） */
+    inode_cache_invalidate(&s_inode_cache, ino);
 
     return (int64_t)copy_size;
 }
@@ -465,6 +521,12 @@ static int32_t ramfs_unlink(uint32_t mount_id, const char *path)
     /* 从哈希表移除 */
     (void)ramfs_hash_remove(&s_name_hash, file->name);
 
+    /* 使 inode 缓存无效 */
+    inode_cache_invalidate(&s_inode_cache, file->ino);
+
+    /* 使页缓存无效 */
+    (void)page_cache_invalidate(&s_page_cache, file->ino, 0ULL);
+
     /* 删除文件 */
     file->in_use = false;
 
@@ -472,11 +534,14 @@ static int32_t ramfs_unlink(uint32_t mount_id, const char *path)
 }
 
 /**
- * @brief RAMFS sync
+ * @brief RAMFS sync（刷新页缓存）
  */
 static int32_t ramfs_sync(uint32_t mount_id)
 {
     (void)mount_id;
+
+    /* 刷新页缓存中的脏页 */
+    page_cache_flush(&s_page_cache);
 
     return 0;
 }
@@ -613,6 +678,9 @@ static int32_t ramfs_link(uint32_t mount_id, const char *oldpath,
     /* 增加硬链接计数 */
     target->nlinks++;
     link->nlinks = target->nlinks;
+
+    /* 使目标 inode 缓存无效（nlinks 已变化） */
+    inode_cache_invalidate(&s_inode_cache, target->ino);
 
     /* 添加到哈希表 */
     {

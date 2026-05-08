@@ -2,7 +2,7 @@
 
 ## 基本信息
 
-- **Name**: 方成 (Babydoge)
+- **Name**: Babydoge
 - **Timezone**: GMT+8 (中国时区)
 - **Contact**: 飞书 / OpenClaw
 
