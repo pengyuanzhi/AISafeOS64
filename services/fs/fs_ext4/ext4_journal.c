@@ -19,6 +19,7 @@
 #include "ext4_journal.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* ========================================================================
  * 内部变量
@@ -76,6 +77,7 @@ static uint32_t journal_write_loop(uint32_t pos, const void *src, uint32_t size)
  * @param size   大小
  * @return 新的位置
  */
+__attribute__((unused))
 static uint32_t journal_read_loop(uint32_t pos, void *dst, uint32_t size)
 {
     uint32_t read = 0U;
@@ -101,6 +103,7 @@ static uint32_t journal_read_loop(uint32_t pos, void *dst, uint32_t size)
  *
  * @return 时间戳
  */
+__attribute__((unused))
 static uint32_t get_timestamp(void)
 {
     /* 简化实现，实际应使用系统时钟 */
@@ -131,7 +134,7 @@ int32_t ext4_journal_init(void)
     s_journal_sb.journal_sequence = 1U;
     s_journal_sb.journal_head = EXT4_JOURNAL_SUPERBLOCK_OFFSET;
     s_journal_sb.journal_tail = EXT4_JOURNAL_SUPERBLOCK_OFFSET;
-    s_journal_sb.journal_state = EXT4_JOURNAL_INVALID;
+    s_journal_sb.journal_state = EXT4_JOURNAL_CLEAN;
     s_journal_sb.journal_type = EXT4_JOURNAL_ORDERED;
     s_journal_sb.journal_inode = 1U;
     
@@ -176,8 +179,8 @@ int32_t ext4_journal_write_metadata(const ext4_journal_metadata_t *metadata)
         return -22; /* EINVAL */
     }
 
-    /* 检查类型 */
-    if (metadata->type >= EXT4_JMETADATA_SYNC)
+    /* 检查类型（SYNC 类型是允许的） */
+    if (metadata->type > EXT4_JMETADATA_SYNC)
     {
         return -22; /* EINVAL */
     }
