@@ -31,7 +31,6 @@
 #include <kernel/smp.h>
 #include <kernel/mmu.h>
 #include <kernel/mm/slab.h>
-#include <kernel/mm/kmalloc.h>
 #include <stdint.h>
 #include <string.h>
 #include "hal.h"

@@ -241,6 +241,7 @@
 
 /* ETXTBSY=26 和 EFBIG=27 在嵌入式 RTOS 中较少使用，此处不定义 */
 /* ENOSPC=28 通常由文件系统模块自行定义 */
+#define ENOSPC               28U
 
 /**
  * @def ESPIPE

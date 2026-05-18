@@ -22,6 +22,8 @@
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
 #include <kernel/printk.h>
+#include <kernel/spinlock.h>
+#include <kernel/errno.h>
 #include <string.h>
 
 /* ========================================================================

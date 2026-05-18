@@ -23,6 +23,7 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 /* ========================================================================
  * 缓存行大小定义

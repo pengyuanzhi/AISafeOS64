@@ -22,6 +22,7 @@
 #include <kernel/barrier.h>
 #include <string.h>
 #include <kernel/spinlock.h>
+#include <kernel/errno.h>
 
 /* ========================================================================
  * 全局零拷贝管理器实例

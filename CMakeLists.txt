@@ -253,6 +253,14 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_context_switch PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_context_switch COMMAND test_context_switch)
 
+    # test_ext4_cow — EXT4 写时复制（CoW）测试
+    add_executable(test_ext4_cow tests/test_ext4_cow.c
+        services/fs/fs_ext4/ext4_cow.c
+        services/fs/fs_ext4/ext4_journal.c)
+    target_include_directories(test_ext4_cow PRIVATE ${CMAKE_SOURCE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_ext4_cow PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-unused-variable -Wno-error)
+    add_test(NAME test_ext4_cow COMMAND test_ext4_cow)
+
 endif()
 
 # ==============================================================================

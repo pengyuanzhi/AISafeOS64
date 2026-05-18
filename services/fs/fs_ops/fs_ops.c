@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <kernel/spinlock.h>
 
 /* ========================================================================
  * 常量定义
@@ -31,6 +32,12 @@
 
 /** @brief 最大文件锁数量 */
 #define FS_MAX_LOCKS          128U
+
+/** @brief 分片锁数量（必须是 2 的幂次方） */
+#define FS_LOCK_SHARDS_COUNT  8U
+
+/** @brief 每个分片的锁表大小 */
+#define FS_LOCKS_PER_SHARD    (FS_MAX_LOCKS / FS_LOCK_SHARDS_COUNT)
 
 /* ========================================================================
  * 文件系统操作表
@@ -66,8 +73,52 @@ typedef struct
     bool            in_use;         /**< @brief 使用标记 */
 } fs_lock_entry_t;
 
-/** @brief 文件锁表 */
-static fs_lock_entry_t s_locks[FS_MAX_LOCKS];
+/**
+ * @brief 文件锁分片结构
+ *
+ * @details 每个分片独立管理一部分锁表，使用 TicketLock 保护，
+ *          不同分片的锁操作互不干扰。
+ */
+typedef struct
+{
+    TicketLock_t      shard_lock;                         /**< @brief 分片自旋锁 */
+    fs_lock_entry_t   locks[FS_LOCKS_PER_SHARD];         /**< @brief 分片锁表 */
+    uint32_t          lock_count;                         /**< @brief 分片内锁计数 */
+} fs_lock_shard_t;
+
+/** @brief 文件锁分片数组 */
+static fs_lock_shard_t s_lock_shards[FS_LOCK_SHARDS_COUNT];
+
+/* ========================================================================
+ * 分片锁辅助函数
+ * ======================================================================== */
+
+/**
+ * @brief 根据挂载点 ID 选择锁分片
+ *
+ * @details 使用取模运算将挂载点映射到分片，
+ *          相同挂载点的所有锁操作路由到同一分片。
+ *
+ * @param mount_id 挂载点 ID
+ *
+ * @return 分片索引 [0, FS_LOCK_SHARDS_COUNT)
+ */
+static inline uint32_t select_lock_shard(uint32_t mount_id)
+{
+    return mount_id & (FS_LOCK_SHARDS_COUNT - 1U);
+}
+
+/**
+ * @brief 获取挂载点对应的锁分片
+ *
+ * @param mount_id 挂载点 ID
+ *
+ * @return 锁分片指针
+ */
+static inline fs_lock_shard_t *get_lock_shard(uint32_t mount_id)
+{
+    return &s_lock_shards[select_lock_shard(mount_id)];
+}
 
 /* ========================================================================
  * 辅助函数
@@ -75,10 +126,14 @@ static fs_lock_entry_t s_locks[FS_MAX_LOCKS];
 
 /**
  * @brief 初始化文件系统抽象层
+ *
+ * @details 初始化文件系统操作表、挂载点表和分片锁表。
+ *          每个分片独立初始化 TicketLock 和锁表。
  */
 static void fs_ops_init(void)
 {
     uint32_t i;
+    uint32_t j;
 
     if (!s_initialized)
     {
@@ -93,9 +148,16 @@ static void fs_ops_init(void)
             s_mount_used[i] = false;
         }
 
-        for (i = 0U; i < FS_MAX_LOCKS; i++)
+        /* 初始化每个锁分片 */
+        for (i = 0U; i < FS_LOCK_SHARDS_COUNT; i++)
         {
-            (void)memset(&s_locks[i], 0, sizeof(fs_lock_entry_t));
+            ticket_lock_init(&s_lock_shards[i].shard_lock);
+            s_lock_shards[i].lock_count = 0U;
+
+            for (j = 0U; j < FS_LOCKS_PER_SHARD; j++)
+            {
+                (void)memset(&s_lock_shards[i].locks[j], 0, sizeof(fs_lock_entry_t));
+            }
         }
 
         s_next_mount_id = 0U;
@@ -104,19 +166,29 @@ static void fs_ops_init(void)
 }
 
 /**
- * @brief 查找文件锁
+ * @brief 查找文件锁（分片内查找，需在持锁状态下调用）
+ *
+ * @details 在指定分片内查找匹配的锁表项。
+ *          调用方必须持有分片锁。
+ *
+ * @param shard    锁分片指针
+ * @param mount_id 挂载点 ID
+ * @param ino      inode 编号
+ *
+ * @return 锁表项指针，未找到返回 NULL
  */
-static fs_lock_entry_t *find_lock(uint32_t mount_id, uint32_t ino)
+static fs_lock_entry_t *find_lock_in_shard(fs_lock_shard_t *shard,
+                                            uint32_t mount_id, uint32_t ino)
 {
     uint32_t i;
 
-    for (i = 0U; i < FS_MAX_LOCKS; i++)
+    for (i = 0U; i < FS_LOCKS_PER_SHARD; i++)
     {
-        if (s_locks[i].in_use &&
-            s_locks[i].mount_id == mount_id &&
-            s_locks[i].ino == ino)
+        if (shard->locks[i].in_use &&
+            shard->locks[i].mount_id == mount_id &&
+            shard->locks[i].ino == ino)
         {
-            return &s_locks[i];
+            return &shard->locks[i];
         }
     }
 
@@ -124,18 +196,25 @@ static fs_lock_entry_t *find_lock(uint32_t mount_id, uint32_t ino)
 }
 
 /**
- * @brief 分配文件锁表项
+ * @brief 分配文件锁表项（分片内分配，需在持锁状态下调用）
+ *
+ * @details 在指定分片内查找空闲槽位并分配。
+ *          调用方必须持有分片锁。
+ *
+ * @param shard 锁分片指针
+ *
+ * @return 锁表项指针，无空闲槽位返回 NULL
  */
-static fs_lock_entry_t *alloc_lock(void)
+static fs_lock_entry_t *alloc_lock_in_shard(fs_lock_shard_t *shard)
 {
     uint32_t i;
 
-    for (i = 0U; i < FS_MAX_LOCKS; i++)
+    for (i = 0U; i < FS_LOCKS_PER_SHARD; i++)
     {
-        if (!s_locks[i].in_use)
+        if (!shard->locks[i].in_use)
         {
-            (void)memset(&s_locks[i], 0, sizeof(fs_lock_entry_t));
-            return &s_locks[i];
+            (void)memset(&shard->locks[i], 0, sizeof(fs_lock_entry_t));
+            return &shard->locks[i];
         }
     }
 
@@ -283,13 +362,22 @@ int32_t fs_unmount(uint32_t mount_id)
         }
     }
 
-    /* 清理文件锁 */
-    for (i = 0U; i < FS_MAX_LOCKS; i++)
+    /* 清理该挂载点对应分片中的文件锁 */
     {
-        if (s_locks[i].in_use && s_locks[i].mount_id == mount_id)
+        fs_lock_shard_t *shard = get_lock_shard(mount_id);
+        uint32_t j;
+
+        ticket_lock_acquire(&shard->shard_lock);
+
+        for (j = 0U; j < FS_LOCKS_PER_SHARD; j++)
         {
-            s_locks[i].in_use = false;
+            if (shard->locks[j].in_use && shard->locks[j].mount_id == mount_id)
+            {
+                shard->locks[j].in_use = false;
+            }
         }
+
+        ticket_lock_release(&shard->shard_lock);
     }
 
     /* 清空挂载点 */
@@ -305,27 +393,47 @@ int32_t fs_unmount(uint32_t mount_id)
 
 /**
  * @brief 文件锁操作
+ *
+ * @details 使用分片锁保护文件锁操作：
+ *          - 根据挂载点 ID 选择对应分片
+ *          - 获取分片锁后执行锁操作
+ *          - 操作完成后释放分片锁
+ *
+ * @param mount_id  挂载点 ID
+ * @param ino       inode 编号
+ * @param lock_type 锁类型（LOCK_SH/LOCK_EX/LOCK_UN）
+ * @param owner_tid 线程 ID
+ *
+ * @return 0 成功，<0 失败
  */
 int32_t fs_flock(uint32_t mount_id, uint32_t ino,
                   fs_lock_type_t lock_type, uint32_t owner_tid)
 {
+    fs_lock_shard_t *shard;
     fs_lock_entry_t *lock;
+    int32_t ret;
 
     fs_ops_init();
 
+    /* 选择并锁定对应分片 */
+    shard = get_lock_shard(mount_id);
+    ticket_lock_acquire(&shard->shard_lock);
+
     /* 查找现有锁 */
-    lock = find_lock(mount_id, ino);
+    lock = find_lock_in_shard(shard, mount_id, ino);
 
     if (lock_type == FS_LOCK_UN)
     {
         /* 解锁 */
         if (lock == NULL)
         {
+            ticket_lock_release(&shard->shard_lock);
             return -1;
         }
 
         if (lock->lock.owner_tid != owner_tid)
         {
+            ticket_lock_release(&shard->shard_lock);
             return -1;
         }
 
@@ -336,7 +444,7 @@ int32_t fs_flock(uint32_t mount_id, uint32_t ino,
             lock->in_use = false;
         }
 
-        return 0;
+        ret = 0;
     }
     else if (lock_type == FS_LOCK_SH || lock_type == FS_LOCK_EX)
     {
@@ -350,38 +458,48 @@ int32_t fs_flock(uint32_t mount_id, uint32_t ino,
                 if (lock->lock.lock_type != lock_type)
                 {
                     /* 锁类型不兼容 */
+                    ticket_lock_release(&shard->shard_lock);
                     return -1;
                 }
 
                 lock->lock.lock_count++;
-                return 0;
+                ret = 0;
             }
             else
             {
                 /* 不同线程的锁冲突 */
+                ticket_lock_release(&shard->shard_lock);
                 return -1;
             }
         }
-
-        /* 分配新锁 */
-        lock = alloc_lock();
-        if (lock == NULL)
+        else
         {
-            return -1;
+            /* 分配新锁 */
+            lock = alloc_lock_in_shard(shard);
+            if (lock == NULL)
+            {
+                ticket_lock_release(&shard->shard_lock);
+                return -1;
+            }
+
+            lock->mount_id = mount_id;
+            lock->ino = ino;
+            lock->lock.locked = true;
+            lock->lock.lock_type = lock_type;
+            lock->lock.owner_tid = owner_tid;
+            lock->lock.lock_count = 1U;
+            lock->in_use = true;
+
+            ret = 0;
         }
-
-        lock->mount_id = mount_id;
-        lock->ino = ino;
-        lock->lock.locked = true;
-        lock->lock.lock_type = lock_type;
-        lock->lock.owner_tid = owner_tid;
-        lock->lock.lock_count = 1U;
-        lock->in_use = true;
-
-        return 0;
+    }
+    else
+    {
+        ret = -1;
     }
 
-    return -1;
+    ticket_lock_release(&shard->shard_lock);
+    return ret;
 }
 
 /**

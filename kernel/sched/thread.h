@@ -109,7 +109,7 @@ typedef void (*kthread_entry_t)(void *arg);
  *          - 栈信息（base、size）
  *          - 链表节点（就绪队列、睡眠队列）
  */
-typedef struct KThread CACHE_ALIGN(64)
+typedef struct KThread
 {
     uint64_t context[KTHREAD_CONTEXT_REGS]; /**< @brief 上下文保存区 */
     thread_id_t tid;       /**< @brief 线程 ID */
