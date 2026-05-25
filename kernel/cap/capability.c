@@ -133,6 +133,24 @@ static const cap_type_rights_t s_cap_type_rights_table[] =
         KOBJ_SHM,
         (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT),
         (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_FD (11) - 文件描述符 */
+    {
+        KOBJ_FD,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_INODE (12) - 文件 Inode */
+    {
+        KOBJ_INODE,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
+    },
+    /* KOBJ_MEMORY_REGION (13) - 内存区域 */
+    {
+        KOBJ_MEMORY_REGION,
+        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE),
+        (uint8_t)(CAP_RIGHT_READ)
     }
 };
 
@@ -487,6 +505,13 @@ kernel_status_t cap_copy(cap_slot_t src_cspace,
 
     /* 检查 GRANT 权限 */
     if ((src_cap->rights & CAP_RIGHT_GRANT) == CAP_RIGHT_NONE)
+    {
+        cap_unlock_dual(src_cs, dst_cs);
+        return -(int32_t)EACCES;
+    }
+
+    /* 检查继承标志 */
+    if (!src_cap->inheritable)
     {
         cap_unlock_dual(src_cs, dst_cs);
         return -(int32_t)EACCES;
@@ -1719,4 +1744,150 @@ kernel_status_t fv_register_cap_invariants(void)
         FV_SEVERITY_WARNING);
 
     return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 新对象类型创建 API（FD, INODE, MEMORY_REGION）
+ * ======================================================================== */
+
+/**
+ * @brief 创建文件描述符类型的能力
+ *
+ * @param cspace_root    CSpace 根能力槽
+ * @param slot           目标能力槽索引
+ * @param fd             文件描述符编号
+ * @param access_mode    访问模式（只读/只写/读写）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_mint_for_fd(cap_slot_t cspace_root,
+                                 cap_slot_t slot,
+                                 uint32_t fd,
+                                 uint8_t access_mode)
+{
+    kernel_status_t status;
+    uint8_t rights;
+
+    /* 验证访问模式 */
+    if (access_mode == 0U)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 根据访问模式设置权限 */
+    rights = CAP_RIGHT_READ;
+    if ((access_mode & 0x02) != 0U)  /* 写入位 */
+    {
+        rights |= CAP_RIGHT_WRITE;
+    }
+    if ((access_mode & 0x04) != 0U)  /* 执行位 */
+    {
+        rights |= CAP_RIGHT_EXECUTE;
+    }
+
+    /* 创建能力 */
+    status = cap_mint(cspace_root,
+                       slot,
+                       KOBJ_FD,
+                       (kobj_id_t)fd,
+                       rights,
+                       0U);
+
+    return status;
+}
+
+/**
+ * @brief 创建 Inode 类型的能力
+ *
+ * @param cspace_root    CSpace 根能力槽
+ * @param slot           目标能力槽索引
+ * @param inode_id       Inode 编号
+ * @param file_type      文件类型（普通文件/目录/符号链接等）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_mint_for_inode(cap_slot_t cspace_root,
+                                     cap_slot_t slot,
+                                     uint64_t inode_id,
+                                     uint8_t file_type)
+{
+    kernel_status_t status;
+    uint8_t rights;
+
+    /* Inode 只读权限 */
+    rights = CAP_RIGHT_READ | CAP_RIGHT_EXECUTE;
+
+    /* 根据文件类型决定是否可以修改元数据 */
+    if ((file_type == 0x01) || (file_type == 0x02))  /* 普通文件或目录 */
+    {
+        rights |= CAP_RIGHT_WRITE;
+    }
+
+    /* 创建能力 */
+    status = cap_mint(cspace_root,
+                       slot,
+                       KOBJ_INODE,
+                       (kobj_id_t)inode_id,
+                       rights,
+                       0U);
+
+    return status;
+}
+
+/**
+ * @brief 创建内存区域类型的能力
+ *
+ * @param cspace_root        CSpace 根能力槽
+ * @param slot               目标能力槽索引
+ * @param mem_region_id      内存区域 ID
+ * @param access_rights      访问权限（读/写/执行）
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_mint_for_memory_region(cap_slot_t cspace_root,
+                                            cap_slot_t slot,
+                                            uint32_t mem_region_id,
+                                            uint8_t access_rights)
+{
+    kernel_status_t status;
+    uint8_t rights;
+
+    /* 验证访问权限 */
+    if (access_rights == 0U)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 根据访问权限设置权限 */
+    rights = CAP_RIGHT_READ;
+    if ((access_rights & 0x02) != 0U)  /* 写入位 */
+    {
+        rights |= CAP_RIGHT_WRITE;
+    }
+    if ((access_rights & 0x04) != 0U)  /* 执行位 */
+    {
+        rights |= CAP_RIGHT_EXECUTE;
+    }
+
+    /* 创建能力 */
+    status = cap_mint(cspace_root,
+                       slot,
+                       KOBJ_MEMORY_REGION,
+                       (kobj_id_t)mem_region_id,
+                       rights,
+                       0U);
+
+    return status;
 }

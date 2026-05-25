@@ -18,13 +18,12 @@
  */
 
 #include <kernel/ipi_coalesce.h>
-#include <kernel/ipi.h>
 #include <kernel/gic.h>
 #include <kernel/barrier.h>
 #include <kernel/config.h>
 #include <kernel/compiler.h>
-#include <kernel/timer.h>
 #include "hal.h"
+#include <kernel/timer.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -56,65 +55,6 @@ static struct
  * @brief IPI Coalesce 统计锁
  */
 static TicketLock_t s_ipi_coalesce_stats_lock;
-
-/* ========================================================================
- * IPI Coalesce 辅助函数
- * ======================================================================== */
-
-/**
- * @brief IPI Coalesce 定时器处理
- *
- * @details 定时检查 IPI Coalesce 批处理器状态，如果超时则立即发送。
- */
-static void ipi_coalesce_timer_handler(void)
-{
-    uint32_t cpu_id;
-    uint32_t i;
-
-    cpu_id = hal_get_cpu_id();
-
-    /* 检查本 CPU 的 IPI Coalesce 批处理器 */
-    if (s_ipi_coalesce[cpu_id].state == IPI_COALESCE_STATE_COLLECTING)
-    {
-        /* 检查是否超时 */
-        uint64_t current_ticks = hal_timer_get_count();
-        uint64_t elapsed_ticks = current_ticks - s_ipi_coalesce[cpu_id].last_collect_time;
-
-        if (elapsed_ticks > IPI_COALESCE_TIMEOUT_TICKS)
-        {
-            /* 超时：立即发送所有待处理 IPI */
-            ticket_lock_acquire(&s_ipi_coalesce[cpu_id].lock);
-            {
-                uint32_t count = s_ipi_coalesce[cpu_id].count;
-                uint32_t i;
-
-                if (count > 0U)
-                {
-                    /* 批量发送 IPI */
-                    for (i = 0U; i < count; i++)
-                    {
-                        uint32_t target_cpu = s_ipi_coalesce[cpu_id].entries[i].target_cpu;
-                        ipi_type_t type = s_ipi_coalesce[cpu_id].entries[i].type;
-                        void *arg = s_ipi_coalesce[cpu_id].entries[i].arg;
-
-                        /* 发送 IPI */
-                        gic_sgi_send(target_cpu, (uint32_t)type);
-
-                        /* 更新统计 */
-                        ticket_lock_acquire(&s_ipi_coalesce_stats_lock);
-                        s_ipi_coalesce_stats.total_batch_sent++;
-                        ticket_lock_release(&s_ipi_coalesce_stats_lock);
-                    }
-
-                    /* 清空批处理器 */
-                    s_ipi_coalesce[cpu_id].count = 0U;
-                    s_ipi_coalesce[cpu_id].state = IPI_COALESCE_STATE_IDLE;
-                }
-            }
-            ticket_lock_release(&s_ipi_coalesce[cpu_id].lock);
-        }
-    }
-}
 
 /* ========================================================================
  * IPI Coalesce 操作 API 实现
@@ -164,7 +104,7 @@ kernel_status_t ipi_coalesce_init(void)
  *
  * @return true 表示添加到批处理器，false 表示立即发送
  */
-bool ipi_coalesce_try_add(uint32_t target_cpu, ipi_type_t type, void *arg)
+bool ipi_coalesce_try_add(uint32_t target_cpu, uint32_t type, void *arg)
 {
     uint32_t cpu_id;
     bool result;
@@ -218,7 +158,7 @@ bool ipi_coalesce_try_add(uint32_t target_cpu, ipi_type_t type, void *arg)
  * @param type        IPI 类型
  * @param arg         IPI 参数
  */
-void ipi_coalesce_send_immediate(uint32_t target_cpu, ipi_type_t type, void *arg)
+void ipi_coalesce_send_immediate(uint32_t target_cpu, uint32_t type, void *arg)
 {
     /* 立即发送 IPI */
     gic_sgi_send(target_cpu, (uint32_t)type);
@@ -263,7 +203,7 @@ void ipi_coalesce_timer_handler(void)
                         for (i = 0U; i < count; i++)
                         {
                             uint32_t target_cpu = s_ipi_coalesce[cpu_id].entries[i].target_cpu;
-                            ipi_type_t type = s_ipi_coalesce[cpu_id].entries[i].type;
+                            uint32_t type = s_ipi_coalesce[cpu_id].entries[i].type;
                             void *arg = s_ipi_coalesce[cpu_id].entries[i].arg;
 
                             /* 发送 IPI */

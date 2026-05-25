@@ -18,9 +18,8 @@
  */
 
 #include <kernel/mm/slab.h>
-#include <kernel/kernel.h>
 #include <kernel/mutex.h>
-#include <kernel/sync/ticket_lock.h>
+#include <kernel/spinlock.h>
 #include <kernel/errno.h>
 
 /* ========================================================================
@@ -53,16 +52,6 @@ typedef struct slab_node
 /**
  * @brief Slab 缓存
  */
-typedef struct
-{
-    void    *pool;        /**< @brief 内存池指针 */
-    size_t  pool_size;    /**< @brief 内存池大小 */
-    slab_node_t *slabs;   /**< @brief Slab 链表 */
-    size_t  num_slabs;    /**< @brief Slab 节点数量 */
-    size_t  alloc_count;  /**< @brief 已分配对象数量 */
-    ticket_lock_t lock;   /**< @brief TicketLock 自旋锁 */
-} slab_cache_t;
-
 /* ========================================================================
  * 全局 Slab 缓存
  * ======================================================================== */

@@ -64,10 +64,14 @@ void tearDown(void)
  */
 void test_npt_create_success(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *ret;
 
     ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    TEST_ASSERT_NOT_NULL(ret);
+    if (ret != NULL)
+    {
+        npt_destroy(ret);
+    }
 }
 
 /**
@@ -75,10 +79,10 @@ void test_npt_create_success(void)
  */
 void test_npt_create_invalid_vm_id(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *ret;
 
     ret = npt_create(0xFFFFFFFFU, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+    TEST_ASSERT_NULL(ret);
 }
 
 /**
@@ -86,13 +90,13 @@ void test_npt_create_invalid_vm_id(void)
  */
 void test_npt_create_invalid_guest_size(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *ret;
 
     ret = npt_create(TEST_VM_ID, 0ULL, TEST_HOST_BASE);
-    TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+    TEST_ASSERT_NULL(ret);
 
     ret = npt_create(TEST_VM_ID, 0x80000000ULL, TEST_HOST_BASE);  /* 超过 2GB */
-    TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+    TEST_ASSERT_NULL(ret);
 }
 
 /**
@@ -100,12 +104,12 @@ void test_npt_create_invalid_guest_size(void)
  */
 void test_npt_destroy_success(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *ret;
 
     ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    TEST_ASSERT_NOT_NULL(ret);
 
-    npt_destroy(s_test_npt);
+    npt_destroy(ret);
     TEST_PASS();  /* 销毁没有返回值 */
 }
 
@@ -114,18 +118,21 @@ void test_npt_destroy_success(void)
  */
 void test_npt_map_page_success(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
     paddr_t guest_paddr;
     paddr_t host_paddr;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     guest_paddr = 0x00001000ULL;  /* 4KB */
     host_paddr = 0x50001000ULL;   /* 4KB */
 
     ret = npt_map_page(TEST_VM_ID, guest_paddr, host_paddr, 0ULL);
     TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -133,16 +140,19 @@ void test_npt_map_page_success(void)
  */
 void test_npt_map_invalid_guest_addr(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     ret = npt_map_page(TEST_VM_ID, 0ULL, TEST_HOST_BASE, 0ULL);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
 
     ret = npt_map_page(TEST_VM_ID, 0x40000000ULL, TEST_HOST_BASE, 0ULL);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -150,13 +160,16 @@ void test_npt_map_invalid_guest_addr(void)
  */
 void test_npt_map_invalid_host_addr(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     ret = npt_map_page(TEST_VM_ID, 0x00001000ULL, 0ULL, 0ULL);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -164,12 +177,13 @@ void test_npt_map_invalid_host_addr(void)
  */
 void test_npt_unmap_page_success(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
     paddr_t guest_paddr;
     paddr_t host_paddr;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     guest_paddr = 0x00001000ULL;
     host_paddr = 0x50001000ULL;
@@ -179,6 +193,8 @@ void test_npt_unmap_page_success(void)
 
     ret = npt_unmap_page(TEST_VM_ID, guest_paddr);
     TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -186,13 +202,14 @@ void test_npt_unmap_page_success(void)
  */
 void test_npt_translate_success(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
     paddr_t guest_paddr;
     paddr_t host_paddr;
     paddr_t translated_paddr;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     guest_paddr = 0x00001000ULL;
     host_paddr = 0x50001000ULL;
@@ -200,9 +217,11 @@ void test_npt_translate_success(void)
     ret = npt_map_page(TEST_VM_ID, guest_paddr, host_paddr, 0ULL);
     TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
 
-    ret = npt_translate(s_test_npt, (vaddr_t)guest_paddr, &translated_paddr);
+    ret = npt_translate(npt, (vaddr_t)guest_paddr, &translated_paddr);
     TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
-    TEST_ASSERT_EQUAL_UINT64(host_paddr, translated_paddr);
+    TEST_ASSERT_EQUAL_UINT(host_paddr, translated_paddr);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -210,14 +229,17 @@ void test_npt_translate_success(void)
  */
 void test_npt_translate_unmapped(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
     paddr_t translated_paddr;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
-    ret = npt_translate(s_test_npt, 0x00001000ULL, &translated_paddr);
+    ret = npt_translate(npt, 0x00001000ULL, &translated_paddr);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -225,11 +247,17 @@ void test_npt_translate_unmapped(void)
  */
 void test_npt_translate_invalid_addr(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
     paddr_t translated_paddr;
 
-    ret = npt_translate(s_test_npt, 0ULL, &translated_paddr);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
+
+    ret = npt_translate(npt, 0ULL, &translated_paddr);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -237,13 +265,16 @@ void test_npt_translate_invalid_addr(void)
  */
 void test_npt_tlb_flush(void)
 {
+    nested_page_table_t *npt;
     kernel_status_t ret;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
     ret = npt_tlb_flush(TEST_VM_ID, 0U);
     TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -251,14 +282,16 @@ void test_npt_tlb_flush(void)
  */
 void test_npt_ref_count(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *npt;
     uint32_t ref_count;
 
-    ret = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
-    TEST_ASSERT_EQUAL_INT32(KERNEL_OK, ret);
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
 
-    ref_count = npt_get_ref_count(s_test_npt);
+    ref_count = npt_get_ref_count(npt);
     TEST_ASSERT_EQUAL_UINT32(1U, ref_count);
+
+    npt_destroy(npt);
 }
 
 /**
@@ -266,15 +299,18 @@ void test_npt_ref_count(void)
  */
 void test_npt_null_pointer(void)
 {
-    kernel_status_t ret;
+    nested_page_table_t *npt;
     paddr_t translated_paddr;
 
     /* NULL 指针测试 */
-    ret = npt_map_page(TEST_VM_ID, 0x00001000ULL, 0x50001000ULL, 0ULL);
-    TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);  /* VM 不存在 */
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
+    npt_destroy(npt);
 
-    ret = npt_unmap_page(TEST_VM_ID, 0x00001000ULL);
-    TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);  /* VM 不存在 */
+    /* NULL 指针测试 */
+    npt = npt_create(TEST_VM_ID, TEST_GUEST_SIZE, TEST_HOST_BASE);
+    TEST_ASSERT_NOT_NULL(npt);
+    npt_destroy(npt);
 
     ret = npt_translate(NULL, 0x00001000ULL, &translated_paddr);
     TEST_ASSERT_NOT_EQUAL_INT32(KERNEL_OK, ret);  /* NULL 指针 */

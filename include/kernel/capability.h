@@ -127,6 +127,7 @@ typedef struct
     cap_slot_t      parent_slot;    /**< @brief 父能力槽索引（CAP_SLOT_INVALID 表示根能力） */
     cap_slot_t      cspace_root;    /**< @brief 所属 CSpace 的根能力槽 */
     uint8_t         derive_depth;   /**< @brief 派生深度（根能力为 0，每派生一次加 1） */
+    bool            inheritable;    /**< @brief 能力继承标志（true=可继承，false=不可继承） */
     struct list_head children;      /**< @brief 子能力链表 */
     struct list_head sibling;       /**< @brief 兄弟链表节点 */
 } cap_t;
@@ -353,6 +354,51 @@ kernel_status_t cap_derive(cap_slot_t src_cspace,
                             uint16_t badge);
 
 /* ========================================================================
+ * 能力继承控制
+ * ======================================================================== */
+
+/**
+ * @brief 设置能力继承标志
+ *
+ * @details 设置指定能力的继承标志。
+ *          inheritable = true: 子能力可以继续派生和传播
+ *          inheritable = false: 子能力不能派生和传播
+ *
+ * @param cspace_root  CSpace 根能力槽
+ * @param slot         能力槽索引
+ * @param inheritable  继承标志
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ * @return -EACCES 权限不足
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_set_inheritable(cap_slot_t cspace_root,
+                                       cap_slot_t slot,
+                                       bool inheritable);
+
+/**
+ * @brief 查询能力继承标志
+ *
+ * @details 查询指定能力的继承标志。
+ *
+ * @param cspace_root    CSpace 根能力槽
+ * @param slot           能力槽索引
+ * @param inheritable    输出继承标志
+ *
+ * @return KERNEL_OK 成功
+ * @return -EINVAL 参数无效
+ * @return -ENOENT 能力不存在
+ *
+ * @note 对应需求: KR-014
+ */
+kernel_status_t cap_get_inheritable(cap_slot_t cspace_root,
+                                       cap_slot_t slot,
+                                       bool *inheritable);
+
+/* ========================================================================
  * 能力信息查询
  * ======================================================================== */
 
@@ -391,6 +437,28 @@ typedef struct
 kernel_status_t cap_get_info(cap_slot_t cspace_root,
                               cap_slot_t slot,
                               cap_info_t *info);
+
+/* ========================================================================
+ * 内联继承标志检查（性能关键路径）
+ * ======================================================================== */
+
+/**
+ * @brief 内联继承标志检查
+ *
+ * @details 检查能力是否可继承。
+ *          用于内核热路径（能力复制、派生等）。
+ *
+ * @param cap 能力指针（必须非 NULL）
+ *
+ * @return true 可继承
+ * @return false 不可继承
+ *
+ * @note 对应需求: KR-014
+ */
+static inline bool cap_inheritable_check(const cap_t *cap)
+{
+    return cap->inheritable;
+}
 
 /* ========================================================================
  * 内联权限检查（性能关键路径）

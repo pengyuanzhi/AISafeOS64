@@ -70,7 +70,7 @@ typedef enum
 typedef struct
 {
     uint32_t        target_cpu;     /**< @brief 目标 CPU */
-    ipi_type_t      type;           /**< @brief IPI 类型 */
+    uint32_t        type;           /**< @brief IPI 类型 */
     void           *arg;           /**< @brief IPI 参数 */
 } ipi_coalesce_entry_t;
 
@@ -85,6 +85,7 @@ typedef struct
     uint32_t                count;                            /**< @brief 当前条目数量 */
     ipi_coalesce_state_t    state;                            /**< @brief 当前状态 */
     TicketLock_t            lock;                             /**< @brief 批处理器锁 */
+    uint64_t                last_collect_time;                 /**< @brief 最后收集时间（用于超时检查） */
 } ipi_coalesce_t;
 
 /* ========================================================================
@@ -112,7 +113,7 @@ kernel_status_t ipi_coalesce_init(void);
  *
  * @return true 表示添加到批处理器，false 表示立即发送
  */
-bool ipi_coalesce_try_add(uint32_t target_cpu, ipi_type_t type, void *arg);
+bool ipi_coalesce_try_add(uint32_t target_cpu, uint32_t type, void *arg);
 
 /**
  * @brief 立即发送 IPI（绕过批处理）
@@ -124,7 +125,7 @@ bool ipi_coalesce_try_add(uint32_t target_cpu, ipi_type_t type, void *arg);
  * @param type        IPI 类型
  * @param arg         IPI 参数
  */
-void ipi_coalesce_send_immediate(uint32_t target_cpu, ipi_type_t type, void *arg);
+void ipi_coalesce_send_immediate(uint32_t target_cpu, uint32_t type, void *arg);
 
 /**
  * @brief IPI Coalesce 定时器处理

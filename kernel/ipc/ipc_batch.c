@@ -19,7 +19,6 @@
 #include <kernel/ipc/ipc_batch.h>
 #include <kernel/ipc/channel.h>
 #include <kernel/ipc/endpoint.h>
-#include <kernel/kernel.h>
 #include <kernel/errno.h>
 #include <kernel/mutex.h>
 

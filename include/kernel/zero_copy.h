@@ -107,7 +107,7 @@ typedef struct CACHE_ALIGN(64)
     uint32_t               free_count;                 /**< @brief 空闲消息数量 */
     uint32_t               used_count;                  /**< @brief 已使用消息数量 */
     uint32_t               next_msg_id;                /**< @brief 下一个消息 ID */
-    spinlock_t             lock;                       /**< @brief 区域锁 */
+    TicketLock_t          lock;                       /**< @brief 区域锁 */
     uint32_t               region_id;                  /**< @brief 区域 ID */
 } zero_copy_shm_region_t;
 

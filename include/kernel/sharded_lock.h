@@ -97,7 +97,6 @@ void sharded_lock_destroy(ShardedLock_t *slock);
  *
  * @return 分片索引 [0, num_shards)
  */
-/**
-/**
-/**
-/**
+uint32_t sharded_lock_select_shard(const ShardedLock_t *slock, uintptr_t key);
+
+#endif /* KERNEL_SHARDED_LOCK_H */

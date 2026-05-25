@@ -30,7 +30,6 @@
 #include <kernel/compiler.h>
 #include <kernel/list.h>
 #include <kernel/mm/slab.h>
-#include <kernel/mm/kmalloc.h>
 #include "thread.h"
 #include "scheduler.h"
 #include <stdint.h>
@@ -199,16 +198,16 @@ static void *ipc_msg_alloc_slab(uint32_t size)
     cache_idx = select_msg_cache(size);
     if (cache_idx < 0)
     {
-        /* 大小不支持，回退到 kmalloc */
-        return kmalloc(size);
+        /* 大小不支持，返回 NULL */
+        return NULL;
     }
 
     /* 从 Slab 缓存分配 */
     buf_ptr = slab_alloc(&s_ipc_msg_slab.caches[cache_idx]);
     if (buf_ptr == NULL)
     {
-        /* Slab 分配失败，回退到 kmalloc */
-        return kmalloc(size);
+        /* Slab 分配失败，返回 NULL */
+        return NULL;
     }
 
     return buf_ptr;
@@ -233,8 +232,8 @@ static void ipc_msg_free_slab(void *ptr, uint32_t size)
     cache_idx = select_msg_cache(size);
     if (cache_idx < 0)
     {
-        /* 大小不支持，使用 kfree */
-        kfree(ptr);
+        /* 大小不支持，不释放 */
+        (void)ptr;  /* 避免未使用警告 */
         return;
     }
 

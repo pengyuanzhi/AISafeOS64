@@ -22,6 +22,8 @@
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
 #include <kernel/printk.h>
+#include <kernel/errno.h>
+#include "hal.h"
 #include <string.h>
 
 /* ========================================================================
@@ -175,12 +177,12 @@ kernel_status_t pcpu_pool_system_init(pcpu_pool_system_t *sys,
 
     if (size < PCPU_POOL_SIZE)
     {
-        return -(int32_t)EINVAL;
+        return -(int32_t)22;
     }
 
     if ((size % PCPU_POOL_SIZE) != 0U)
     {
-        return -(int32_t)EINVAL;
+        return -(int32_t)22;
     }
 
     (void)memset(sys, 0U, sizeof(pcpu_pool_system_t));

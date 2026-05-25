@@ -3,7 +3,7 @@
  * @brief   嵌套页表（NPT）接口
  * @author  AISafe64 Team
  * @date    2026-05-03
- * @version 1.0
+ * @version 1.1
  *
  * @details 本文件定义了嵌套页表（NPT）相关数据结构和接口：
  *          - NPT 级别枚举
@@ -22,6 +22,7 @@
 
 #include <kernel/types.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* ========================================================================
  * 常量定义
@@ -74,6 +75,34 @@ typedef enum
 
 #define NPT_ENTRY_PADDR_SHIFT      (12ULL)
 #define NPT_ENTRY_PADDR_MASK       ((1ULL << 52ULL) - 1ULL)
+
+/** @brief 页表项内物理地址字段掩码（位 [47:12]） */
+#define NPT_PADDR_FIELD_MASK       (((1ULL << 36ULL) - 1ULL) << 12ULL)
+
+/* ========================================================================
+ * 页表项标志位（ARMv8-A 页表属性）
+ * ======================================================================== */
+
+/** @brief 标志位掩码（低 12 位） */
+#define NPT_FLAGS_MASK             (0xFFFULL)
+
+/** @brief 读权限位（AP[2:1] = 01） */
+#define NPT_FLAG_READ              (1ULL << 6ULL)
+
+/** @brief 写权限位（AP[2:1] = 00） */
+#define NPT_FLAG_WRITE             (1ULL << 7ULL)
+
+/** @brief 执行权限位（PXN = 0） */
+#define NPT_FLAG_EXECUTE           (1ULL << 10ULL)
+
+/** @brief 用户模式位（nG = 1） */
+#define NPT_FLAG_USER              (1ULL << 11ULL)
+
+/** @brief 不可缓存位（AttrIndex[0]） */
+#define NPT_FLAG_UNCACHED          (1ULL << 2ULL)
+
+/** @brief 设备内存位（AttrIndex[1]） */
+#define NPT_FLAG_DEVICE            (1ULL << 3ULL)
 
 /* ========================================================================
  * 嵌套页表描述符
@@ -204,5 +233,181 @@ kernel_status_t npt_tlb_flush(uint32_t vm_id, uint32_t asid);
  * @return 引用计数
  */
 uint32_t npt_get_ref_count(nested_page_table_t *npt);
+
+/* ========================================================================
+ * 页表项操作辅助函数 (Phase 1) - static inline 纯位操作
+ * ======================================================================== */
+
+/**
+ * @brief 设置页表项类型
+ *
+ * @param entry 页表项
+ * @param type  类型 (TABLE/BLOCK/PAGE)
+ *
+ * @return 设置后的页表项
+ */
+static inline npt_entry_t npt_pte_set_type(npt_entry_t entry, uint64_t type)
+{
+    npt_entry_t result = entry;
+    result &= ~(NPT_ENTRY_TYPE_MASK << NPT_ENTRY_TYPE_SHIFT);
+    result |= (type << NPT_ENTRY_TYPE_SHIFT);
+    return result;
+}
+
+/**
+ * @brief 设置物理地址
+ *
+ * @param entry 页表项
+ * @param paddr 物理地址（4KB 对齐）
+ *
+ * @return 设置后的页表项
+ */
+static inline npt_entry_t npt_pte_set_paddr(npt_entry_t entry, uint64_t paddr)
+{
+    npt_entry_t result = entry;
+    result &= ~NPT_PADDR_FIELD_MASK;
+    result |= ((paddr >> 12ULL) << 12ULL) & NPT_PADDR_FIELD_MASK;
+    return result;
+}
+
+/**
+ * @brief 设置标志位
+ *
+ * @param entry 页表项
+ * @param flags 标志位（读/写/执行/用户等）
+ *
+ * @return 设置后的页表项
+ */
+static inline npt_entry_t npt_pte_set_flags(npt_entry_t entry, uint64_t flags)
+{
+    npt_entry_t result = entry;
+    result |= flags;
+    return result;
+}
+
+/**
+ * @brief 清除页表项
+ *
+ * @param entry 页表项
+ *
+ * @return 清零后的页表项
+ */
+static inline npt_entry_t npt_pte_clear(npt_entry_t entry)
+{
+    (void)entry;
+    return 0ULL;
+}
+
+/**
+ * @brief 清除页表项类型
+ *
+ * @param entry 页表项
+ *
+ * @return 清除类型后的页表项
+ */
+static inline npt_entry_t npt_pte_clear_type(npt_entry_t entry)
+{
+    npt_entry_t result = entry;
+    result &= ~(NPT_ENTRY_TYPE_MASK << NPT_ENTRY_TYPE_SHIFT);
+    return result;
+}
+
+/**
+ * @brief 清除标志位
+ *
+ * @param entry 页表项
+ *
+ * @return 清除标志位后的页表项
+ */
+static inline npt_entry_t npt_pte_clear_flags(npt_entry_t entry)
+{
+    npt_entry_t result = entry;
+    result &= ~NPT_FLAGS_MASK;
+    return result;
+}
+
+/**
+ * @brief 获取页表项类型
+ *
+ * @param entry 页表项
+ *
+ * @return 类型 (TABLE/BLOCK/PAGE/NONE)
+ */
+static inline uint64_t npt_pte_get_type(npt_entry_t entry)
+{
+    return (entry >> NPT_ENTRY_TYPE_SHIFT) & NPT_ENTRY_TYPE_MASK;
+}
+
+/**
+ * @brief 获取物理地址
+ *
+ * @param entry 页表项
+ *
+ * @return 物理地址（4KB 对齐）
+ */
+static inline uint64_t npt_pte_get_paddr(npt_entry_t entry)
+{
+    return entry & NPT_PADDR_FIELD_MASK;
+}
+
+/**
+ * @brief 获取标志位
+ *
+ * @param entry 页表项
+ *
+ * @return 标志位
+ */
+static inline uint64_t npt_pte_get_flags(npt_entry_t entry)
+{
+    return entry & NPT_FLAGS_MASK;
+}
+
+/**
+ * @brief 检查可读权限
+ *
+ * @param entry 页表项
+ *
+ * @return true 可读，false 不可读
+ */
+static inline bool npt_pte_is_readable(npt_entry_t entry)
+{
+    return (npt_pte_get_flags(entry) & NPT_FLAG_READ) != 0ULL;
+}
+
+/**
+ * @brief 检查可写权限
+ *
+ * @param entry 页表项
+ *
+ * @return true 可写，false 不可写
+ */
+static inline bool npt_pte_is_writable(npt_entry_t entry)
+{
+    return (npt_pte_get_flags(entry) & NPT_FLAG_WRITE) != 0ULL;
+}
+
+/**
+ * @brief 检查可执行权限
+ *
+ * @param entry 页表项
+ *
+ * @return true 可执行，false 不可执行
+ */
+static inline bool npt_pte_is_executable(npt_entry_t entry)
+{
+    return (npt_pte_get_flags(entry) & NPT_FLAG_EXECUTE) != 0ULL;
+}
+
+/**
+ * @brief 检查用户模式访问
+ *
+ * @param entry 页表项
+ *
+ * @return true 用户模式，false 内核模式
+ */
+static inline bool npt_pte_is_user(npt_entry_t entry)
+{
+    return (npt_pte_get_flags(entry) & NPT_FLAG_USER) != 0ULL;
+}
 
 #endif /* SERVICES_VMM_NPT_NPT_H */

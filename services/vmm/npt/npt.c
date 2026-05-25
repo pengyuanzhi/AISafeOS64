@@ -29,8 +29,39 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/spinlock.h>
-#include "vmm.h"
-#include "vmm_stats.h"
+
+/* 定义页面大小 */
+#ifndef PAGE_SIZE_4K
+#define PAGE_SIZE_4K  (4096ULL)
+#endif
+
+/* VMM 宏定义 */
+#ifndef VMM_MAX_VMS
+#define VMM_MAX_VMS  (32U)
+#endif
+
+/* 类型定义（用于内部函数） */
+#ifndef __KERNEL__
+typedef struct vm_desc vm_desc_t;
+typedef struct vcpu_desc vcpu_desc_t;
+
+/* VM 描述符结构体定义 */
+struct vm_desc
+{
+    uint32_t vm_id;
+    uint32_t vcpu_count;
+    nested_page_table_t *npt;
+    struct vcpu_desc *vcpus;
+};
+
+struct vcpu_desc
+{
+    struct
+    {
+        uint64_t esr_el1;
+    } sys_regs;
+};
+#endif
 
 /* ========================================================================
  * 内部状态
@@ -56,7 +87,7 @@ static TicketLock_t s_npt_ref_lock;
  *
  * @return 条目指针，失败返回 NULL
  */
-static npt_entry_t *npt_walk(npt_entry_t *npt, vaddr_t guest_va,
+static npt_entry_t *npt_walk(npt_entry_t entries[VMM_NPT_LEVELS][512], vaddr_t guest_va,
                               uint32_t level, bool create)
 {
     uint32_t index;
@@ -64,7 +95,7 @@ static npt_entry_t *npt_walk(npt_entry_t *npt, vaddr_t guest_va,
     paddr_t child_paddr;
     npt_entry_t *child_entry;
 
-    if (npt == NULL || guest_va == 0ULL)
+    if (entries == NULL || guest_va == 0ULL)
     {
         return NULL;
     }
@@ -75,11 +106,11 @@ static npt_entry_t *npt_walk(npt_entry_t *npt, vaddr_t guest_va,
     if (level == 0U)
     {
         /* PGD 级别，直接返回条目指针 */
-        return &(npt[0U][index]);
+        return &(entries[0U][index]);
     }
 
     /* 获取当前级别条目 */
-    entry = npt[0U][index];
+    entry = entries[0U][index];
 
     if ((entry & NPT_ENTRY_TYPE_MASK) == NPT_ENTRY_TYPE_NONE)
     {
@@ -104,7 +135,7 @@ static npt_entry_t *npt_walk(npt_entry_t *npt, vaddr_t guest_va,
                           ((child_paddr >> 12ULL) & NPT_ENTRY_PADDR_MASK) << 12ULL;
 
         /* 设置父条目 */
-        npt[0U][index] = child_entry[0U];
+        entries[0U][index] = child_entry[0U];
     }
 
     /* 获取子页表 */
@@ -112,32 +143,32 @@ static npt_entry_t *npt_walk(npt_entry_t *npt, vaddr_t guest_va,
     child_entry = (npt_entry_t *)child_paddr;
 
     /* 递归到下一级 */
-    return npt_walk(child_entry, guest_va, level - 1U, create);
+    return npt_walk((npt_entry_t(*)[512])child_entry, guest_va, level - 1U, create);
 }
 
 /* ========================================================================
  * 公共 API - NPT 创建/销毁
  * ======================================================================== */
 
-kernel_status_t npt_create(uint32_t vm_id, uint64_t guest_size,
-                            paddr_t host_base)
+nested_page_table_t *npt_create(uint32_t vm_id, uint64_t guest_size,
+                                      paddr_t host_base)
 {
     nested_page_table_t *npt;
     
-    /* 检查参数有效性 */
+    /* 检查参数有效 */
     if (vm_id >= VMM_MAX_VMS)
     {
-        return -(int32_t)EINVAL;
+        return NULL;
     }
 
     if (guest_size == 0ULL || guest_size > VMM_GUEST_PHYS_SIZE)
     {
-        return -(int32_t)EINVAL;
+        return NULL;
     }
 
     if (guest_size & (PAGE_SIZE_4K - 1ULL))
     {
-        return -(int32_t)EINVAL;  /* Guest 大小必须页对齐 */
+        return NULL;  /* Guest 大小必须页对齐 */
     }
 
     ticket_lock_acquire(&s_npt_lock);
@@ -147,7 +178,7 @@ kernel_status_t npt_create(uint32_t vm_id, uint64_t guest_size,
     if (npt == NULL)
     {
         ticket_lock_release(&s_npt_lock);
-        return -(int32_t)ENOMEM;
+        return NULL;
     }
 
     (void)memset(npt, 0, sizeof(nested_page_table_t));
@@ -158,7 +189,7 @@ kernel_status_t npt_create(uint32_t vm_id, uint64_t guest_size,
     {
         kfree(npt);
         ticket_lock_release(&s_npt_lock);
-        return -(int32_t)ENOMEM;
+        return NULL;
     }
 
     /* 初始化根页表 */
@@ -185,7 +216,7 @@ kernel_status_t npt_create(uint32_t vm_id, uint64_t guest_size,
 
     ticket_lock_release(&s_npt_lock);
 
-    return KERNEL_OK;
+    return npt;
 }
 
 void npt_destroy(nested_page_table_t *npt)
@@ -422,22 +453,3 @@ uint32_t npt_get_ref_count(nested_page_table_t *npt)
  *
  * @param vm_id VM ID
  *
- * @return NPT 指针，失败返回 NULL
- */
-nested_page_table_t *vmm_get_npt(uint32_t vm_id)
-{
-    vm_desc_t *vm;
-
-    if (vm_id >= VMM_MAX_VMS)
-    {
-        return NULL;
-    }
-
-    vm = vmm_get_vm(vm_id);
-    if (vm == NULL)
-    {
-        return NULL;
-    }
-
-    return &vm->npt;
-}

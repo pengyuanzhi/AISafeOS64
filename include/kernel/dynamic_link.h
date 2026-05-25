@@ -100,15 +100,15 @@ typedef struct CACHE_ALIGN(64)
  *
  * @details 管理所有动态加载的库。
  */
-typedef struct CACHE_ALIGN(64)
+typedef struct
 {
     dynlib_desc_t   *libs[DYNLIB_MAX_LIBS];  /**< @brief 库数组 */
     dynlib_sym_t     syms[DYNLIB_MAX_SYMS];  /**< @brief 符号表 */
     uint32_t         lib_count;               /**< @count */
     uint32_t         sym_count;                /**< @brief 符号数量 */
-    spinlock_t       lock;                    /**< @brief 管理器锁 */
+    TicketLock_t     lock;                    /**< @brief 管理器锁 */
     uint32_t         total_size;              /**< @brief 总大小 */
-} dynlib_manager_t;
+} CACHE_ALIGN(64) dynlib_manager_t;
 
 /* ========================================================================
  * 动态链接操作 API

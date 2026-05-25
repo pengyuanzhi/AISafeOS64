@@ -17,9 +17,11 @@
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
-#include <kernel/mm/buddy_system.h>
+#include "buddy_system.h"
 #include <kernel/printk.h>
 #include <kernel/barrier.h>
+#include <kernel/errno.h>
+#include <kernel/spinlock.h>
 #include <string.h>
 
 /* ========================================================================

@@ -21,7 +21,9 @@
 #include <kernel/timer.h>
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
+#include <kernel/errno.h>
 #include <string.h>
+#include <kernel/spinlock.h>
 
 /* ========================================================================
  * 热数据缓存（全局单例）
@@ -376,3 +378,4 @@ kernel_status_t hot_data_cache_get_stats(uint32_t *hit_count,
 
     return KERNEL_OK;
 }
+#include <kernel/spinlock.h>

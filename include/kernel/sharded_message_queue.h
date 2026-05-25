@@ -80,9 +80,9 @@ typedef struct
 /**
  * @brief 消息队列分片
  *
- * @brief 每个分片维护自己的消息队列。
+ * @details 每个分片维护自己的消息队列。
  */
-typedef struct CACHE_ALIGN(64)
+typedef struct
 {
     sharded_mq_msg_t messages[SHARDED_MQ_MAX_MSGS];  /**< @brief 消息数组 */
     uint32_t          write_idx;                    /**< @brief 写入索引 */
@@ -91,7 +91,7 @@ typedef struct CACHE_ALIGN(64)
     uint32_t          total_enqueues;                /**< @brief 总入队次数 */
     uint32_t          total_dequeues;               /**< @brief 总出队次数 */
     TicketLock_t      lock;                         /**< @brief 分片锁 */
-} sharded_mq_shard_t;
+} sharded_mq_shard_t CACHE_ALIGN(64);
 
 /* ========================================================================
  * 消息队列分片锁
@@ -100,18 +100,18 @@ typedef struct CACHE_ALIGN(64)
 /**
  * @brief 消息队列分片锁
  *
- * @brief 管理所有分片。
+ * @details 管理所有分片。
  */
-typedef struct CACHE_ALIGN(64)
+typedef struct
 {
     sharded_mq_shard_t  shards[SHARDED_MQ_SHARDS];   /**< @brief 分片数组 */
     uint32_t            write_shard_idx;              /**< @brief 当前写入分片索引 */
     uint32_t            read_shard_idx;               /**< @brief 当前读取分片索引 */
     uint32_t            switch_count;                 /**< @brief 分片切换次数 */
     uint64_t            total_enqueues;               /**< @brief 总入队次数 */
-    uint64_t            total_dequeues;               /**< @total 出队次数 */
+    uint64_t            total_dequeues;               /**< @brief 总出队次数 */
     uint32_t            max_msg_count;                /**< @brief 最大消息数量 */
-} sharded_mq_t;
+} sharded_mq_t CACHE_ALIGN(64);
 
 /* ========================================================================
  * 消息队列分片锁操作 API

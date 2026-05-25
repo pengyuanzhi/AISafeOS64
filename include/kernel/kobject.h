@@ -7,7 +7,7 @@
  *
  * @details 本文件定义了微内核的统一内核对象类型系统：
  *          - 内核对象公共头部（KObjHeader_t）
- *          - 10 种内核对象类型标识
+ *          - 14 种内核对象类型标识（新增 FD/INODE/MEMORY_REGION）
  *          - 原子引用计数
  *          - 对象生命周期管理 API
  *
@@ -51,6 +51,9 @@ typedef enum
     KOBJ_CHANNEL,              /**< @brief IPC 通道 */
     KOBJ_CONNECTION,           /**< @brief IPC 连接 */
     KOBJ_SHM,                  /**< @brief 共享内存对象 */
+    KOBJ_FD,                   /**< @brief 文件描述符 */
+    KOBJ_INODE,                /**< @brief 文件 Inode */
+    KOBJ_MEMORY_REGION,        /**< @brief 内存区域 */
     KOBJ_TYPE_COUNT            /**< @brief 类型总数（用于边界检查） */
 } kobj_type_t;
 

@@ -29,7 +29,7 @@
 /**
  * @brief 全局消息队列分片锁实例
  */
-static sharded_mq_t s_sharded_mq CACHE_ALIGN(64);
+static sharded_mq_t CACHE_ALIGN(64) s_sharded_mq;
 
 /**
  * @brief 消息队列分片锁初始化标志

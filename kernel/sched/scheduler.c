@@ -45,6 +45,9 @@ extern void cpu_switch_to_first_task(uint64_t *ctx);
 extern char __heap_start[];
 extern char __heap_end[];
 
+/* 前向声明: 栈分配函数 */
+static vaddr_t stack_alloc(uint32_t size);
+
 /* HAL 接口 */
 extern void hal_uart_puts(uint64_t base, const char *str);
 
@@ -319,11 +322,6 @@ static vaddr_t stack_alloc(uint32_t size)
  *
  * @return 成功返回栈顶地址，失败返回 0
  */
-vaddr_t stack_alloc_by_scheduler(uint32_t size)
-{
-    return stack_alloc(size);
-}
-
 /* ========================================================================
  * idle 线程入口函数
  * ======================================================================== */
