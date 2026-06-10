@@ -18,9 +18,11 @@
  */
 
 #include <kernel/mm/slab.h>
+#include <kernel/mm/kmalloc.h>
 #include <kernel/mutex.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
+#include <kernel/string.h>
 
 /* ========================================================================
  * Slab 分配器配置

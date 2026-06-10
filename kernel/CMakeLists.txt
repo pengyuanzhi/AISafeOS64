@@ -90,6 +90,7 @@ set(KERNEL_MM_SOURCES
     mm/object_pool.c
     mm/shm.c
     mm/slab.c
+    mm/kmalloc.c
     mm/rbtree.c
     mm/hot_data_cache.c
     mm/buddy_system.c

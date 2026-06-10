@@ -247,6 +247,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_slab PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     add_test(NAME test_slab COMMAND test_slab)
 
+    # test_kmalloc — kmalloc/kfree 内存分配器测试（宿主机模式）
+    add_executable(test_kmalloc tests/test_kmalloc.c)
+    target_include_directories(test_kmalloc PRIVATE ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_kmalloc PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    target_compile_definitions(test_kmalloc PRIVATE TEST_HOST_MODE)
+    add_test(NAME test_kmalloc COMMAND test_kmalloc)
+
+    # test_kmalloc_kernel — kmalloc 内核实现测试
+    add_executable(test_kmalloc_kernel tests/test_kmalloc_kernel.c kernel/mm/kmalloc.c lib/kernel_string.c)
+    target_include_directories(test_kmalloc_kernel PRIVATE ${CMAKE_SOURCE_DIR} ${TEST_INCLUDE_DIRS})
+    target_compile_options(test_kmalloc_kernel PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    add_test(NAME test_kmalloc_kernel COMMAND test_kmalloc_kernel)
+
     # test_context_switch — 上下文切换性能测试
     add_executable(test_context_switch tests/test_context_switch.c)
     target_include_directories(test_context_switch PRIVATE ${TEST_INCLUDE_DIRS})
