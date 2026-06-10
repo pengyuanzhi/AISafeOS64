@@ -386,7 +386,7 @@ kernel_status_t dynlib_bind(const dynlib_manager_t *manager,
     /* 查找符号 */
     for (i = 0U; i < DYNLIB_MAX_SYMS; i++)
     {
-        const dynlib_sym_t *sym = &manager->syms[i];
+        dynlib_sym_t *sym = &manager->syms[i];
 
         if (sym->name != NULL && hash == sym->hash &&
             strcmp(name, sym->name) == 0)
@@ -458,10 +458,8 @@ kernel_status_t dynlib_call(const dynlib_manager_t *manager,
         if (sym->type == DYNLIB_SYM_FUNC)
         {
             /* 调用函数 */
-            asm volatile("blr %0"
-                         : "=r"(ret)
-                         : "r"(func)
-                         : "lr", "memory");
+            typedef void (*func_t)(void);
+            ((func_t)func)();
         }
         else
         {

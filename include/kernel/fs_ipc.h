@@ -268,7 +268,8 @@ int32_t fs_chown(const char *path, uint32_t uid, uint32_t gid);
  *
  * @return 0 成功，<0 失败
  */
-int32_t fs_flock(uint32_t fd, uint32_t lock_type);
+/* 文件锁：需要 mount_id 和 ino 参数，暂不暴露给用户态 */
+/* int32_t fs_flock(uint32_t fd, uint32_t lock_type); */
 
 /**
  * @brief 创建符号链接

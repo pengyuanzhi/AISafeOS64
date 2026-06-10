@@ -66,7 +66,6 @@ set(KERNEL_IPC_SOURCES
     ipc/notification.c
     ipc/ic2.c
     ipc/ring_buffer.c
-    ipc/ipc_batch.c
     ipc/sharded_message_queue.c
     ipc/zero_copy.c
 )

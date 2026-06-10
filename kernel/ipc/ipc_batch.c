@@ -16,9 +16,12 @@
  * @copyright Copyright (c) 2026 AISafe64 Team
  */
 
-#include <kernel/ipc/ipc_batch.h>
-#include <kernel/ipc/channel.h>
-#include <kernel/ipc/endpoint.h>
+/* TODO: kernel/ipc/ipc_batch.h 不存在，需要创建 */
+/* #include <kernel/ipc/ipc_batch.h> */
+/* TODO: kernel/ipc/channel.h 不存在，需要创建 */
+/* #include <kernel/ipc/channel.h> */
+/* TODO: kernel/ipc/endpoint.h 不存在 */
+/* #include <kernel/ipc/endpoint.h> */
 #include <kernel/errno.h>
 #include <kernel/mutex.h>
 

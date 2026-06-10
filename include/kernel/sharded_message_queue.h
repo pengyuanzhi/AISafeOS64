@@ -91,7 +91,7 @@ typedef struct
     uint32_t          total_enqueues;                /**< @brief 总入队次数 */
     uint32_t          total_dequeues;               /**< @brief 总出队次数 */
     TicketLock_t      lock;                         /**< @brief 分片锁 */
-} sharded_mq_shard_t CACHE_ALIGN(64);
+} __attribute__((aligned(64))) sharded_mq_shard_t;
 
 /* ========================================================================
  * 消息队列分片锁
@@ -111,7 +111,7 @@ typedef struct
     uint64_t            total_enqueues;               /**< @brief 总入队次数 */
     uint64_t            total_dequeues;               /**< @brief 总出队次数 */
     uint32_t            max_msg_count;                /**< @brief 最大消息数量 */
-} sharded_mq_t CACHE_ALIGN(64);
+} __attribute__((aligned(64))) sharded_mq_t;
 
 /* ========================================================================
  * 消息队列分片锁操作 API

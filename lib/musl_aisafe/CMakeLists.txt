@@ -41,6 +41,7 @@ set(MUSL_INCS
     ${MUSL_UPSTREAM}/src/internal
     ${GEN_DIR}
     ${MUSL_UPSTREAM}/include
+    /usr/aarch64-linux-gnu/include
 )
 
 # ==============================================================================
