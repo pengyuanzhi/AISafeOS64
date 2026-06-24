@@ -65,8 +65,11 @@ static int32_t fs_service_init(void)
     }
 
     /* 注册 EXT4 */
-    /* TODO: ext4 头文件冲突待修复，暂时跳过注册 */
-    (void)ext4_get_ops;
+    ret = fs_register_fs(FS_FSTYPE_EXT4, ext4_get_ops());
+    if (ret != 0)
+    {
+        return -4;
+    }
 
     /* 注册 DEVFS */
     ret = fs_register_fs(FS_FSTYPE_DEVFS, devfs_get_ops());

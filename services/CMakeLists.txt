@@ -273,6 +273,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_ops.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_path.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_devfs/devfs.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ext4/ext4_ops.c
             )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层

@@ -47,21 +47,8 @@
 #define EXT4_TIND_BLOCK          14U
 
 /* ========================================================================
- * Inode 类型
+ * Inode 类型（ext4_file_type_t 已在 ext4_types.h 中统一定义）
  * ======================================================================== */
-
-/** @brief 文件类型 */
-typedef enum
-{
-    EXT4_FT_UNKNOWN      = 0U,
-    EXT4_FT_REG_FILE     = 1U,
-    EXT4_FT_DIR          = 2U,
-    EXT4_FT_CHRDEV       = 3U,
-    EXT4_FT_BLKDEV       = 4U,
-    EXT4_FT_FIFO         = 5U,
-    EXT4_FT_SOCK         = 6U,
-    EXT4_FT_SYMLINK      = 7U
-} ext4_file_type_t;
 
 /* ========================================================================
  * Inode 状态

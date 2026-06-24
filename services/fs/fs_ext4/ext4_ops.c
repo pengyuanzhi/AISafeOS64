@@ -26,6 +26,21 @@
 #include <stdbool.h>
 
 /* ========================================================================
+ * Forward declarations（ext4 内部模块接口）
+ * ======================================================================== */
+int32_t ext4_instance_init(ext4_instance_t *inst);
+int32_t ext4_instance_cleanup(ext4_instance_t *inst);
+int32_t ext4_inode_lookup(ext4_instance_t *inst, const char *path,
+                          uint32_t *ino, ext4_inode_t *inode);
+int32_t ext4_inode_create(ext4_instance_t *inst, const char *path,
+                          uint32_t mode);
+int32_t ext4_inode_delete(ext4_instance_t *inst, const char *path);
+int64_t ext4_file_read(ext4_instance_t *inst, uint32_t ino,
+                        uint64_t offset, void *buf, uint64_t size);
+int64_t ext4_file_write(ext4_instance_t *inst, uint32_t ino,
+                         uint64_t offset, const void *buf, uint64_t size);
+
+/* ========================================================================
  * 常量定义
  * ======================================================================== */
 
@@ -173,11 +188,12 @@ static int32_t ext4_unmount(fs_mount_t *mnt)
 /**
  * @brief 查找文件
  */
-static int32_t ext4_lookup(uint32_t mount_id, const char *path,
-                           fs_inode_t *inode)
+static int32_t ext4_fs_lookup(uint32_t mount_id, const char *path,
+                              fs_inode_t *inode)
 {
     ext4_ctx_t *ctx;
     ext4_inode_t ei;
+    uint32_t ino_no;
     int32_t ret;
 
     if (path == NULL || inode == NULL)
@@ -191,32 +207,32 @@ static int32_t ext4_lookup(uint32_t mount_id, const char *path,
         return -1;
     }
 
-    /* 查找 inode */
-    ret = ext4_inode_lookup(&ctx->inst, path, &ei);
+    /* 查找 inode，ext4_inode_lookup 输出 inode 号和 inode 数据 */
+    ret = ext4_inode_lookup(&ctx->inst, path, &ino_no, &ei);
     if (ret < 0)
     {
         return -1;
     }
 
     /* 填充 inode */
-    inode->ino = ei.inode_no;
-    inode->size = ei.size;
-    inode->mode = ei.mode;
-    inode->nlinks = ei.links_count;
-    inode->atime = ei.atime;
-    inode->mtime = ei.mtime;
-    inode->ctime = ei.ctime;
+    inode->ino = ino_no;
+    inode->size = (uint64_t)ei.i_size;
+    inode->mode = (uint32_t)ei.i_mode;
+    inode->nlinks = (uint32_t)ei.i_links_count;
+    inode->atime = (uint64_t)ei.i_atime;
+    inode->mtime = (uint64_t)ei.i_mtime;
+    inode->ctime = (uint64_t)ei.i_ctime;
 
     /* 根据模式判断文件类型 */
-    if ((ei.mode & EXT4_S_IFDIR) != 0U)
+    if (((uint32_t)ei.i_mode & EXT4_S_IFDIR) != 0U)
     {
         inode->type = FS_TYPE_DIRECTORY;
     }
-    else if ((ei.mode & EXT4_S_IFREG) != 0U)
+    else if (((uint32_t)ei.i_mode & EXT4_S_IFREG) != 0U)
     {
         inode->type = FS_TYPE_REGULAR;
     }
-    else if ((ei.mode & EXT4_S_IFLNK) != 0U)
+    else if (((uint32_t)ei.i_mode & EXT4_S_IFLNK) != 0U)
     {
         inode->type = FS_TYPE_SYMLINK;
     }
@@ -231,11 +247,12 @@ static int32_t ext4_lookup(uint32_t mount_id, const char *path,
 /**
  * @brief 创建文件
  */
-static int32_t ext4_create(uint32_t mount_id, const char *path,
-                            uint32_t mode, fs_inode_t *inode)
+static int32_t ext4_fs_create(uint32_t mount_id, const char *path,
+                              uint32_t mode, fs_inode_t *inode)
 {
     ext4_ctx_t *ctx;
     ext4_inode_t ei;
+    uint32_t ino_no;
     int32_t ret;
 
     if (path == NULL)
@@ -259,17 +276,17 @@ static int32_t ext4_create(uint32_t mount_id, const char *path,
     /* 查找新创建的文件 */
     if (inode != NULL)
     {
-        ret = ext4_inode_lookup(&ctx->inst, path, &ei);
+        ret = ext4_inode_lookup(&ctx->inst, path, &ino_no, &ei);
         if (ret < 0)
         {
             return -1;
         }
 
-        inode->ino = ei.inode_no;
-        inode->size = 0;
+        inode->ino = ino_no;
+        inode->size = 0U;
         inode->type = FS_TYPE_REGULAR;
-        inode->mode = ei.mode;
-        inode->nlinks = ei.links_count;
+        inode->mode = (uint32_t)ei.i_mode;
+        inode->nlinks = (uint32_t)ei.i_links_count;
     }
 
     return 0;
@@ -278,7 +295,7 @@ static int32_t ext4_create(uint32_t mount_id, const char *path,
 /**
  * @brief 读取文件
  */
-static int64_t ext4_read(uint32_t mount_id, uint32_t ino,
+static int64_t ext4_fs_read(uint32_t mount_id, uint32_t ino,
                           uint64_t offset, void *buf, uint64_t size)
 {
     ext4_ctx_t *ctx;
@@ -304,7 +321,7 @@ static int64_t ext4_read(uint32_t mount_id, uint32_t ino,
 /**
  * @brief 写入文件
  */
-static int64_t ext4_write(uint32_t mount_id, uint32_t ino,
+static int64_t ext4_fs_write(uint32_t mount_id, uint32_t ino,
                            uint64_t offset, const void *buf, uint64_t size)
 {
     ext4_ctx_t *ctx;
@@ -330,7 +347,7 @@ static int64_t ext4_write(uint32_t mount_id, uint32_t ino,
 /**
  * @brief 创建目录
  */
-static int32_t ext4_mkdir(uint32_t mount_id, const char *path, uint32_t mode)
+static int32_t ext4_fs_mkdir(uint32_t mount_id, const char *path, uint32_t mode)
 {
     ext4_ctx_t *ctx;
     int32_t ret;
@@ -355,7 +372,7 @@ static int32_t ext4_mkdir(uint32_t mount_id, const char *path, uint32_t mode)
 /**
  * @brief 删除文件
  */
-static int32_t ext4_unlink(uint32_t mount_id, const char *path)
+static int32_t ext4_fs_unlink(uint32_t mount_id, const char *path)
 {
     ext4_ctx_t *ctx;
     int32_t ret;
@@ -404,12 +421,12 @@ static const fs_ops_t s_ext4_ops =
 {
     .mount   = ext4_mount,
     .unmount = ext4_unmount,
-    .lookup  = ext4_lookup,
-    .create  = ext4_create,
-    .read    = ext4_read,
-    .write   = ext4_write,
-    .mkdir   = ext4_mkdir,
-    .unlink  = ext4_unlink,
+    .lookup  = ext4_fs_lookup,
+    .create  = ext4_fs_create,
+    .read    = ext4_fs_read,
+    .write   = ext4_fs_write,
+    .mkdir   = ext4_fs_mkdir,
+    .unlink  = ext4_fs_unlink,
     .sync    = ext4_sync
 };
 
@@ -425,4 +442,58 @@ static const fs_ops_t s_ext4_ops =
 const fs_ops_t *ext4_get_ops(void)
 {
     return &s_ext4_ops;
+}
+
+/* ========================================================================
+ * Stub 实现（待 ext4 内部模块完善后替换）
+ *
+ * 这些函数提供弱实现，使 fs.elf 能链接通过。
+ * 后续将 ext4_inode.c / ext4_file.c 等纳入构建时自动覆盖。
+ * ======================================================================== */
+
+__attribute__((weak)) int32_t ext4_instance_init(ext4_instance_t *inst)
+{
+    (void)inst;
+    return -1;
+}
+
+__attribute__((weak)) int32_t ext4_instance_cleanup(ext4_instance_t *inst)
+{
+    (void)inst;
+    return 0;
+}
+
+__attribute__((weak)) int32_t ext4_inode_lookup(ext4_instance_t *inst,
+    const char *path, uint32_t *ino, ext4_inode_t *inode)
+{
+    (void)inst; (void)path; (void)ino; (void)inode;
+    return -1;
+}
+
+__attribute__((weak)) int32_t ext4_inode_create(ext4_instance_t *inst,
+    const char *path, uint32_t mode)
+{
+    (void)inst; (void)path; (void)mode;
+    return -1;
+}
+
+__attribute__((weak)) int32_t ext4_inode_delete(ext4_instance_t *inst,
+    const char *path)
+{
+    (void)inst; (void)path;
+    return -1;
+}
+
+__attribute__((weak)) int64_t ext4_file_read(ext4_instance_t *inst,
+    uint32_t ino, uint64_t offset, void *buf, uint64_t size)
+{
+    (void)inst; (void)ino; (void)offset; (void)buf; (void)size;
+    return -1;
+}
+
+__attribute__((weak)) int64_t ext4_file_write(ext4_instance_t *inst,
+    uint32_t ino, uint64_t offset, const void *buf, uint64_t size)
+{
+    (void)inst; (void)ino; (void)offset; (void)buf; (void)size;
+    return -1;
 }
