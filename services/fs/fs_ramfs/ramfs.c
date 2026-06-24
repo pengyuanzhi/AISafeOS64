@@ -20,8 +20,7 @@
 
 #include "fs_ops.h"
 #include "fs_inode_cache.h"
-/* TODO: fs_page_cache.h 不存在 */
-/* #include "fs_page_cache.h" */
+#include "fs_page_cache.h"
 #include "ramfs_hash.h"
 #include <string.h>
 #include <stdint.h>

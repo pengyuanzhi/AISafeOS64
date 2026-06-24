@@ -4,6 +4,17 @@
 #include <sys/types.h>
 #include <time.h>
 
+/* 兼容性 typedef：当系统 sys/stat.h 包含此文件时，确保类型可用 */
+#ifndef _AISAFE_BLKSIZE_T_DEFINED
+typedef int blksize_t;
+#define _AISAFE_BLKSIZE_T_DEFINED
+#endif
+
+#ifndef _AISAFE_BLKCNT_T_DEFINED
+typedef long blkcnt_t;
+#define _AISAFE_BLKCNT_T_DEFINED
+#endif
+
 /* struct stat 定义（标准 musl aarch64） */
 struct stat {
 	dev_t st_dev;

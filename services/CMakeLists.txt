@@ -141,6 +141,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
         ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ipc
         ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops
         ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs
+        ${CMAKE_CURRENT_SOURCE_DIR}/fs
     )
     
     target_compile_options(test_fs_ipc.elf PRIVATE
@@ -165,6 +166,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
         -static
         -Wl,--gc-sections
         -Wl,--no-warn-rwx-segments
+        -Wl,--allow-multiple-definition
         -Wl,--start-group
         -lgcc
         -Wl,--end-group
@@ -256,9 +258,13 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ipc/fs_ipc.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_server_ipc.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_ops.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_inode_cache.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_page_cache.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs_hash.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_romfs/romfs.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_devfs/devfs.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/ticket_lock_user.c
             )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层
@@ -285,6 +291,10 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ops
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ramfs
             ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_romfs
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_fat32
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_ext4
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs/fs_devfs
+            ${CMAKE_CURRENT_SOURCE_DIR}/fs
         )
 
         target_compile_options(${SERVICE_NAME}.elf PRIVATE
@@ -301,6 +311,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
             -D_FORTIFY_SOURCE=0
             -O2
             -fno-asynchronous-unwind-tables
+            -mno-outline-atomics
         )
 
         target_link_options(${SERVICE_NAME}.elf PRIVATE

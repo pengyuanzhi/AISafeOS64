@@ -930,6 +930,51 @@ uint32_t kernel_strtoul(const char *nptr, char **endptr, int32_t base)
     return result;
 }
 
+/* ========================================================================
+ * 标准库符号别名
+ *
+ * GCC -O2 优化会隐式生成 memset/memcpy 调用（如结构体清零），
+ * 即使源码使用 kernel_memset 宏也不行。
+ * 此处提供标准符号，满足链接器需求。
+ * ======================================================================== */
+
+#undef memset
+#undef memcpy
+#undef memmove
+#undef memcmp
+
+/**
+ * @brief 标准库 memset 符号（满足 GCC 隐式调用）
+ */
+void *memset(void *s, int c, size_t n)
+{
+    return kernel_memset(s, c, n);
+}
+
+/**
+ * @brief 标准库 memcpy 符号（满足 GCC 隐式调用）
+ */
+void *memcpy(void *dest, const void *src, size_t n)
+{
+    return kernel_memcpy(dest, src, n);
+}
+
+/**
+ * @brief 标准库 memmove 符号（满足 GCC 隐式调用）
+ */
+void *memmove(void *dest, const void *src, size_t n)
+{
+    return kernel_memmove(dest, src, n);
+}
+
+/**
+ * @brief 标准库 memcmp 符号（满足 GCC 隐式调用）
+ */
+int32_t memcmp(const void *s1, const void *s2, size_t n)
+{
+    return kernel_memcmp(s1, s2, n);
+}
+
 /**
  * @brief 简化的 snprintf 实现（只支持格式化字符串，不支持浮点）
  */
