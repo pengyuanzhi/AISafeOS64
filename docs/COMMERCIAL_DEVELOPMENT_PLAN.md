@@ -25,9 +25,16 @@
 - **远程管理**: 0%（缺失）
 
 ### ⚠️ 当前技术债务
-- **编译错误**: 40个待修复（已从80个减少50%）
+- **编译错误**: 0个（已修复编译阶段错误）
+- **链接错误**: 3个（kmalloc/kfree/memset 未实现）
 - **TODO/FIXME**: 130个待处理
 - **测试覆盖**: 部分模块测试覆盖率不足80%
+
+### 🎯 近期任务（优先级 P0）
+- [ ] 修复 kmalloc/kfree 内存分配函数实现
+- [ ] 修复 memset 函数链接问题
+- [ ] 完成内核静态库链接
+- [ ] 验证内核可在 QEMU 中启动
 
 ---
 
@@ -289,7 +296,7 @@ cd $WORKDIR
 PLAN_FILE="$WORKDIR/docs/COMMERCIAL_DEVELOPMENT_PLAN.md"
 
 # 获取当前任务
-CURRENT_TASK=$(grep -A 5 "### 近期任务" "$PLAN_FILE" | grep -m 1 "^\- \[ \]" | sed 's/^\- \[ \] //')
+CURRENT_TASK=$(grep -A 10 "近期任务" "$PLAN_FILE" | grep -m 1 "^\- \[ \]" | sed 's/^\- \[ \] //')
 
 if [ -z "$CURRENT_TASK" ]; then
     echo "✅ 所有任务已完成"

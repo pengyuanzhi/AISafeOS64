@@ -72,6 +72,28 @@
 #define EXT4_S_IXOTH            00001U     /* 其他执行 */
 
 /* ========================================================================
+ * 文件类型枚举
+ * ======================================================================== */
+
+/**
+ * @brief 目录项文件类型
+ */
+#ifndef EXT4_FILE_TYPE_T_DEFINED
+#define EXT4_FILE_TYPE_T_DEFINED
+typedef enum
+{
+    EXT4_FT_UNKNOWN       = 0U,  /**< @brief 未知类型 */
+    EXT4_FT_REG_FILE      = 1U,  /**< @brief 普通文件 */
+    EXT4_FT_DIR           = 2U,  /**< @brief 目录 */
+    EXT4_FT_CHRDEV        = 3U,  /**< @brief 字符设备 */
+    EXT4_FT_BLKDEV        = 4U,  /**< @brief 块设备 */
+    EXT4_FT_FIFO          = 5U,  /**< @brief FIFO */
+    EXT4_FT_SOCK          = 6U,  /**< @brief 套接字 */
+    EXT4_FT_SYMLINK       = 7U   /**< @brief 符号链接 */
+} ext4_file_type_t;
+#endif /* EXT4_FILE_TYPE_T_DEFINED */
+
+/* ========================================================================
  * Ext4 超级块结构
  * ======================================================================== */
 

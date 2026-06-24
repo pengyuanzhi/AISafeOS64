@@ -2,7 +2,8 @@
 # AISafeOS64 全自主开发脚本
 # 每日自动执行：09:00-18:00
 
-set -e
+# 移除 set -e，因为编译可能失败但需要继续执行
+# set -e
 
 WORKDIR="/home/kerfs/AISafeOS64/AISafeOS64"
 LOG_DIR="$WORKDIR/logs"
@@ -22,8 +23,15 @@ echo "🚀 开始全自主开发 - $TODAY $(date '+%H:%M:%S')" | tee -a "$LOG_DI
 echo "📦 检查编译状态..." | tee -a "$LOG_DIR/auto_dev_$DATE.log"
 mkdir -p build && cd build
 cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-arm64.cmake > /dev/null 2>&1 || true
-make -j$(nproc) > "$LOG_DIR/build_$DATE.log" 2>&1 || echo "⚠️ 编译失败，需要修复" | tee -a "$LOG_DIR/auto_dev_$DATE.log"
+make -j$(nproc) > "$LOG_DIR/build_$DATE.log" 2>&1
+BUILD_RESULT=$?
 cd "$WORKDIR"
+
+if [ $BUILD_RESULT -eq 0 ]; then
+    echo "✅ 编译成功" | tee -a "$LOG_DIR/auto_dev_$DATE.log"
+else
+    echo "⚠️ 编译失败（链接阶段错误），继续执行" | tee -a "$LOG_DIR/auto_dev_$DATE.log"
+fi
 
 # 2. 读取开发计划，获取下一个任务
 echo "📋 读取开发计划..." | tee -a "$LOG_DIR/auto_dev_$DATE.log"
