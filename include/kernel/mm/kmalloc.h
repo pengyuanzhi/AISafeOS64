@@ -53,7 +53,7 @@ typedef struct
  * @details 默认 4MB，可通过 Kconfig 配置
  */
 #ifndef KMALLOC_HEAP_SIZE
-#define KMALLOC_HEAP_SIZE       (4U * 1024U * 1024U)
+#define KMALLOC_HEAP_SIZE       (2U * 1024U * 1024U)  /* 2MB - 与链接脚本 __heap_start/__heap_end 匹配 */
 #endif
 
 /**

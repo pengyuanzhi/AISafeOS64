@@ -65,12 +65,28 @@ extern void hal_uart_puts(uint64_t base, const char *str);
  */
 static int32_t thread_stack_slab_init(void)
 {
-    /* TODO: slab_create -> kmalloc 调用链在 QEMU 中触发 Instruction Abort
-     * 暂时禁用 Slab 分配器，回退到 bump allocator
-     * 后续需要用 GDB 调试 kmalloc 搜索循环中的 NULL 指针问题 */
-    g_scheduler.stack_slab.initialized = false;
-    (void)slab_create;  /* 避免 unused function 警告 */
-    return KERNEL_OK;
+    int32_t ret;
+    size_t pool_sizes[STACK_SIZE_COUNT] = {
+        STACK_SIZE_4KB_BYTES * 8,   /* 4KB 栈，每个 Slab 8 个对象 */
+        STACK_SIZE_8KB_BYTES * 4,   /* 8KB 栈，每个 Slab 4 个对象 */
+        STACK_SIZE_16KB_BYTES * 2    /* 16KB 栈，每个 Slab 2 个对象 */
+    };
+
+    for (uint32_t i = 0U; i < STACK_SIZE_COUNT; i++)
+    {
+        ret = slab_create(&g_scheduler.stack_slab.caches[i], pool_sizes[i]);
+        if (ret != KERNEL_OK)
+        {
+            /* 清理已创建的缓存 */
+            for (uint32_t j = 0U; j < i; j++)
+            {
+                (void)slab_destroy(&g_scheduler.stack_slab.caches[j]);
+            }
+            return ret;
+        }
+    }
+
+    g_scheduler.stack_slab.initialized = true;
 
     return KERNEL_OK;
 }
@@ -107,15 +123,15 @@ static int32_t thread_stack_slab_destroy(void)
 static int32_t select_stack_cache(uint32_t size)
 {
     /* 根据栈大小选择合适的缓存 */
-    if (size <= STACK_SIZE_4KB)
+    if (size <= STACK_SIZE_4KB_BYTES)
     {
         return 0; /* 4KB 缓存 */
     }
-    else if (size <= STACK_SIZE_8KB)
+    else if (size <= STACK_SIZE_8KB_BYTES)
     {
         return 1; /* 8KB 缓存 */
     }
-    else if (size <= STACK_SIZE_16KB)
+    else if (size <= STACK_SIZE_16KB_BYTES)
     {
         return 2; /* 16KB 缓存 */
     }

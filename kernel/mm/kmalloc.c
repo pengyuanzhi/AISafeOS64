@@ -71,14 +71,17 @@ typedef struct block_header
  * ======================================================================== */
 
 /**
- * @brief 内核堆内存区域（静态分配）
+ * @brief 内核堆区域（使用链接脚本定义的 heap 段）
  *
- * @details 使用 BSS 段静态数组作为内核堆。
- *          在实际硬件上，此处可替换为由 bootloader
- *          传递的物理内存区域。
+ * @details 使用 __heap_start ~ __heap_start + KMALLOC_HEAP_SIZE 作为内核堆。
+ *          避免在 BSS 段中放置巨型静态数组。
  */
-static uint8_t s_heap_base[KMALLOC_HEAP_SIZE]
-    __attribute__((aligned(KMALLOC_ALIGN)));
+
+/** @brief 链接脚本定义的堆起始地址 */
+extern char __heap_start[];
+
+/** @brief 堆基地址指针（运行时从链接符号获取） */
+static uint8_t *s_heap_base = NULL;
 
 /* ========================================================================
  * 分配器全局状态
@@ -243,6 +246,9 @@ static void merge_free_blocks(block_header_t *block)
 int32_t kmalloc_init(void)
 {
     block_header_t *first_block;
+
+    /* 从链接符号获取堆基地址 */
+    s_heap_base = (uint8_t *)(uintptr_t)__heap_start;
 
     /* 初始化堆区域 */
     (void)kernel_memset(s_heap_base, 0, KMALLOC_HEAP_SIZE);

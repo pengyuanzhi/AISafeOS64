@@ -73,11 +73,16 @@ typedef struct CACHE_ALIGN(64)
  */
 typedef enum
 {
-    STACK_SIZE_4KB = 4096,      /**< @brief 4KB 栈 */
-    STACK_SIZE_8KB = 8192,      /**< @brief 8KB 栈 */
-    STACK_SIZE_16KB = 16384,    /**< @brief 16KB 栈 */
-    STACK_SIZE_COUNT            /**< @brief 栈大小类别数量 */
+    STACK_SIZE_4KB = 0,         /**< @brief 4KB 栈索引 */
+    STACK_SIZE_8KB = 1,         /**< @brief 8KB 栈索引 */
+    STACK_SIZE_16KB = 2,        /**< @brief 16KB 栈索引 */
+    STACK_SIZE_COUNT            /**< @brief 栈大小类别数量 = 3 */
 } stack_size_class_t;
+
+/** @brief 实际栈大小（字节） */
+#define STACK_SIZE_4KB_BYTES   4096U
+#define STACK_SIZE_8KB_BYTES   8192U
+#define STACK_SIZE_16KB_BYTES  16384U
 
 /**
  * @brief 线程栈 Slab 缓存集合
