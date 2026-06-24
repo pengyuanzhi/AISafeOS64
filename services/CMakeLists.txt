@@ -259,12 +259,20 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_server_ipc.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_ops.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/fs_inode_cache.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/ticket_lock_user.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_page_cache.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ramfs/ramfs_hash.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_romfs/romfs.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_bpb.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_cache.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_dir.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_fat.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_file.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_ops.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_fat32/fat32_path.c
                 ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_devfs/devfs.c
-                ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_NAME}/fs_ops/ticket_lock_user.c
             )
         elseif(SERVICE_NAME STREQUAL "drv_virtio_net")
             # VirtIO Net 驱动：包含网络接口层

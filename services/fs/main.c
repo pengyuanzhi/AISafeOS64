@@ -58,8 +58,11 @@ static int32_t fs_service_init(void)
     }
 
     /* 注册 FAT32 */
-    /* TODO: fat32_ops.c 类型冲突待修复，暂时跳过注册 */
-    (void)fat32_get_ops;
+    ret = fs_register_fs(FS_FSTYPE_FAT32, fat32_get_ops());
+    if (ret != 0)
+    {
+        return -3;
+    }
 
     /* 注册 EXT4 */
     /* TODO: ext4 头文件冲突待修复，暂时跳过注册 */

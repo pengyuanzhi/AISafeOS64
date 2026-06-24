@@ -198,11 +198,11 @@ static int32_t fat32_lookup(uint32_t mount_id, const char *path,
     }
 
     /* 填充 inode */
-    inode->ino = entry.cluster;
+    inode->ino = (uint32_t)(((uint32_t)entry.fst_clus_hi << 16) | entry.fst_clus_lo);
     inode->size = entry.file_size;
 
     /* 根据属性判断文件类型 */
-    if ((entry.attributes & FAT32_ATTR_DIRECTORY) != 0U)
+    if ((entry.attr & FAT32_ATTR_DIRECTORY) != 0U)
     {
         inode->type = FS_TYPE_DIRECTORY;
     }
@@ -259,7 +259,7 @@ static int32_t fat32_create(uint32_t mount_id, const char *path,
 
     if (inode != NULL)
     {
-        inode->ino = entry.cluster;
+        inode->ino = (uint32_t)(((uint32_t)entry.fst_clus_hi << 16) | entry.fst_clus_lo);
         inode->size = 0;
         inode->type = FS_TYPE_REGULAR;
         inode->mode = 0;
@@ -272,7 +272,7 @@ static int32_t fat32_create(uint32_t mount_id, const char *path,
 /**
  * @brief 读取文件
  */
-static int64_t fat32_read(uint32_t mount_id, uint32_t ino,
+static int64_t fat32_fs_read(uint32_t mount_id, uint32_t ino,
                            uint64_t offset, void *buf, uint64_t size)
 {
     fat32_ctx_t *ctx;
@@ -309,7 +309,7 @@ static int64_t fat32_read(uint32_t mount_id, uint32_t ino,
 /**
  * @brief 写入文件
  */
-static int64_t fat32_write(uint32_t mount_id, uint32_t ino,
+static int64_t fat32_fs_write(uint32_t mount_id, uint32_t ino,
                             uint64_t offset, const void *buf, uint64_t size)
 {
     fat32_ctx_t *ctx;
