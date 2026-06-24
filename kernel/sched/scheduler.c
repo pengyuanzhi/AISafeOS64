@@ -65,33 +65,12 @@ extern void hal_uart_puts(uint64_t base, const char *str);
  */
 static int32_t thread_stack_slab_init(void)
 {
-    int32_t ret;
-    size_t pool_sizes[STACK_SIZE_COUNT] = {
-        STACK_SIZE_4KB * 8,   /* 4KB 栈，每个 Slab 8 个对象 */
-        STACK_SIZE_8KB * 4,   /* 8KB 栈，每个 Slab 4 个对象 */
-        STACK_SIZE_16KB * 2    /* 16KB 栈，每个 Slab 2 个对象 */
-    };
-    const char *cache_names[STACK_SIZE_COUNT] = {
-        "stack_4KB",
-        "stack_8KB",
-        "stack_16KB"
-    };
-
-    for (uint32_t i = 0U; i < STACK_SIZE_COUNT; i++)
-    {
-        ret = slab_create(&g_scheduler.stack_slab.caches[i], pool_sizes[i]);
-        if (ret != KERNEL_OK)
-        {
-            /* 清理已创建的缓存 */
-            for (uint32_t j = 0U; j < i; j++)
-            {
-                (void)slab_destroy(&g_scheduler.stack_slab.caches[j]);
-            }
-            return ret;
-        }
-    }
-
-    g_scheduler.stack_slab.initialized = true;
+    /* TODO: slab_create -> kmalloc 调用链在 QEMU 中触发 Instruction Abort
+     * 暂时禁用 Slab 分配器，回退到 bump allocator
+     * 后续需要用 GDB 调试 kmalloc 搜索循环中的 NULL 指针问题 */
+    g_scheduler.stack_slab.initialized = false;
+    (void)slab_create;  /* 避免 unused function 警告 */
+    return KERNEL_OK;
 
     return KERNEL_OK;
 }
@@ -710,6 +689,8 @@ void NORETURN scheduler_start(void)
 
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
+
+    hal_uart_puts(0x09000000UL, "[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */
     cpu_switch_to_first_task(first_thread->context);
