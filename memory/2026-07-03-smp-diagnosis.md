@@ -1,4 +1,4 @@
-# 2026-07-03 SMP 多核启动诊断 ✅ (已完成诊断，修复待续)
+# 2026-07-03 SMP 多核启动诊断与修复 ✅ (已修复)
 
 ## 完成工作
 
@@ -94,22 +94,53 @@ thread_entry_trampoline:
 **异常向量表发现**：所有异常最终跳到 `.Lexception_panic`（0x400011e8）= `wfe; b` 死循环。
 崩溃时 PC=0 递增是异常嵌套的表现。
 
-#### 待验证的根因假设（优先级排序）
+## 最终根因 ✅ 已确认并修复
 
-1. **idle 线程 SP（heap 区域）在从核页表未映射**：虽然 mmu_init_secondary 用主核页表，
-   但需验证 heap 区域（0x40080000+）在页表里的映射粒度。idle 线程栈是 kmalloc 分配的，
-   可能落在主核构建页表后新增的内存区域
-2. **eret 后 SP_EL1 切换问题**：context[13] SPSR=0x5（EL1h 用 SP_EL1），
-   但 cpu_switch_to_first_task 设置的是 sp（当前 SP），从核的 SP_EL1/SP_EL0 状态可能不对
-3. **异常处理死循环导致看门狗/嵌套**：.Lexception_panic 是占位符，不保存/恢复状态
+### 真正的根因：从核定时器中断并发访问全局软件定时器队列
 
-#### 修复方向
+通过系统化诊断（逐函数 UART 标记 + 排除法），最终确认崩溃根因：
 
-1. **验证页表映射**：在从核 mmu_init_secondary 后，测试访问 SP 地址
-2. **简化从核首次切换**：从核不调用 cpu_switch_to_first_task，直接在 EL1h 用当前栈
-   执行 idle 循环（避免复杂的上下文恢复）
-3. **完善异常处理**：.Lexception_panic 应打印诊断信息而非静默死循环
-4. **从核 idle 线程用静态栈**：避免 kmalloc 栈的页表映射问题
+**`timer_interrupt_handler()` 中的全局共享数据并发访问**
+
+从核被 PSCI 唤醒后，在 `smp_secondary_entry` 中使能了各自的物理定时器。
+当从核定时器中断触发时，`timer_interrupt_handler()` 在从核上执行，
+**并发访问主核也在访问的全局无锁数据结构**：
+
+1. `s_system_ticks++` — 非原子自增（数据竞争，但通常不致命）
+2. **`s_timer_queue` 软件定时器链表遍历** — 无锁链表操作（prev/next 指针修改）
+3. **`s_sleep_queue` 睡眠线程队列遍历** — 同上
+4. **`scheduler_tick()`** — 调度器共享状态访问
+
+当主核注册了软件定时器后（启动时调度器/smp_work 线程注册），`s_timer_queue` 非空。
+从核并发遍历该链表时，指针被损坏，`timer->callback` 变成无效地址（0），
+调用回调时跳转到地址 0 → **Instruction Abort at PC=0** → 异常嵌套循环。
+
+### 关键诊断证据
+
+- 禁用从核定时器 → **0 exception**（4核完全稳定）
+- 从核定时器中断标记显示：进入 timer handler（m:4382）vs 完成（T:4374），
+  差值 8 次说明偶发崩溃（竞态条件）
+- 链表状态标记：`L`(非空):19311 vs `l`(空):8 → 从核看到链表非空
+
+### 修复方案
+
+**从核定时器中断只做最小处理**（timer.c `timer_interrupt_handler`）：
+- 从核：仅 `s_system_ticks++` + `timer_set_next_compare()` + 心跳打印
+- CPU0：完整处理（软件定时器队列 + 睡眠队列 + scheduler_tick）
+
+软件定时器队列、睡眠队列、调度器 tick 的全局共享数据只在 CPU0 上处理，
+从核的调度由 IPI 和从核自身逻辑处理（后续可逐步实现每 CPU 独立队列）。
+
+### 排除的假设（诊断过程中验证）
+
+| 假设 | 验证方式 | 结论 |
+|------|---------|------|
+| 缓存一致性 | flush_code_cache 覆盖整个 .text | ❌ 扩大后崩溃依旧 |
+| idle SP 页表未映射 | 检查 PTE 映射（SP 在 RW 段） | ❌ 已映射 |
+| cpu_switch_to_first_task 崩溃 | 跳过切换直接 wfe 仍崩 | ❌ 非切换问题 |
+| 主核 TTBR0 切换 | 禁用切换仍崩 | ❌ 非 TLB 问题 |
+| tlbi vmalle1is 广播 | 改非 IS 仍崩 | ❌ 非 TLB 广播 |
+| 从核定时器中断 | 禁用从核定时器→0 exception | ✅ **确认根因** |
 
 ## 代码统计
 

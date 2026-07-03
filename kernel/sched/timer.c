@@ -236,76 +236,86 @@ void timer_interrupt_handler(void)
     /* 设置下一次比较值 */
     timer_set_next_compare();
 
-    /* 处理软件定时器（检查是否有定时器过期） */
-    while (s_timer_queue.next != &s_timer_queue)
+    /*
+     * SMP 修复：从核定时器中断只做最小处理。
+     *
+     * 全局软件定时器队列、睡眠队列、调度器 tick 涉及大量无锁共享数据，
+     * 从核并发访问会导致链表损坏和上下文切换崩溃。从核只需递增 ticks
+     * 和重设比较值，调度由 IPI 和从核自身的调度逻辑处理。
+     */
+    if (cpu_id == 0U)
     {
-        SoftwareTimer_t *timer = container_of(s_timer_queue.next,
-                                               SoftwareTimer_t, node);
-
-        if (timer->expire_tick <= s_system_ticks)
+        /* 处理软件定时器（检查是否有定时器过期） */
+        while (s_timer_queue.next != &s_timer_queue)
         {
-            /* 从队列中移除 */
-            timer->node.prev->next = timer->node.next;
-            timer->node.next->prev = timer->node.prev;
-            timer->node.next = &timer->node;
-            timer->node.prev = &timer->node;
+            SoftwareTimer_t *timer = container_of(s_timer_queue.next,
+                                                   SoftwareTimer_t, node);
 
-            timer->state = TIMER_STATE_CALLBACK;
-
-            /* 执行回调 */
-            if (timer->callback != NULL)
+            if (timer->expire_tick <= s_system_ticks)
             {
-                timer->callback(timer->callback_arg);
-            }
+                /* 从队列中移除 */
+                timer->node.prev->next = timer->node.next;
+                timer->node.next->prev = timer->node.prev;
+                timer->node.next = &timer->node;
+                timer->node.prev = &timer->node;
 
-            /* 如果是周期定时器，重新入队 */
-            if (timer->interval > 0ULL)
-            {
-                timer->expire_tick += timer->interval;
-                timer->state = TIMER_STATE_ACTIVE;
+                timer->state = TIMER_STATE_CALLBACK;
 
-                /* 重新插入到队列中 */
-                timer->node.next = s_timer_queue.next;
-                timer->node.prev = &s_timer_queue;
-                s_timer_queue.next->prev = &timer->node;
-                s_timer_queue.next = &timer->node;
+                /* 执行回调 */
+                if (timer->callback != NULL)
+                {
+                    timer->callback(timer->callback_arg);
+                }
+
+                /* 如果是周期定时器，重新入队 */
+                if (timer->interval > 0ULL)
+                {
+                    timer->expire_tick += timer->interval;
+                    timer->state = TIMER_STATE_ACTIVE;
+
+                    /* 重新插入到队列中 */
+                    timer->node.next = s_timer_queue.next;
+                    timer->node.prev = &s_timer_queue;
+                    s_timer_queue.next->prev = &timer->node;
+                    s_timer_queue.next = &timer->node;
+                }
+                else
+                {
+                    timer->state = TIMER_STATE_EXPIRED;
+                }
             }
             else
             {
-                timer->state = TIMER_STATE_EXPIRED;
+                break;
             }
         }
-        else
+
+        /* 处理睡眠线程唤醒 */
+        while (s_sleep_queue.next != &s_sleep_queue)
         {
-            break;
+            struct KThread *thread = container_of(s_sleep_queue.next,
+                                                   struct KThread, sleep_node);
+
+            if (thread->wakeup_tick <= s_system_ticks)
+            {
+                /* 从睡眠队列移除 */
+                thread->sleep_node.prev->next = thread->sleep_node.next;
+                thread->sleep_node.next->prev = thread->sleep_node.prev;
+                thread->sleep_node.next = &thread->sleep_node;
+                thread->sleep_node.prev = &thread->sleep_node;
+
+                /* 唤醒线程 */
+                timer_wakeup_thread(thread);
+            }
+            else
+            {
+                break;
+            }
         }
+
+        /* 触发调度器 tick（RR 时间片处理），仅 CPU0 */
+        scheduler_tick();
     }
-
-    /* 处理睡眠线程唤醒 */
-    while (s_sleep_queue.next != &s_sleep_queue)
-    {
-        struct KThread *thread = container_of(s_sleep_queue.next,
-                                               struct KThread, sleep_node);
-
-        if (thread->wakeup_tick <= s_system_ticks)
-        {
-            /* 从睡眠队列移除 */
-            thread->sleep_node.prev->next = thread->sleep_node.next;
-            thread->sleep_node.next->prev = thread->sleep_node.prev;
-            thread->sleep_node.next = &thread->sleep_node;
-            thread->sleep_node.prev = &thread->sleep_node;
-
-            /* 唤醒线程 */
-            timer_wakeup_thread(thread);
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    /* 触发调度器 tick（RR 时间片处理） */
-    scheduler_tick();
 }
 
 /* ========================================================================
