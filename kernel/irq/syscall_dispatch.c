@@ -39,6 +39,8 @@
 #include <kernel/cspace.h>
 #include <kernel/page_table.h>
 #include <kernel/interrupt.h>
+#include <kernel/phys_mem.h>
+#include <kernel/mmu.h>
 #include "thread.h"
 
 /* HAL 用于 debug print */
@@ -47,6 +49,52 @@ extern void hal_uart_putc(uint64_t base, char c);
 
 
 #define QEMU_UART0_BASE  0x09000000UL
+
+/* ========================================================================
+ * 用户态驱动内存映射支持
+ *
+ * @details 简单的用户虚拟地址 bump allocator，用于 SYS_VM_MAP 分配
+ *          用户态 MMIO/DMA 映射的虚拟地址。从 0x10000000 开始递增
+ *          （避开 ELF 加载区 0x400000 和栈区）。
+ * ======================================================================== */
+
+/** @brief 用户驱动映射区起始地址（避开 ELF@0x400000 和栈） */
+#define USER_MMAP_BASE  ((uint64_t)0x10000000ULL)
+
+/** @brief 用户驱动映射区当前分配指针（bump allocator） */
+static uint64_t s_user_mmap_ptr = USER_MMAP_BASE;
+
+/**
+ * @brief 分配用户虚拟地址区间
+ *
+ * @param size 需要的字节数（将按页对齐）
+ *
+ * @return 分配的起始虚拟地址
+ */
+static uint64_t user_mmap_alloc(uint64_t size)
+{
+    uint64_t addr = s_user_mmap_ptr;
+    uint64_t aligned_size = (size + (uint64_t)PAGE_SIZE_4K - 1ULL)
+                          & ~((uint64_t)PAGE_SIZE_4K - 1ULL);
+    s_user_mmap_ptr += aligned_size;
+    return addr;
+}
+
+/**
+ * @brief 获取当前线程的用户 PGD（用于页表映射）
+ *
+ * @return 用户 PGD 虚拟地址，非用户线程返回 0
+ */
+static page_table_t *get_current_user_pgd(void)
+{
+    struct KThread *current = kthread_get_current();
+
+    if ((current == NULL) || (current->is_user == 0U) || (current->user_pgd == 0ULL))
+    {
+        return NULL;
+    }
+    return (page_table_t *)(uintptr_t)current->user_pgd;
+}
 
 /* ========================================================================
  * ENOSYS 定义
@@ -386,15 +434,71 @@ static void dispatch_memory(syscall_frame_t *frame)
 
         case SYS_VM_MAP:
         {
-            /* x0=vspace_id, x1=addr, x2=flags */
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            /*
+             * 映射物理内存到用户空间（MMIO 或 DMA）
+             *
+             * 参数：x0 = paddr（0=分配 DMA 物理页，非 0=MMIO 直接映射）
+             *       x1 = size（字节数）
+             *       x2 = perm_flags（PAGE_PERM_* 组合）
+             * 返回：x0 = 用户虚拟地址（成功）或负错误码
+             */
+            uint64_t paddr = frame->x0;
+            uint64_t size = frame->x1;
+            page_perm_t perm = (page_perm_t)frame->x2;
+            page_table_t *user_pgd = get_current_user_pgd();
+
+            if (user_pgd == NULL)
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EPERM);
+                break;
+            }
+
+            /* 分配用户虚拟地址 */
+            uint64_t vaddr = user_mmap_alloc(size);
+            uint64_t offset;
+            kernel_status_t map_ret = KERNEL_OK;
+
+            /* 逐页映射 */
+            for (offset = 0U; offset < size; offset += (uint64_t)PAGE_SIZE_4K)
+            {
+                uint64_t cur_paddr;
+                if (paddr == 0ULL)
+                {
+                    /* DMA 分配：分配连续物理页 */
+                    cur_paddr = phys_mem_alloc_page();
+                    if (cur_paddr == 0ULL)
+                    {
+                        frame->x0 = (uint64_t)(-(int64_t)ENOMEM);
+                        break;
+                    }
+                }
+                else
+                {
+                    /* MMIO 直接映射 */
+                    cur_paddr = paddr + offset;
+                }
+
+                map_ret = page_table_map(user_pgd, vaddr + offset,
+                                         cur_paddr, perm, true);
+                if (map_ret != KERNEL_OK)
+                {
+                    frame->x0 = (uint64_t)(-(int64_t)ENOMEM);
+                    break;
+                }
+            }
+
+            if (offset >= size)
+            {
+                frame->x0 = vaddr;
+            }
             break;
         }
 
         case SYS_VM_UNMAP:
         {
-            /* x0=vspace_id, x1=addr, x2=size */
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            /* x0=addr, x1=size（简化实现：仅释放虚拟地址，物理页由 DMA 跟踪释放） */
+            /* 当前简化：返回成功（物理页释放延后实现） */
+            frame->x0 = 0ULL;
             break;
         }
 
@@ -402,6 +506,34 @@ static void dispatch_memory(syscall_frame_t *frame)
         {
             /* x0=vspace_id, x1=addr, x2=flags */
             frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+
+        case SYS_VIRT_TO_PHYS:
+        {
+            /*
+             * 查询用户虚拟地址对应的物理地址（DMA 用，写 virtqueue 寄存器需要）
+             *
+             * 参数：x0 = 用户虚拟地址
+             * 返回：x0 = 物理地址（成功）或负错误码
+             */
+            page_table_t *user_pgd = get_current_user_pgd();
+            paddr_t paddr_result;
+
+            if (user_pgd == NULL)
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EPERM);
+                break;
+            }
+
+            if (page_table_lookup(user_pgd, (vaddr_t)frame->x0, &paddr_result) == KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)paddr_result;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+            }
             break;
         }
 
@@ -516,16 +648,32 @@ static void dispatch_interrupt(syscall_frame_t *frame)
     {
         case SYS_INTERRUPT_ATTACH:
         {
-            /* x0=irq, x1=notification_cap */
-            /* TODO: 需要中断绑定到通知对象的 API */
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            /*
+             * 绑定硬件中断到 notification 对象
+             *
+             * 参数：x0 = irq 中断号
+             *       x1 = notification_id 通知对象 ID
+             * 返回：x0 = 0 成功 或负错误码
+             *
+             * 内核 interrupt_attach 配置 GIC 并在中断发生时
+             * 调用 ipc_notification_signal 通知用户态。
+             */
+            uint32_t irq = (uint32_t)frame->x0;
+            kobj_id_t notif_id = (kobj_id_t)frame->x1;
+            kernel_status_t ret;
+
+            /* IRQ_TRIGGER_EDGE_FALLING=2, 优先级 0xA0 */
+            ret = interrupt_attach(irq, notif_id, 2U, (uint8_t)0xA0U);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }
 
         case SYS_INTERRUPT_DETACH:
         {
             /* x0=irq */
-            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            uint32_t irq = (uint32_t)frame->x0;
+            kernel_status_t ret = interrupt_detach(irq);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }
 

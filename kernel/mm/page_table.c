@@ -97,6 +97,7 @@ static inline page_table_t *pte_to_table(uint64_t pte)
  *
  * @details 根据权限标志和 is_user 标志，选择合适的 ARMv8-A
  *          页表属性组合：
+ *          - DEVICE 标志: 使用 Device nGnRnE 属性（非缓存，MMIO/DMA）
  *          - 用户态 + RW: PTE_USER_DATA（读写、执行禁止、非全局）
  *          - 用户态 + RO: PTE_USER_RO（只读、执行禁止、非全局）
  *          - 用户态 + RX: PTE_USER_CODE（只读、可执行、非全局）
@@ -111,6 +112,22 @@ static inline page_table_t *pte_to_table(uint64_t pte)
 static uint64_t compute_pte_attr(page_perm_t perm, bool is_user)
 {
     uint64_t attr;
+
+    /* Device 属性优先：用于 MMIO/DMA 映射（非缓存） */
+    if ((perm & PAGE_PERM_DEVICE) != 0U)
+    {
+        if (is_user)
+        {
+            /* 用户态 Device 页（nGnRnE，读写，执行禁止，非全局） */
+            attr = PTE_USER_DEVICE;
+        }
+        else
+        {
+            /* 内核态 Device 页（nGnRnE，读写，执行禁止，全局） */
+            attr = PTE_VALID | PTE_AF | PTE_AP_PRIV_RW | PTE_XN | PTE_ATTR_INDEX_DEVICE;
+        }
+        return attr;
+    }
 
     if (is_user)
     {

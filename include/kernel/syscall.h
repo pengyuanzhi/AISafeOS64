@@ -79,9 +79,10 @@ typedef struct
 /* --- 内存管理（0x0200 - 0x02FF） --- */
 #define SYS_VMSPACE_CREATE         0x0200U   /**< @brief 创建地址空间 */
 #define SYS_VMSPACE_DESTROY        0x0201U   /**< @brief 销毁地址空间 */
-#define SYS_VM_MAP                 0x0202U   /**< @brief 映射页面 */
+#define SYS_VM_MAP                 0x0202U   /**< @brief 映射页面（MMIO/DMA，用户态驱动用） */
 #define SYS_VM_UNMAP               0x0203U   /**< @brief 解除映射 */
 #define SYS_VM_PROTECT             0x0204U   /**< @brief 修改权限 */
+#define SYS_VIRT_TO_PHYS           0x0205U   /**< @brief 虚拟地址转物理地址（DMA 用） */
 
 /* --- 能力管理（0x0300 - 0x03FF） --- */
 #define SYS_CSPACE_CREATE          0x0300U   /**< @brief 创建能力空间 */

@@ -110,6 +110,21 @@
 /** @brief 特权只读 + 用户只读 */
 #define PTE_AP_ALL_RO       ((uint64_t)3U << 6U)
 
+/* ========================================================================
+ * 内存属性索引（AttrIndex，bits[4:2]，对应 MAIR_EL1）
+ *
+ * @details MAIR_EL1 已在 mmu_early_init 中配置：
+ *          - MAIR[0] = 0xFF（Normal Write-Back Cacheable）
+ *          - MAIR[1] = 0x00（Device nGnRnE）
+ *          PTE 通过 AttrIndex 选择使用哪个 MAIR 属性。
+ * ======================================================================== */
+
+/** @brief Normal 内存属性索引（MAIR[0]，可缓存） */
+#define PTE_ATTR_INDEX_NORMAL   ((uint64_t)0U << 2U)
+
+/** @brief Device 内存属性索引（MAIR[1]，nGnRnE，设备 MMIO） */
+#define PTE_ATTR_INDEX_DEVICE   ((uint64_t)1U << 2U)
+
 /** @brief 内核页属性（读写、执行禁止、全局） */
 #define PTE_KERNEL_ATTR     (PTE_VALID | PTE_AF | PTE_AP_PRIV_RW)
 
@@ -124,6 +139,15 @@
 
 /** @brief 用户只读页属性 */
 #define PTE_USER_RO         (PTE_VALID | PTE_AF | PTE_AP_ALL_RO | PTE_NG | PTE_PXN | PTE_XN)
+
+/** @brief 用户设备页属性（Device nGnRnE，读写、执行禁止、非全局）
+ *
+ * @details 用于用户态驱动的 MMIO 映射和 DMA 内存映射。
+ *          Device 属性保证内存访问不被重排、不缓存，
+ *          免除用户态无法执行的 cache 维护指令（dc cvac 等）。
+ *          AttrIndex=1 对应 MAIR[1]=0x00（Device nGnRnE）。
+ */
+#define PTE_USER_DEVICE     (PTE_VALID | PTE_AF | PTE_AP_ALL_RW | PTE_NG | PTE_PXN | PTE_XN | PTE_ATTR_INDEX_DEVICE)
 
 /* ========================================================================
  * 页表项操作宏
@@ -162,13 +186,16 @@
  */
 typedef enum
 {
-    PAGE_PERM_NONE = 0U,        /**< @brief 无权限 */
-    PAGE_PERM_READ = (1U << 0), /**< @brief 可读 */
-    PAGE_PERM_WRITE = (1U << 1),/**< @brief 可写 */
-    PAGE_PERM_EXEC = (1U << 2), /**< @brief 可执行 */
+    PAGE_PERM_NONE = 0U,            /**< @brief 无权限 */
+    PAGE_PERM_READ = (1U << 0),     /**< @brief 可读 */
+    PAGE_PERM_WRITE = (1U << 1),    /**< @brief 可写 */
+    PAGE_PERM_EXEC = (1U << 2),     /**< @brief 可执行 */
+    PAGE_PERM_DEVICE = (1U << 4),   /**< @brief Device/MMIO 映射（非缓存） */
     PAGE_PERM_RW = PAGE_PERM_READ | PAGE_PERM_WRITE,
     PAGE_PERM_RX = PAGE_PERM_READ | PAGE_PERM_EXEC,
-    PAGE_PERM_RWX = PAGE_PERM_READ | PAGE_PERM_WRITE | PAGE_PERM_EXEC
+    PAGE_PERM_RWX = PAGE_PERM_READ | PAGE_PERM_WRITE | PAGE_PERM_EXEC,
+    /**< @brief Device RW（MMIO 映射，用户态驱动用） */
+    PAGE_PERM_DEVICE_RW = PAGE_PERM_READ | PAGE_PERM_WRITE | PAGE_PERM_DEVICE
 } page_perm_t;
 
 /* ========================================================================
