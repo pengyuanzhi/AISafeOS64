@@ -2622,13 +2622,73 @@ void kernel_main(void)
         (void)device_register("pl011", DRIVER_TYPE_UART,
                               (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
 
-        /* VirtIO Block MMIO @ 0x0A003E00, IRQ 79 (slot=31) */
+        /* VirtIO Block MMIO（probe 内部扫描 32 slot 自动发现设备） */
         (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
-                              (paddr_t)0x0A003E00ULL, 0x200ULL, 79U, NULL);
+                              (paddr_t)0x0A000000ULL, 0x200ULL, 48U, NULL);
 
         /* 执行设备探测 */
-        (void)device_probe_all();
+        ret = device_probe_all();
+
+        /* 打印驱动统计 */
+        {
+            driver_stats_t stats;
+            driver_get_stats(&stats);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] drivers: ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, ", devices: ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, ", probed: ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+        (void)ret;
     }
+
+    /* ---- VirtIO Block 读写验证 ---- */
+    {
+        static uint8_t s_blk_buf[512U] __attribute__((aligned(8)));
+        int64_t blk_ret;
+        uint32_t ii;
+        uint32_t blk_found = 0U;
+
+        /* 扫描 virtio-mmio 确认块设备存在 */
+        for (ii = 0U; ii < 32U; ii++)
+        {
+            volatile uint32_t *base;
+            base = (volatile uint32_t *)(void *)(0x0A000000ULL + ((uint64_t)ii * 0x200ULL));
+            if ((base[0U] == 0x74726976U) && (base[2U] == 2U))
+            {
+                blk_found++;
+            }
+        }
+
+        if (blk_found > 0U)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Read/Write test...\n");
+
+            /* 填充测试数据并写扇区 0 */
+            for (ii = 0U; ii < 512U; ii++)
+            {
+                s_blk_buf[ii] = (uint8_t)(ii & 0xFFU);
+            }
+            blk_ret = device_write(2U, s_blk_buf, 512ULL, 0ULL);
+
+            /* 回读验证 */
+            kernel_memzero(s_blk_buf, 512U);
+            blk_ret = device_read(2U, s_blk_buf, 512ULL, 0ULL);
+            if ((blk_ret == 512) && (s_blk_buf[0U] == 0U) &&
+                (s_blk_buf[1U] == 1U) && (s_blk_buf[255U] == 0xFFU))
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] VERIFY OK\n");
+            }
+            else
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] VERIFY FAIL\n");
+            }
+        }
+    }
+
+    /* ---- VirtIO MMIO 设备扫描（已由上方读写验证覆盖，此处删除重复）---- */
 
 #if CONFIG_DEBUG
     /* ---- VirtIO Block 读写验证 ---- */
