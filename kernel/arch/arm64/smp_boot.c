@@ -76,6 +76,54 @@ static int32_t psci_cpu_on(uint64_t cpu_id, uint64_t entry_point,
 }
 
 /* ========================================================================
+ * 代码段缓存清理（PSCI 唤醒从核前置操作）
+ * ======================================================================== */
+
+/**
+ * @brief 清理代码段缓存，确保从核取指到最新指令
+ *
+ * @param start 起始虚拟地址
+ * @param size  字节数
+ *
+ * @details 主核 MMU/缓存已开启时，代码写入可能停留在主核 L1 缓存中。
+ *          从核 PSCI 唤醒后 MMU 关闭、缓存冷启，从物理内存取指时可能
+ *          取到未更新的数据（全 0），导致 PC 漂移到地址 0 区域崩溃。
+ *          通过 dc cvau（数据清理到统一点）+ ic ivau（指令缓存失效）
+ *          + dsb ish 保证代码对从核可见。
+ */
+static void flush_code_cache(uint64_t start, uint64_t size)
+{
+    uint64_t addr;
+    uint64_t end = start + size;
+
+    /* 64 字节对齐（典型 ARM64 cacheline） */
+    start &= ~0x3FULL;
+    end = (end + 0x3Full) & ~0x3Full;
+
+    /* 逐 cacheline 清理数据缓存到统一点 */
+    for (addr = start; addr < end; addr += 64ULL)
+    {
+        __asm__ volatile("dc cvau, %0" :: "r"(addr) : "memory");
+    }
+
+    /* 数据屏障：等待清理完成（Inner Shareable） */
+    __asm__ volatile("dsb ish" ::: "memory");
+
+    /* 失效指令缓存 */
+    for (addr = start; addr < end; addr += 64ULL)
+    {
+        __asm__ volatile("ic ivau, %0" :: "r"(addr) : "memory");
+    }
+
+    /* 指令屏障 */
+    __asm__ volatile("dsb ish" ::: "memory");
+    __asm__ volatile("isb" ::: "memory");
+}
+
+/* smp_secondary_entry 在 smp.h 中声明，此处仅需前向引用其地址 */
+/* （函数名即地址，用于确定从核代码段终点） */
+
+/* ========================================================================
  * SMP 初始化
  * ======================================================================== */
 
@@ -127,6 +175,18 @@ kernel_status_t smp_boot_secondary(void)
     kernel_status_t ret = KERNEL_OK;
 
     ticket_lock_acquire(&s_smp_lock);
+
+    /*
+     * 唤醒从核前，清理从核入口代码段的缓存。
+     * 覆盖范围：secondary_entry → smp_secondary_entry（从核执行的初始代码）。
+     * 从核被 PSCI 唤醒时 MMU 关闭，必须从物理内存取到最新指令。
+     */
+    {
+        extern void smp_secondary_entry(uint32_t cpu_id);  /* smp.h 已声明，此处取地址 */
+        uint64_t code_start = (uint64_t)(uintptr_t)&secondary_entry;
+        uint64_t code_end   = (uint64_t)(uintptr_t)&smp_secondary_entry;
+        flush_code_cache(code_start, code_end - code_start);
+    }
 
     for (cpu_id = 1U; cpu_id < CONFIG_MAX_CPUS; cpu_id++)
     {
