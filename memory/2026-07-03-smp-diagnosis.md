@@ -70,10 +70,46 @@
 
 ### SMP 调度器从核切换修复
 
-1. **扩大缓存清理范围**：`flush_code_cache` 覆盖整个 `.text` 段（调度器、context.S、idle 入口）
-2. **验证 `scheduler_pick_next()` 从核行为**：确保从核只选自己的 idle 线程或亲和线程
-3. **检查 `cpu_switch_to_first_task` 从核路径**：确认 eret 目标地址有效且代码可见
-4. **添加 SMP 运行时验证**：从核成功进入 idle 循环后打印 CPU online 信息
+#### 深入诊断结果（第二轮）
+
+扩大 `flush_code_cache` 覆盖整个 .text 段后，崩溃**依旧**——排除缓存一致性假设。
+
+通过在 `scheduler_start_secondary` 加诊断，确认：
+- 从核 `scheduler_pick_next()` 返回非 NULL 线程（idle 线程）✅
+- context[14] ELR = 0x40002090 (thread_entry_trampoline) ✅ 有效
+- context[0] x19 = 0x40003770 (idle_task_entry) ✅ 有效
+- context[12] SP = 0x4009A0D0（heap 区域，kmalloc 分配的内核栈）
+- 从核打印 'X' 标记后崩溃 → **确认崩溃在 `cpu_switch_to_first_task` 的 eret 之后**
+
+#### 崩溃机制分析
+
+`cpu_switch_to_first_task`（context.S）恢复寄存器后 `eret` 到 thread_entry_trampoline：
+```asm
+thread_entry_trampoline:
+    mov x0, x20    ; arg
+    br  x19        ; 跳到 idle_task_entry (0x40003770)
+```
+`idle_task_entry` 第一条指令 `stp x29, x30, [sp, #-16]!` 访问 SP=0x4009A0D0。
+
+**异常向量表发现**：所有异常最终跳到 `.Lexception_panic`（0x400011e8）= `wfe; b` 死循环。
+崩溃时 PC=0 递增是异常嵌套的表现。
+
+#### 待验证的根因假设（优先级排序）
+
+1. **idle 线程 SP（heap 区域）在从核页表未映射**：虽然 mmu_init_secondary 用主核页表，
+   但需验证 heap 区域（0x40080000+）在页表里的映射粒度。idle 线程栈是 kmalloc 分配的，
+   可能落在主核构建页表后新增的内存区域
+2. **eret 后 SP_EL1 切换问题**：context[13] SPSR=0x5（EL1h 用 SP_EL1），
+   但 cpu_switch_to_first_task 设置的是 sp（当前 SP），从核的 SP_EL1/SP_EL0 状态可能不对
+3. **异常处理死循环导致看门狗/嵌套**：.Lexception_panic 是占位符，不保存/恢复状态
+
+#### 修复方向
+
+1. **验证页表映射**：在从核 mmu_init_secondary 后，测试访问 SP 地址
+2. **简化从核首次切换**：从核不调用 cpu_switch_to_first_task，直接在 EL1h 用当前栈
+   执行 idle 循环（避免复杂的上下文恢复）
+3. **完善异常处理**：.Lexception_panic 应打印诊断信息而非静默死循环
+4. **从核 idle 线程用静态栈**：避免 kmalloc 栈的页表映射问题
 
 ## 代码统计
 

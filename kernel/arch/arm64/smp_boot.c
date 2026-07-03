@@ -177,14 +177,17 @@ kernel_status_t smp_boot_secondary(void)
     ticket_lock_acquire(&s_smp_lock);
 
     /*
-     * 唤醒从核前，清理从核入口代码段的缓存。
-     * 覆盖范围：secondary_entry → smp_secondary_entry（从核执行的初始代码）。
+     * 唤醒从核前，清理整个内核代码段的缓存。
+     *
      * 从核被 PSCI 唤醒时 MMU 关闭，必须从物理内存取到最新指令。
+     * 从核执行路径不仅包括 secondary_entry，还包括调度器代码、
+     * cpu_switch_to_first_task、thread_entry_trampoline、idle_task_entry 等，
+     * 因此需要覆盖整个 .text 段（secondary_entry → __text_end）。
      */
     {
-        extern void smp_secondary_entry(uint32_t cpu_id);  /* smp.h 已声明，此处取地址 */
+        extern char __text_end[];  /* 链接脚本定义的 .text 段结束符号 */
         uint64_t code_start = (uint64_t)(uintptr_t)&secondary_entry;
-        uint64_t code_end   = (uint64_t)(uintptr_t)&smp_secondary_entry;
+        uint64_t code_end   = (uint64_t)(uintptr_t)__text_end;
         flush_code_cache(code_start, code_end - code_start);
     }
 
