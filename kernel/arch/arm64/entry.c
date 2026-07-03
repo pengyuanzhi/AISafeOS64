@@ -36,6 +36,8 @@
 #include <kernel/driver.h>
 #include <kernel/elf.h>
 #include <kernel/process.h>
+#include <kernel/mm/kmalloc.h>
+#include <kernel/mm/slab.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -2266,9 +2268,203 @@ static uint32_t smp_e2e_test(void)
     return 0U;
 }
 
+#endif /* CONFIG_DEBUG */
+
 /* ========================================================================
- * 内核主入口
+ * 内核性能基准测试（QEMU 实测）
+ *
+ * @details 测量内核基础操作延迟，为 IPC 和调度优化提供基准。
+ *          包含：定时器读取开销、自旋锁操作开销、内存操作开销。
+ *          如果 IPC 子系统可用，额外测量 IPC 端点往返延迟。
  * ======================================================================== */
+
+/** @brief 性能测试迭代次数 */
+#define KERN_BENCH_ITERATIONS  100000U
+
+/** @brief IPC 测试迭代次数（IPC 较慢，减少迭代） */
+#define IPC_BENCH_ITERATIONS   10000U
+
+/** @brief IPC 测试端点 ID */
+static kobj_id_t s_ipc_bench_ep;
+
+/** @brief IPC 测试就绪标志 */
+static volatile uint32_t s_ipc_bench_ready;
+
+/** @brief IPC server 线程：receive + reply 循环 */
+static void ipc_bench_server(void *arg)
+{
+    ipc_msg_tag_t tag;
+    uint8_t recv_buf[64];
+    uint8_t reply_buf[64];
+    uint32_t i;
+
+    (void)arg;
+
+    if (ipc_endpoint_create(THREAD_ID_INVALID, &s_ipc_bench_ep) != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] IPC EP create FAIL\n");
+        s_ipc_bench_ready = 2U;  /* 标记失败 */
+        barrier();
+        kthread_exit();
+    }
+
+    s_ipc_bench_ready = 1U;
+    barrier();
+
+    for (i = 0U; i < (uint32_t)IPC_BENCH_ITERATIONS; i++)
+    {
+        if (ipc_msg_receive(s_ipc_bench_ep, &tag, recv_buf, sizeof(recv_buf)) != KERNEL_OK)
+        {
+            break;
+        }
+        if (ipc_msg_reply(s_ipc_bench_ep, 0, reply_buf, sizeof(reply_buf)) != KERNEL_OK)
+        {
+            break;
+        }
+    }
+
+    kthread_exit();
+}
+
+/** @brief 基准测试线程：内核微操作 + IPC 往返（如可用） */
+static void kern_bench_client(void *arg)
+{
+    uint64_t freq;
+    uint64_t start;
+    uint64_t end;
+    uint64_t total;
+    uint32_t i;
+    TicketLock_t lock;
+    volatile uint32_t sink;
+    uint8_t buf[64];
+
+    (void)arg;
+
+    freq = hal_timer_get_freq();
+    if (freq == 0ULL)
+    {
+        freq = 62500000ULL;  /* QEMU virt 默认 62.5MHz */
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[BENCH] === Kernel Microbenchmark ===\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] counter freq: ");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, freq);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " Hz\n");
+
+    /* 测试 1：hal_timer_get_count 调用开销 */
+    sink = 0U;
+    start = hal_timer_get_count();
+    for (i = 0U; i < (uint32_t)KERN_BENCH_ITERATIONS; i++)
+    {
+        sink += (uint32_t)hal_timer_get_count();
+    }
+    end = hal_timer_get_count();
+    total = end - start;
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] timer_get_count: ");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)KERN_BENCH_ITERATIONS);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+    (void)sink;
+
+    /* 测试 2：TicketLock acquire/release 开销（无竞争） */
+    ticket_lock_init(&lock);
+    start = hal_timer_get_count();
+    for (i = 0U; i < (uint32_t)KERN_BENCH_ITERATIONS; i++)
+    {
+        ticket_lock_acquire(&lock);
+        ticket_lock_release(&lock);
+    }
+    end = hal_timer_get_count();
+    total = end - start;
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] ticket_lock (uncontended): ");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)KERN_BENCH_ITERATIONS);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+
+    /* 测试 3：kmalloc/kfree 开销 */
+    start = hal_timer_get_count();
+    for (i = 0U; i < 1000U; i++)
+    {
+        void *p = kmalloc(64);
+        if (p != NULL)
+        {
+            kfree(p);
+        }
+    }
+    end = hal_timer_get_count();
+    total = end - start;
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] kmalloc+kfree(64): ");
+    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / 1000ULL);
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+
+    /* 测试 4：IPC 端点往返延迟（如果 IPC 子系统可用） */
+    if (s_ipc_bench_ready == 1U)
+    {
+        ipc_msg_tag_t tag = { .value = 0x1000ULL };
+        start = hal_timer_get_count();
+        for (i = 0U; i < (uint32_t)IPC_BENCH_ITERATIONS; i++)
+        {
+            if (ipc_msg_send(s_ipc_bench_ep, tag,
+                             buf, sizeof(buf),
+                             buf, sizeof(buf)) != KERNEL_OK)
+            {
+                break;
+            }
+        }
+        end = hal_timer_get_count();
+        total = end - start;
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] IPC send+recv+reply: ");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)IPC_BENCH_ITERATIONS);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op (");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE,
+                         (total * 1000ULL) / ((uint64_t)IPC_BENCH_ITERATIONS * freq));
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " us)\n");
+    }
+    else
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                      "[BENCH] IPC skipped (subsys not ready)\n");
+    }
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] ===============================\n\n");
+
+    kthread_exit();
+}
+
+/**
+ * @brief 启动性能基准测试
+ */
+static void kern_bench_start(void)
+{
+    thread_id_t tid;
+
+    s_ipc_bench_ready = 0U;
+    barrier();
+
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] Starting benchmark...\n");
+
+    /* 创建 IPC server 线程（如果 IPC 子系统可用，server 会创建端点；
+     * 如果不可用，server 标记 s_ipc_bench_ready=2 后退出） */
+    tid = kthread_create("ipc_srv",
+                         ipc_bench_server,
+                         NULL,
+                         (priority_t)150U,
+                         KTHREAD_POLICY_FIFO,
+                         CONFIG_STACK_SIZE_DEFAULT);
+    (void)tid;  /* 线程在 scheduler_start() 后运行 */
+
+    /* 创建基准测试线程（优先级低于 server，让 server 先就绪） */
+    tid = kthread_create("kern_bench",
+                         kern_bench_client,
+                         NULL,
+                         (priority_t)140U,
+                         KTHREAD_POLICY_FIFO,
+                         CONFIG_STACK_SIZE_DEFAULT);
+    if (tid == THREAD_ID_INVALID)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] thread create FAIL\n");
+    }
+}
+
+
 
 /**
  * @brief 微内核 C 语言主入口
@@ -2282,8 +2478,6 @@ static uint32_t smp_e2e_test(void)
  *
  * @note 此函数不应返回
  */
-
-#endif /* CONFIG_DEBUG */
 
 void kernel_main(void)
 {
@@ -2376,6 +2570,14 @@ void kernel_main(void)
     /* 使能定时器 PPI 中断（IRQ 30） */
     (void)gic_enable_irq(QEMU_TIMER_IRQ);
 
+    /* ---- 初始化内核堆分配器（kmalloc）---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] kmalloc init\n");
+    ret = kmalloc_init();
+    if (ret != 0)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: kmalloc init fail\n");
+    }
+
     /* ---- 第七步：初始化调度器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Sched init\n");
     ret = scheduler_init();
@@ -2386,6 +2588,14 @@ void kernel_main(void)
         {
             __asm__ volatile("wfe" ::: "memory");
         }
+    }
+
+    /* ---- 初始化 IPC 子系统 ---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] IPC init\n");
+    ret = ipc_endpoint_subsys_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: IPC subsys fail (slab)\n");
     }
 
     /* ---- 第八步：初始化 SMP 多核 ---- */
@@ -2937,6 +3147,10 @@ void kernel_main(void)
 #else
     /* 生产模式：直接启动调度器 */
 #endif /* CONFIG_DEBUG */
+
+    /* 启动性能基准测试（线程在 scheduler_start 后执行） */
+    kern_bench_start();
+
     scheduler_start();
 
     /* 永不到达 */
