@@ -74,11 +74,16 @@ static TicketLock_t s_ep_subsys_lock;
  */
 typedef enum
 {
-    IPC_MSG_SIZE_64B = 64,    /**< @brief 64B 消息 */
-    IPC_MSG_SIZE_256B = 256,  /**< @brief 256B 消息 */
-    IPC_MSG_SIZE_1KB = 1024,  /**< @brief 1KB 消息 */
-    IPC_MSG_SIZE_COUNT       /**< @brief 消息大小类别数量 */
+    IPC_MSG_SIZE_64B_INDEX = 0,  /**< @brief 64B 消息索引 */
+    IPC_MSG_SIZE_256B_INDEX,     /**< @brief 256B 消息索引 */
+    IPC_MSG_SIZE_1KB_INDEX,      /**< @brief 1KB 消息索引 */
+    IPC_MSG_SIZE_COUNT           /**< @brief 消息大小类别数量（= 3） */
 } ipc_msg_size_class_t;
+
+/** @brief 各类别消息的实际字节大小 */
+#define IPC_MSG_SIZE_64B_VAL    64U
+#define IPC_MSG_SIZE_256B_VAL   256U
+#define IPC_MSG_SIZE_1KB_VAL    1024U
 
 /**
  * @brief IPC 消息缓冲区 Slab 缓存集合
@@ -103,9 +108,9 @@ static int32_t ipc_msg_slab_init(void)
 {
     int32_t ret;
     size_t pool_sizes[IPC_MSG_SIZE_COUNT] = {
-        IPC_MSG_SIZE_64B * 16,    /* 64B 消息，每个 Slab 16 个对象 */
-        IPC_MSG_SIZE_256B * 8,   /* 256B 消息，每个 Slab 8 个对象 */
-        IPC_MSG_SIZE_1KB * 4      /* 1KB 消息，每个 Slab 4 个对象 */
+        IPC_MSG_SIZE_64B_VAL * 16,    /* 64B 消息，每个 Slab 16 个对象 */
+        IPC_MSG_SIZE_256B_VAL * 8,   /* 256B 消息，每个 Slab 8 个对象 */
+        IPC_MSG_SIZE_1KB_VAL * 4      /* 1KB 消息，每个 Slab 4 个对象 */
     };
 
     for (uint32_t i = 0U; i < IPC_MSG_SIZE_COUNT; i++)
@@ -159,15 +164,15 @@ static int32_t ipc_msg_slab_destroy(void)
 static int32_t select_msg_cache(uint32_t size)
 {
     /* 根据消息大小选择合适的缓存 */
-    if (size <= IPC_MSG_SIZE_64B)
+    if (size <= IPC_MSG_SIZE_64B_VAL)
     {
         return 0; /* 64B 缓存 */
     }
-    else if (size <= IPC_MSG_SIZE_256B)
+    else if (size <= IPC_MSG_SIZE_256B_VAL)
     {
         return 1; /* 256B 缓存 */
     }
-    else if (size <= IPC_MSG_SIZE_1KB)
+    else if (size <= IPC_MSG_SIZE_1KB_VAL)
     {
         return 2; /* 1KB 缓存 */
     }

@@ -287,10 +287,17 @@ kernel_status_t cspace_subsys_init(void)
     (void)memset(s_cspace_hash, 0U, sizeof(s_cspace_hash));
     (void)memset(s_hash_nodes, 0U, sizeof(s_hash_nodes));
 
-    /* 初始化能力表 Slab 缓存 */
+    /* 初始化能力表 Slab 缓存
+     *
+     * caches[i] 服务 capacity = (i+1)*64 的 CSpace，需要分配 (i+1)*64 个 cap_t。
+     * pool_size = sizeof(cap_t) * (i+1) * 64，为每个 CSpace 预留完整能力表空间。
+     * 原 slab_create(0) 是 bug（pool_size=0 返回 EINVAL 导致子系统初始化失败）。
+     */
     for (uint32_t i = 0U; i < (CSPACE_MAX_CAPACITY / 64U + 1U); i++)
     {
-        int32_t ret_slab = slab_create(&s_cap_table_slab.caches[i], 0U);
+        uint32_t capacity = (i + 1U) * 64U;
+        size_t pool_size = sizeof(cap_t) * (size_t)capacity;
+        int32_t ret_slab = slab_create(&s_cap_table_slab.caches[i], pool_size);
         if (ret_slab != KERNEL_OK)
         {
             /* 清理已创建的缓存 */

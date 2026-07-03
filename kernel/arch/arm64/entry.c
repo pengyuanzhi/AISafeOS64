@@ -2595,7 +2595,15 @@ void kernel_main(void)
     ret = ipc_endpoint_subsys_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: IPC subsys fail (slab)\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: IPC subsys fail\n");
+    }
+
+    /* ---- 初始化能力系统（CSpace 子系统）---- */
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Cap init\n");
+    ret = cspace_subsys_init();
+    if (ret != KERNEL_OK)
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: cap subsys fail\n");
     }
 
     /* ---- 第八步：初始化 SMP 多核 ---- */
