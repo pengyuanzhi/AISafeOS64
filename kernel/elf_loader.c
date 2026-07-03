@@ -19,8 +19,18 @@
 #include <kernel/driver.h>
 #include <arch/arm64/hal.h>
 #include <kernel/types.h>
+#include <kernel/page_table.h>
+#include <kernel/phys_mem.h>
+#include <kernel/mmu.h>
 #include <string.h>
 #include <stdbool.h>
+#include "../../sched/scheduler.h"
+#include "../../sched/thread.h"
+
+/* arch_setup_elf_thread_context 定义在 context.S */
+extern void arch_setup_elf_thread_context(uint64_t *ctx, uint64_t entry,
+                                           uint64_t arg, uint64_t kernel_sp,
+                                           uint64_t user_sp);
 
 /* ========================================================================
  * 常量定义
@@ -132,6 +142,7 @@ elf_error_t elf_loader_init(const uint8_t *elf_data, uint32_t elf_size,
             {
                 segments[*segment_count].vaddr = phdr[i].p_vaddr;
                 segments[*segment_count].length = phdr[i].p_memsz;
+                segments[*segment_count].filesz = phdr[i].p_filesz;
                 segments[*segment_count].offset = phdr[i].p_offset;
 
                 /* 转换保护权限 */
@@ -178,4 +189,254 @@ elf_error_t elf_loader_get_entry(uint64_t *entry)
     *entry = s_elf_header.e_entry;
 
     return ELF_OK;
+}
+
+/* ========================================================================
+ * ELF 加载并创建用户线程
+ * ======================================================================== */
+
+/** @brief 用户栈大小（8KB，与 CONFIG_STACK_SIZE_DEFAULT 一致） */
+#define ELF_USER_STACK_SIZE  8192U
+
+/** @brief 用户栈顶地址（TTBR0 高端，避开 ELF 加载区 0x400000 和 MMIO 区 0x10000000） */
+#define ELF_USER_STACK_TOP   ((uint64_t)0x70000000ULL)
+
+/** @brief 内核 UART 基址（用于加载日志） */
+#define ELF_UART_BASE        ((uint64_t)0x09000000ULL)
+
+/**
+ * @brief 从 ELF 权限标志转换为 page_perm_t
+ */
+static page_perm_t elf_prot_to_perm(uint8_t prot)
+{
+    page_perm_t perm = PAGE_PERM_READ;
+
+    if ((prot & ELF_PF_W) != 0U)
+    {
+        perm |= PAGE_PERM_WRITE;
+    }
+    if ((prot & ELF_PF_X) != 0U)
+    {
+        perm |= PAGE_PERM_EXEC;
+    }
+    return perm;
+}
+
+/**
+ * @brief 将数据拷贝到用户地址空间
+ *
+ * @details 临时切换 TTBR0 到用户 PGD，通过用户虚拟地址写数据，然后切回内核 PGD。
+ *          mmu_create_user_pgd 复制了 TTBR1 内核映射，切换 TTBR0 后内核代码
+ *          仍可通过 TTBR1 访问，安全。
+ */
+static void copy_to_user_space(page_table_t *user_pgd, uint64_t user_vaddr,
+                                const uint8_t *src, uint64_t size)
+{
+    /* 保存当前 TTBR0，切换到用户 PGD */
+    uint64_t saved_ttbr0 = hal_read_ttbr0();
+    hal_write_ttbr0((uint64_t)(uintptr_t)user_pgd);
+    hal_isb();
+
+    /* 通过用户虚拟地址拷贝数据 */
+    {
+        uint8_t *dst = (uint8_t *)(uintptr_t)user_vaddr;
+        uint64_t i;
+        for (i = 0ULL; i < size; i++)
+        {
+            dst[i] = src[i];
+        }
+    }
+
+    /* 切回内核 PGD */
+    hal_write_ttbr0(saved_ttbr0);
+    hal_isb();
+}
+
+kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
+                                  const char *thread_name)
+{
+    elf_header_t header;
+    elf_segment_t segments[ELF_MAX_SEGMENTS];
+    uint32_t seg_count = 0U;
+    uint32_t i;
+    elf_error_t err;
+    uint64_t user_pgd;
+    page_table_t *user_pgd_ptr;
+    thread_id_t tid;
+    KThread_t *thread;
+    uint64_t user_sp = ELF_USER_STACK_TOP;
+
+    if ((elf_data == NULL) || (elf_size == 0U))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 解析 ELF */
+    err = elf_loader_init(elf_data, elf_size, &header,
+                          segments, ELF_MAX_SEGMENTS, &seg_count);
+    if (err != ELF_OK)
+    {
+        hal_uart_puts(ELF_UART_BASE, "[ELF] parse FAIL\n");
+        return -(int32_t)EINVAL;
+    }
+
+    hal_uart_puts(ELF_UART_BASE, "[ELF] Loading ");
+    hal_uart_puts(ELF_UART_BASE, thread_name);
+    hal_uart_puts(ELF_UART_BASE, " entry=0x");
+    {
+        char hex[16];
+        uint32_t j;
+        uint64_t entry = header.e_entry;
+        for (j = 0U; j < 16U; j++)
+        {
+            uint8_t nibble = (uint8_t)((entry >> ((15U - j) * 4U)) & 0xFU);
+            hex[j] = (char)((nibble < 10U) ? ('0' + nibble) : ('a' + nibble - 10U));
+        }
+        for (j = 0U; j < 16U; j++)
+        {
+            hal_uart_putc(ELF_UART_BASE, hex[j]);
+        }
+    }
+    hal_uart_putc(ELF_UART_BASE, '\n');
+
+    /* 创建用户地址空间 */
+    user_pgd = mmu_create_user_pgd();
+    if (user_pgd == 0ULL)
+    {
+        hal_uart_puts(ELF_UART_BASE, "[ELF] PGD alloc FAIL\n");
+        return -(int32_t)ENOMEM;
+    }
+    user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
+
+    /* 映射每个 PT_LOAD 段 */
+    for (i = 0U; i < seg_count; i++)
+    {
+        uint64_t offset;
+        page_perm_t perm = elf_prot_to_perm(segments[i].prot);
+
+        for (offset = 0ULL; offset < segments[i].length; offset += (uint64_t)PAGE_SIZE_4K)
+        {
+            paddr_t paddr = phys_mem_alloc_page();
+            uint64_t vaddr = segments[i].vaddr + offset;
+
+            if (paddr == 0ULL)
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] page alloc FAIL\n");
+                return -(int32_t)ENOMEM;
+            }
+
+            if (page_table_map(user_pgd_ptr, vaddr, paddr, perm, true) != KERNEL_OK)
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] map FAIL\n");
+                return -(int32_t)ENOMEM;
+            }
+        }
+
+        /* 拷贝段数据（filesz 字节）到用户空间 */
+        if (segments[i].filesz > 0ULL)
+        {
+            copy_to_user_space(user_pgd_ptr, segments[i].vaddr,
+                               elf_data + segments[i].offset,
+                               segments[i].filesz);
+        }
+
+        /* BSS 区域清零（filesz 到 memsz 之间） */
+        if (segments[i].length > segments[i].filesz)
+        {
+            uint64_t bss_size = segments[i].length - segments[i].filesz;
+            /* 临时切换 TTBR0 清零 BSS */
+            uint64_t saved_ttbr0 = hal_read_ttbr0();
+            hal_write_ttbr0((uint64_t)(uintptr_t)user_pgd_ptr);
+            hal_isb();
+            {
+                uint8_t *bss = (uint8_t *)(uintptr_t)(segments[i].vaddr + segments[i].filesz);
+                uint64_t k;
+                for (k = 0ULL; k < bss_size; k++)
+                {
+                    bss[k] = 0U;
+                }
+            }
+            hal_write_ttbr0(saved_ttbr0);
+            hal_isb();
+        }
+    }
+
+    /* 分配用户栈（映射 ELF_USER_STACK_TOP 下方若干页） */
+    {
+        uint64_t stack_offset;
+        for (stack_offset = 0ULL; stack_offset < (uint64_t)ELF_USER_STACK_SIZE;
+             stack_offset += (uint64_t)PAGE_SIZE_4K)
+        {
+            paddr_t paddr = phys_mem_alloc_page();
+            uint64_t vaddr = ELF_USER_STACK_TOP - (uint64_t)ELF_USER_STACK_SIZE + stack_offset;
+
+            if (paddr == 0ULL)
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] stack alloc FAIL\n");
+                return -(int32_t)ENOMEM;
+            }
+
+            if (page_table_map(user_pgd_ptr, vaddr, paddr,
+                               PAGE_PERM_RW, true) != KERNEL_OK)
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] stack map FAIL\n");
+                return -(int32_t)ENOMEM;
+            }
+        }
+    }
+
+    /* 创建内核线程（kthread_create 分配内核栈） */
+    tid = kthread_create(thread_name,
+                         (kthread_entry_t)header.e_entry,
+                         NULL,
+                         (priority_t)120U,
+                         KTHREAD_POLICY_FIFO,
+                         CONFIG_STACK_SIZE_DEFAULT);
+    if (tid == THREAD_ID_INVALID)
+    {
+        hal_uart_puts(ELF_UART_BASE, "[ELF] thread create FAIL\n");
+        return -(int32_t)ENOMEM;
+    }
+
+    /* 配置为用户态线程 */
+    thread = &g_scheduler.thread_table[tid];
+    thread->is_user = 1U;
+    thread->user_sp = (vaddr_t)user_sp;
+    thread->user_pgd = user_pgd;
+
+    /* 设置 ELF 上下文（TTBR0 入口） */
+    {
+        uint64_t kernel_sp = (uint64_t)(uintptr_t)thread->stack_base + thread->stack_size;
+        arch_setup_elf_thread_context(thread->context,
+                                       header.e_entry,
+                                       0U,
+                                       kernel_sp,
+                                       user_sp);
+    }
+
+    hal_uart_puts(ELF_UART_BASE, "[ELF] Loaded tid=");
+    {
+        char dec[8];
+        uint32_t j;
+        uint64_t val = (uint64_t)tid;
+        for (j = 0U; j < 8U; j++)
+        {
+            dec[j] = (char)('0' + (val % 10ULL));
+            val /= 10ULL;
+        }
+        /* 跳过前导零 */
+        j = 8U;
+        while (j > 1U && dec[j - 1U] == '0')
+        {
+            j--;
+        }
+        while (j > 0U)
+        {
+            hal_uart_putc(ELF_UART_BASE, dec[j - 1U]);
+            j--;
+        }
+    }
+    hal_uart_putc(ELF_UART_BASE, '\n');
+
+    return KERNEL_OK;
 }

@@ -17,6 +17,7 @@
 #define KERNEL_ELF_H
 
 #include <kernel/types.h>
+#include <kernel/errno.h>
 #include <stdbool.h>
 
 /* ========================================================================
@@ -78,7 +79,8 @@ typedef struct
 typedef struct
 {
     uint64_t vaddr;            /**< @brief 虚拟地址 */
-    uint64_t length;           /**< @brief 段长度 */
+    uint64_t length;           /**< @brief 段内存长度（memsz） */
+    uint64_t filesz;           /**< @brief 段文件长度（filesz，区分代码与 BSS） */
     uint64_t offset;           /**< @brief 文件偏移 */
     uint8_t  prot;            /**< @brief 保护权限（PF_R|PF_W|PF_X） */
     bool     active;           /**< @brief 活跃标记 */
@@ -140,5 +142,27 @@ elf_error_t elf_loader_get_status(void);
  * @return ELF_OK 成功，其他为错误码
  */
 elf_error_t elf_loader_get_entry(uint64_t *entry);
+
+/**
+ * @brief 从块设备加载 ELF 到用户空间并创建用户线程
+ *
+ * @details 完整的 ELF 加载流程：
+ *          1. 从块设备读取整个 ELF 文件到内核缓冲
+ *          2. 解析 ELF 头和 PT_LOAD 段
+ *          3. 创建用户地址空间（user_pgd）
+ *          4. 逐段映射到用户空间（TTBR0），拷贝段数据，清零 BSS
+ *          5. 分配用户栈
+ *          6. 创建用户线程（入口为 ELF entry，TTBR0 低地址）
+ *
+ * @param elf_data    已读入内存的完整 ELF 数据缓冲
+ * @param elf_size    ELF 数据大小
+ * @param thread_name 线程名称
+ * @return KERNEL_OK 成功，其他为错误码
+ *
+ * @note 调用前需确保块设备已读取 ELF 到 elf_data
+ * @note 线程在 scheduler_start() 后执行
+ */
+kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
+                                  const char *thread_name);
 
 #endif /* KERNEL_ELF_H */

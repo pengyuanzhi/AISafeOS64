@@ -244,6 +244,60 @@ arch_setup_user_thread_context:
 
 
 /* ========================================================================
+ * arch_setup_elf_thread_context(ctx, entry, arg, kernel_sp, user_sp)
+ *
+ * x0 = ctx          (uint64_t *)
+ * x1 = entry        (uint64_t) - ELF 入口地址（TTBR0 低地址，不加偏移）
+ * x2 = arg          (uint64_t) - 入口函数参数
+ * x3 = kernel_sp    (uint64_t) - 内核栈顶（16字节对齐）
+ * x4 = user_sp      (uint64_t) - 用户态栈顶（16字节对齐）
+ *
+ * 与 arch_setup_user_thread_context 的区别：
+ *   - ELR 直接指向 ELF entry（TTBR0 低地址），不经过 trampoline
+ *   - entry 不加 TTBR1 偏移
+ *   - 适用于从独立 ELF 加载的用户态驱动
+ * ======================================================================== */
+    .global arch_setup_elf_thread_context
+    .type arch_setup_elf_thread_context, @function
+arch_setup_elf_thread_context:
+    /* context[0] = x19 = entry（原始 TTBR0 地址，不加偏移） */
+    str     x1, [x0, #0]
+
+    /* context[1] = x20 = arg */
+    str     x2, [x0, #8]
+
+    /* 清零 x21 ~ x28 */
+    str     xzr, [x0, #16]
+    str     xzr, [x0, #24]
+    str     xzr, [x0, #32]
+    str     xzr, [x0, #40]
+    str     xzr, [x0, #48]
+    str     xzr, [x0, #56]
+    str     xzr, [x0, #64]
+    str     xzr, [x0, #72]
+
+    /* context[10] = FP(x29) = 0 */
+    str     xzr, [x0, #80]
+
+    /* context[11] = LR(x30) = entry（TTBR0，独立 ELF 直接入口） */
+    str     x1, [x0, #88]
+
+    /* context[12] = SP = kernel_sp（内核栈） */
+    str     x3, [x0, #96]
+
+    /* context[13] = SPSR_EL1 = 0x0（EL0t，所有中断使能） */
+    str     xzr, [x0, #104]
+
+    /* context[14] = ELR_EL1 = entry（TTBR0 低地址，直接跳转） */
+    str     x1, [x0, #112]
+
+    /* context[2] = x21 = user_sp（调度器切换时恢复到 SP_EL0） */
+    str     x4, [x0, #16]
+
+    ret
+
+
+/* ========================================================================
  * user_entry_trampoline
  *
  * 用户态线程入口跳板。
