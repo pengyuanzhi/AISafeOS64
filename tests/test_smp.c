@@ -29,6 +29,26 @@
 #include <stdatomic.h>
 
 /* ========================================================================
+ * 可移植 CPU 放松指令（替代 ARM64 wfe）
+ * ======================================================================== */
+
+/** @brief 放松 CPU（自旋等待时降低功耗）
+ *
+ * @details ARM64 使用 wfe（Wait For Event），x86 使用 pause 指令。
+ *          宿主机测试运行在 x86 上，用 sched_yield 让出 CPU 时间片。
+ */
+static inline void cpu_relax(void)
+{
+#if defined(__aarch64__)
+    __asm volatile("wfe");
+#elif defined(__x86_64__) || defined(__i386__)
+    __asm volatile("pause" ::: "memory");
+#else
+    sched_yield();
+#endif
+}
+
+/* ========================================================================
  * 测试统计
  * ======================================================================== */
 
@@ -110,8 +130,8 @@ static void spinlock_lock(spinlock_t *lock)
 {
     while (spinlock_trylock(lock) == false)
     {
-        /* 优化：PAUSE 指令减少功耗 */
-        __asm volatile("wfe");
+        /* 优化：放松 CPU 减少功耗 */
+        cpu_relax();
     }
 }
 
@@ -207,7 +227,7 @@ static void* cache_coherence_thread(void *arg)
     while (atomic_load(&s_sync_flag) == 0)
     {
         /* 等待同步 */
-        __asm volatile("wfe");
+        cpu_relax();
     }
 
     /* 读取其他 CPU 的数据 */

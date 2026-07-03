@@ -21,45 +21,17 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "ext4_types.h"
 
 /* ========================================================================
- * 目录项结构（仅在 ext4_types.h 未定义时定义）
+ * 目录常量（仅在本文件及目录操作源文件中使用）
  * ======================================================================== */
 
-#ifndef EXT4_TYPES_H
-/** @brief 最大文件名长度 */
-#define EXT4_DIR_NAME_LEN        255U
+/** @brief 最大文件名长度（与 EXT4_NAME_LEN 保持一致） */
+#define EXT4_DIR_NAME_LEN        EXT4_NAME_LEN
 
 /** @brief 最小目录项长度 */
 #define EXT4_DIR_MIN_REC_LEN     8U
-
-/** @brief Ext4 目录项 */
-typedef struct ext4_dir_entry
-{
-    uint32_t      inode;        /**< @brief Inode 编号 */
-    uint16_t      rec_len;      /**< @brief 记录长度 */
-    uint8_t       name_len;     /**< @brief 文件名长度 */
-    uint8_t       file_type;    /**< @brief 文件类型 */
-    char          name[EXT4_DIR_NAME_LEN]; /**< @brief 文件名 */
-} ext4_dir_entry_t;
-
-/* ========================================================================
- * 文件类型
- * ======================================================================== */
-
-/** @brief 目录项文件类型 */
-typedef enum
-{
-    EXT4_FT_UNKNOWN       = 0U,
-    EXT4_FT_REG_FILE      = 1U,
-    EXT4_FT_DIR           = 2U,
-    EXT4_FT_CHRDEV        = 3U,
-    EXT4_FT_BLKDEV        = 4U,
-    EXT4_FT_FIFO          = 5U,
-    EXT4_FT_SOCK          = 6U,
-    EXT4_FT_SYMLINK       = 7U
-} ext4_file_type_t;
-#endif /* EXT4_TYPES_H */
 
 /* ========================================================================
  * 目录接口

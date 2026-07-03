@@ -17,11 +17,14 @@ mkdir -p "$BUILD_DIR"
 
 run_test() {
     local name="$1"
+    local extra_src="$2"   # 额外源文件（可选，如链接内核实现）
+    local extra_defs="$3"  # 额外宏定义（可选，如 TEST_HOST_MODE）
     local src="$TEST_DIR/$name"
     local bin="$BUILD_DIR/${name%.c}"
 
     printf "  编译 %-30s ... " "$name"
-    if gcc -std=c11 -Wall -Wextra -o "$bin" "$src" 2>/dev/null; then
+    # shellcheck disable=SC2086
+    if gcc -std=c11 -Wall -Wextra $extra_defs -I"$PROJECT_DIR/include" -I"$TEST_DIR" -o "$bin" "$src" $extra_src 2>/dev/null; then
         printf "OK  运行 ... "
         if "$bin" > /tmp/test_output.txt 2>&1; then
             echo "PASS"
@@ -33,7 +36,8 @@ run_test() {
         fi
     else
         echo "FAIL (编译错误)"
-        gcc -std=c11 -Wall -Wextra -o "$bin" "$src" 2>&1 || true
+        # shellcheck disable=SC2086
+        gcc -std=c11 -Wall -Wextra $extra_defs -I"$PROJECT_DIR/include" -I"$TEST_DIR" -o "$bin" "$src" $extra_src 2>&1 || true
         FAIL=$((FAIL + 1))
     fi
     TOTAL=$((TOTAL + 1))
@@ -68,6 +72,10 @@ run_test "test_channel.c"
 run_test "test_capability.c"
 run_test "test_capability_revoke.c"
 run_test "test_smp.c"
+
+echo ""
+echo "--- 内核实现测试（链接真实内核代码）---"
+run_test "test_kmalloc_kernel.c" "$PROJECT_DIR/kernel/mm/kmalloc.c $PROJECT_DIR/lib/kernel_string.c" "-DTEST_HOST_MODE"
 
 echo ""
 echo "============================================"

@@ -258,6 +258,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_kmalloc_kernel tests/test_kmalloc_kernel.c kernel/mm/kmalloc.c lib/kernel_string.c)
     target_include_directories(test_kmalloc_kernel PRIVATE ${CMAKE_SOURCE_DIR} ${TEST_INCLUDE_DIRS})
     target_compile_options(test_kmalloc_kernel PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
+    target_compile_definitions(test_kmalloc_kernel PRIVATE TEST_HOST_MODE)
     add_test(NAME test_kmalloc_kernel COMMAND test_kmalloc_kernel)
 
     # test_context_switch — 上下文切换性能测试

@@ -22,33 +22,15 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "ext4_types.h"
 
 /* ========================================================================
- * 常量定义
+ * Inode 管理常量
  * ======================================================================== */
 
 /** @brief Ext4 Inode 表偏移（基于块号） */
 #define EXT4_INODE_TABLE_OFFSET(block_id) \
     (block_id)
-
-/** @brief 单个 Inode 大小（通常是 256 字节） */
-#define EXT4_INODE_SIZE          256U
-
-/** @brief 直接块指针数量 */
-#define EXT4_NDIR_BLOCKS         12U
-
-/** @brief 一级间接块指针 */
-#define EXT4_IND_BLOCK           12U
-
-/** @brief 二级间接块指针 */
-#define EXT4_DIND_BLOCK          13U
-
-/** @brief 三级间接块指针 */
-#define EXT4_TIND_BLOCK          14U
-
-/* ========================================================================
- * Inode 类型（ext4_file_type_t 已在 ext4_types.h 中统一定义）
- * ======================================================================== */
 
 /* ========================================================================
  * Inode 状态

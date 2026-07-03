@@ -75,10 +75,19 @@ typedef struct block_header
  *
  * @details 使用 __heap_start ~ __heap_start + KMALLOC_HEAP_SIZE 作为内核堆。
  *          避免在 BSS 段中放置巨型静态数组。
+ *
+ *          宿主机单元测试（TEST_HOST_MODE）链接真实 kmalloc.c 实现但无法
+ *          使用内核链接脚本，因此改用静态缓冲区作为堆区域。
  */
 
-/** @brief 链接脚本定义的堆起始地址 */
+#ifdef TEST_HOST_MODE
+/* 宿主机测试模式：使用静态缓冲区替代链接脚本符号 */
+#define KMALLOC_HOST_HEAP_SIZE  (4U * 1024U * 1024U)  /**< @brief 宿主机测试堆 4MB（BSS 段，不占文件空间） */
+static uint8_t s_host_heap[KMALLOC_HOST_HEAP_SIZE];   /**< @brief 宿主机测试堆缓冲区 */
+#else
+/** @brief 链接脚本定义的堆起始地址（仅内核构建时使用） */
 extern char __heap_start[];
+#endif
 
 /** @brief 堆基地址指针（运行时从链接符号获取） */
 static uint8_t *s_heap_base = NULL;
@@ -247,15 +256,21 @@ int32_t kmalloc_init(void)
 {
     block_header_t *first_block;
 
-    /* 从链接符号获取堆基地址 */
+    /* 获取堆基地址：内核模式从链接符号，宿主机测试模式从静态缓冲区 */
+#ifdef TEST_HOST_MODE
+    s_heap_base = s_host_heap;
+    const size_t heap_size = KMALLOC_HOST_HEAP_SIZE;
+#else
     s_heap_base = (uint8_t *)(uintptr_t)__heap_start;
+    const size_t heap_size = KMALLOC_HEAP_SIZE;
+#endif
 
     /* 初始化堆区域 */
-    (void)kernel_memset(s_heap_base, 0, KMALLOC_HEAP_SIZE);
+    (void)kernel_memset(s_heap_base, 0, heap_size);
 
     /* 设置第一个空闲块 */
     first_block = (block_header_t *)s_heap_base;
-    first_block->size    = KMALLOC_HEAP_SIZE;
+    first_block->size    = heap_size;
     first_block->magic   = KMALLOC_MAGIC;
     first_block->is_free = 1U;
     first_block->next    = NULL;
