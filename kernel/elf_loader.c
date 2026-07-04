@@ -435,6 +435,30 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
             while (j > 0U) hal_uart_putc(ELF_UART_BASE, dec[--j]);
         }
         hal_uart_putc(ELF_UART_BASE, '\n');
+
+        /* 验证映射：lookup 第一个页 */
+        {
+            paddr_t vp;
+            if (page_table_lookup(user_pgd_ptr, segments[i].vaddr, &vp) == KERNEL_OK)
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] lookup OK paddr=0x");
+                {
+                    char h[16];
+                    uint32_t j;
+                    for (j = 0U; j < 16U; j++)
+                    {
+                        uint8_t n = (uint8_t)((vp >> ((15U-j)*4U)) & 0xFU);
+                        h[j] = (char)((n<10U)?('0'+n):('a'+n-10U));
+                    }
+                    for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
+                }
+                hal_uart_putc(ELF_UART_BASE, '\n');
+            }
+            else
+            {
+                hal_uart_puts(ELF_UART_BASE, "[ELF] lookup FAIL\n");
+            }
+        }
     }
 
     /* 分配用户栈（映射 ELF_USER_STACK_TOP 下方若干页） */

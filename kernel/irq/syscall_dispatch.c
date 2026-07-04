@@ -706,6 +706,9 @@ static void dispatch_debug(syscall_frame_t *frame)
             const char *str = (const char *)(uintptr_t)frame->x0;
             uint64_t len = frame->x1;
 
+            /* 诊断标记：确认 SVC 到达内核 */
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '<');
+
             if (str != NULL)
             {
                 uint64_t i;
