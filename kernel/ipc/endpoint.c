@@ -30,6 +30,9 @@
 #include <kernel/compiler.h>
 #include <kernel/list.h>
 #include <kernel/mm/slab.h>
+#include <kernel/capability.h>
+#include <kernel/cspace.h>
+#include <kernel/kobject.h>
 #include "thread.h"
 #include "scheduler.h"
 #include <stdint.h>
@@ -372,6 +375,74 @@ static ipc_endpoint_t *get_endpoint(kobj_id_t ep_id)
 }
 
 /**
+ * @brief 检查当前线程是否拥有对端点的指定权限
+ *
+ * @details 双路径访问控制：
+ *          1. 如果当前线程有 CSpace，遍历其能力表查找指向此端点的能力，
+ *             通过 cap_validate 验证权限（完整能力系统路径）。
+ *          2. 如果没有 CSpace（早期线程），回退到 owner_tid 检查。
+ *
+ * @param ep       端点指针
+ * @param required 需要的权限（CAP_RIGHT_READ/WRITE 等）
+ *
+ * @return KERNEL_OK 有权限
+ * @return -EACCES   无权限
+ */
+static kernel_status_t endpoint_check_access(const ipc_endpoint_t *ep,
+                                              uint8_t required)
+{
+    KThread_t *current;
+
+    current = kthread_get_current();
+    if (current == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 路径 1：能力系统验证（如果线程有 CSpace） */
+    if (current->cspace != NULL)
+    {
+        cspace_t *cs = (cspace_t *)current->cspace;
+        cap_slot_t slot;
+
+        /* 遍历 CSpace 查找指向此端点的能力 */
+        ticket_lock_acquire(&cs->lock);
+        for (slot = 0U; slot < cs->capacity; slot++)
+        {
+            cap_t *cap = cspace_lookup(cs, slot);
+            if ((cap != NULL) &&
+                (cap->state == CAP_STATE_VALID) &&
+                (cap->kobj_type == KOBJ_ENDPOINT) &&
+                (cap->kobj_id == ep->id))
+            {
+                /* 找到匹配能力，验证权限 */
+                kernel_status_t ret;
+                if ((cap->rights & required) == required)
+                {
+                    ticket_lock_release(&cs->lock);
+                    return KERNEL_OK;
+                }
+                /* 权限不足 */
+                ticket_lock_release(&cs->lock);
+                return -(int32_t)EACCES;
+            }
+        }
+        ticket_lock_release(&cs->lock);
+
+        /* 有 CSpace 但没找到能力 → 无权限 */
+        return -(int32_t)EACCES;
+    }
+
+    /* 路径 2：回退到 owner 检查（无 CSpace 时） */
+    if (ep->owner_tid == current->tid)
+    {
+        return KERNEL_OK;
+    }
+
+    return -(int32_t)EACCES;
+}
+
+/**
  * @brief 检查端点是否有效
  */
 static bool endpoint_is_valid(const ipc_endpoint_t *ep)
@@ -515,10 +586,13 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
         return -(int32_t)ESRCH;
     }
 
-    /* 访问控制：只有端点 owner 才能 destroy */
-    if (ep->owner_tid != current->tid)
+    /* 访问控制：需要 GRANT 权限（或 owner 回退） */
     {
-        return -(int32_t)EACCES;
+        kernel_status_t acc = endpoint_check_access(ep, CAP_RIGHT_GRANT);
+        if (acc != KERNEL_OK)
+        {
+            return acc;
+        }
     }
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
@@ -734,11 +808,13 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
         return -(int32_t)ESRCH;
     }
 
-    /* 访问控制：只有端点 owner 才能 receive
-     * （能力系统过渡方案，后续将替换为 cap_validate） */
-    if (ep->owner_tid != current->tid)
+    /* 访问控制：通过能力系统验证 READ 权限（回退到 owner 检查） */
     {
-        return -(int32_t)EACCES;
+        kernel_status_t acc = endpoint_check_access(ep, CAP_RIGHT_READ);
+        if (acc != KERNEL_OK)
+        {
+            return acc;
+        }
     }
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
@@ -818,11 +894,13 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
         return -(int32_t)ESRCH;
     }
 
-    /* 访问控制：只有端点 owner 才能 reply
-     * （能力系统过渡方案） */
-    if (ep->owner_tid != current->tid)
+    /* 访问控制：需要 WRITE 权限（或 owner 回退） */
     {
-        return -(int32_t)EACCES;
+        kernel_status_t acc = endpoint_check_access(ep, CAP_RIGHT_WRITE);
+        if (acc != KERNEL_OK)
+        {
+            return acc;
+        }
     }
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
