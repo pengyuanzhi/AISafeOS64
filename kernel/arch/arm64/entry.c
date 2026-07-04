@@ -3284,7 +3284,10 @@ void kernel_main(void)
     /* 生产模式：直接启动调度器 */
 #endif /* CONFIG_DEBUG */
 
-    /* ---- 加载用户态驱动 ELF（引导读取器读盘 + elf_load_and_run）---- */
+    /* ---- 加载用户态驱动 ELF（引导读取器读盘 + elf_load_and_run）----
+     * 仅在 CONFIG_DEBUG 模式下编译，节省 text 段空间。
+     * 生产模式不加载用户态驱动 ELF（待用户态基础设施完善后启用）。 */
+#if CONFIG_DEBUG
     {
         extern int32_t boot_blk_init(void);
         extern int32_t boot_blk_read(uint64_t offset, void *buf, uint32_t size);
@@ -3329,9 +3332,12 @@ void kernel_main(void)
             }
         }
     }
+#endif /* CONFIG_DEBUG */
 
     /* 启动性能基准测试（线程在 scheduler_start 后执行） */
+#if CONFIG_DEBUG
     kern_bench_start();
+#endif
 
     scheduler_start();
 
