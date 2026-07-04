@@ -36,7 +36,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         ${CMAKE_CURRENT_LIST_DIR}/lib/*.c
         PROPERTIES
         COMPILE_OPTIONS
-        "-Wall;-Wextra;-Werror;-Wpedantic;-Wconversion;-Wsign-conversion;-Wshadow;-Wstrict-prototypes;-Wmissing-prototypes;-Wstrict-overflow=1;-Wvla;-ffreestanding;-fno-builtin;-fno-common;-fdata-sections;-ffunction-sections;-fno-strict-aliasing;-fno-stack-protector;-Wundef;-Wcast-align;-Wwrite-strings;-Wold-style-definition;-Wmissing-declarations;-Wredundant-decls;-Wnested-externs;-Wlogical-op;-Waggregate-return"
+        "-Wall;-Wextra;-Werror;-Wpedantic;-Wconversion;-Wsign-conversion;-Wshadow;-Wstrict-prototypes;-Wmissing-prototypes;-Wstrict-overflow=1;-Wvla;-ffreestanding;-fno-builtin;-fno-common;-fdata-sections;-ffunction-sections;-fno-strict-aliasing;-fstack-protector-strong;-Wundef;-Wcast-align;-Wwrite-strings;-Wold-style-definition;-Wmissing-declarations;-Wredundant-decls;-Wnested-externs;-Wlogical-op;-Waggregate-return"
     )
 endif()
 

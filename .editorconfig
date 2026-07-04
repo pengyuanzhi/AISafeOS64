@@ -1,0 +1,48 @@
+# .editorconfig - AISafeOS64 编辑器统一配置
+#
+# 确保所有开发者/编辑器使用一致的编码风格。
+# @version 1.0
+# @date 2026-07-04
+
+root = true
+
+# 所有文件
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# C 源码
+[*.{c,h}]
+indent_size = 4
+indent_brace_style = allman
+
+# 汇编
+[*.{S,s}]
+indent_size = 4
+
+# 链接脚本
+[*.ld]
+indent_size = 4
+
+# CMake
+[CMakeLists.txt]
+indent_size = 4
+
+# Shell 脚本
+[*.sh]
+indent_size = 4
+shell_variant = posix
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# YAML
+[*.{yml,yaml}]
+indent_size = 2

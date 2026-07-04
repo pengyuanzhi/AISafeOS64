@@ -1,0 +1,68 @@
+# .clang-tidy - AISafeOS64 内核静态分析配置
+#
+# 基于 MISRA C:2012 要求，使用 clang-tidy 进行自动化静态分析。
+# 运行: clang-tidy --config-file=.clang-tidy kernel/**/*.c
+#
+# @version 1.0
+# @date 2026-07-04
+
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  cert-*,
+  -cert-err34-c,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  misc-*,
+  -misc-no-recursion,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-non-const-parameter,
+  clang-analyzer-*,
+  -clang-analyzer-alpha.*
+
+# 警告即错误
+WarningsAsErrors: '*'
+
+# 头文件目录
+HeaderFilterRegex: '.*'
+
+CheckOptions:
+  # 函数复杂度限制（AGENTS.md 要求 ≤10）
+  - key:   readability-function-cognitive-complexity.Threshold
+    value: '10'
+  # 函数行数限制
+  - key:   readability-function-size.LineThreshold
+    value: '100'
+  - key:   readability-function-size.StatementThreshold
+    value: '80'
+  # 命名规范
+  - key:   readability-identifier-naming.FunctionCase
+    value: 'lower_case'
+  - key:   readability-identifier-naming.VariableCase
+    value: 'lower_case'
+  - key:   readability-identifier-naming.ConstantPrefix
+    value: 'k_'
+  - key:   readability-identifier-naming.EnumConstantCase
+    value: 'UPPER_CASE'
+  - key:   readability-identifier-naming.MacroDefinitionCase
+    value: 'UPPER_CASE'
+  - key:   readability-identifier-naming.TypedefCase
+    value: 'CamelCase'
+  - key:   readability-identifier-naming.StructCase
+    value: 'CamelCase'
+  # 禁止的非标准函数
+  - key:   cppcoreguidelines-avoid-c-arrays.IgnoreStringLiterals
+    value: '1'
+
+# 排除的目录（架构相关代码允许内联汇编）
+__exclude_dirs__:
+  - 'kernel/arch/arm64'
+  - 'build'
+  - 'tests'
