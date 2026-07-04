@@ -782,8 +782,111 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
 }
 
 /* ========================================================================
- * 接收消息（阻塞）
+ * 能力传递辅助函数
  * ======================================================================== */
+
+/**
+ * @brief 执行跨 CSpace 的能力复制
+ *
+ * @param sender   发送方线程
+ * @param src_slot 发送方 CSpace 中的能力槽
+ * @param receiver 接收方线程
+ *
+ * @return KERNEL_OK 成功，负数错误码失败
+ */
+static kernel_status_t endpoint_do_cap_transfer(KThread_t *sender,
+                                                 cap_slot_t src_slot,
+                                                 KThread_t *receiver)
+{
+    cspace_t *sender_cs;
+    cspace_t *recv_cs;
+    cap_slot_t dest_slot;
+
+    if ((sender == NULL) || (receiver == NULL) ||
+        (src_slot == CAP_SLOT_INVALID))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    sender_cs = (cspace_t *)sender->cspace;
+    recv_cs = (cspace_t *)receiver->cspace;
+
+    /* 双方都必须有 CSpace */
+    if ((sender_cs == NULL) || (recv_cs == NULL))
+    {
+        return -(int32_t)ENOSYS;
+    }
+
+    /* 在接收方 CSpace 中分配一个目标槽 */
+    dest_slot = recv_cs->free_head;
+    if (dest_slot == CAP_SLOT_INVALID)
+    {
+        return -(int32_t)ENOMEM;
+    }
+
+    /* 复制能力（降权：0 = 保持原权限） */
+    return cap_copy(sender_cs->root_slot, src_slot,
+                    recv_cs->root_slot, dest_slot, 0U);
+}
+
+/* ========================================================================
+ * 发送消息并传递能力（seL4 风格 cap transfer）
+ * ======================================================================== */
+
+kernel_status_t ipc_msg_send_with_cap(kobj_id_t ep_id,
+                                       ipc_msg_tag_t tag,
+                                       const void *send_buf,
+                                       uint32_t send_size,
+                                       void *recv_buf,
+                                       uint32_t recv_size,
+                                       cap_slot_t cap_slot)
+{
+    ipc_endpoint_t *ep;
+    KThread_t *current;
+    KThread_t *receiver;
+    uint32_t irq_state;
+
+    ep = get_endpoint(ep_id);
+    if (!endpoint_is_valid(ep))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    current = kthread_get_current();
+    if (current == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    irq_state = ticket_lock_acquire_irqsave(&ep->lock);
+
+    /* 记录能力传递信息 */
+    if (cap_slot != CAP_SLOT_INVALID)
+    {
+        ep->transfer_src_slot = cap_slot;
+        ep->has_cap_transfer = true;
+    }
+    else
+    {
+        ep->has_cap_transfer = false;
+    }
+
+    /* 如果接收方正在等待（快速路径），立即传递能力 */
+    if ((ep->state == IPC_EP_RECEIVING) && (ep->has_cap_transfer))
+    {
+        receiver = &g_scheduler.thread_table[ep->owner_tid];
+        if (receiver->state == KTHREAD_STATE_BLOCKED)
+        {
+            (void)endpoint_do_cap_transfer(current, ep->transfer_src_slot, receiver);
+            ep->has_cap_transfer = false;
+        }
+    }
+
+    ticket_lock_release_irqrestore(&ep->lock, irq_state);
+
+    /* 委托给标准 ipc_msg_send 完成消息传递 */
+    return ipc_msg_send(ep_id, tag, send_buf, send_size, recv_buf, recv_size);
+}
 
 kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
                                  ipc_msg_tag_t *tag,
@@ -843,6 +946,14 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
         if (tag != NULL)
         {
             *tag = ep->saved_tag;
+        }
+
+        /* 慢速路径的能力传递：发送方先到达并标记了 cap transfer */
+        if (ep->has_cap_transfer)
+        {
+            KThread_t *sender_thread = &g_scheduler.thread_table[ep->sender_tid];
+            (void)endpoint_do_cap_transfer(sender_thread, ep->transfer_src_slot, current);
+            ep->has_cap_transfer = false;
         }
 
         /* 直接进入回复阶段 */

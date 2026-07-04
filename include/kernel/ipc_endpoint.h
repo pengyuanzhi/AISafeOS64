@@ -93,6 +93,32 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
                               uint32_t recv_size);
 
 /**
+ * @brief 发送消息并传递能力（seL4 风格 cap transfer）
+ *
+ * @details 在 IPC 消息传递的同时，将发送方 CSpace 中的一个能力
+ *          复制到接收方 CSpace。接收方在 receive 时获得该能力。
+ *
+ * @param ep_id     端点 ID
+ * @param tag       消息标签
+ * @param send_buf  发送缓冲区
+ * @param send_size 发送大小
+ * @param recv_buf  接收缓冲区
+ * @param recv_size 接收大小
+ * @param cap_slot  要传递的能力槽（发送方 CSpace），CAP_SLOT_INVALID 表示不传递
+ *
+ * @return KERNEL_OK 成功
+ *
+ * @note 对应需求: KR-005, KR-014（能力传递）
+ */
+kernel_status_t ipc_msg_send_with_cap(kobj_id_t ep_id,
+                                       ipc_msg_tag_t tag,
+                                       const void *send_buf,
+                                       uint32_t send_size,
+                                       void *recv_buf,
+                                       uint32_t recv_size,
+                                       cap_slot_t cap_slot);
+
+/**
  * @brief 接收消息（阻塞）
  *
  * @details 从端点的待处理队列中接收消息。

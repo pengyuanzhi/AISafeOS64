@@ -27,6 +27,7 @@
 #include <kernel/list.h>
 #include <kernel/spinlock.h>
 #include <kernel/alignment.h>
+#include <kernel/capability.h>
 #include <stdint.h>
 
 /* ========================================================================
@@ -209,6 +210,10 @@ typedef struct CACHE_ALIGN(64)
     uint32_t            sender_recv_size; /**< @brief 发送方回复缓冲区大小 */
     ipc_msg_tag_t       saved_tag;       /**< @brief 保存的消息标签（Send→Receive 传递） */
     uint16_t            generation;       /**< @brief 端点 ID 世代号（防 use-after-free） */
+
+    /* 能力传递（seL4 风格 cap transfer） */
+    cap_slot_t          transfer_src_slot;  /**< @brief 发送方要传递的能力槽 */
+    bool                has_cap_transfer;   /**< @brief 本次消息是否携带能力传递 */
 } ipc_endpoint_t;
 
 /* ========================================================================
