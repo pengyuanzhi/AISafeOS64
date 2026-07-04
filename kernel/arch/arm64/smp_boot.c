@@ -25,6 +25,7 @@
 #include <kernel/gic.h>
 #include <kernel/config.h>
 #include <kernel/interrupt.h>
+#include <kernel/virt_phys.h>
 #include <hal.h>
 #include <stdint.h>
 #include <kernel/mmu.h>
@@ -203,9 +204,10 @@ kernel_status_t smp_boot_secondary(void)
         s_percpu_data[cpu_id].state = CPU_STATE_BOOTING;
         barrier();
 
+        /* PSCI CPU_ON 的 entry_point 必须是物理地址（从核启动时 MMU 关闭） */
         psci_ret = psci_cpu_on(
             (uint64_t)cpu_id,
-            (uint64_t)(uintptr_t)&secondary_entry,
+            (uint64_t)virt_to_phys(&secondary_entry),
             (uint64_t)cpu_id
         );
 

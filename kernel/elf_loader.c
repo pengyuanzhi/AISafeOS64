@@ -20,6 +20,7 @@
 #include <arch/arm64/hal.h>
 #include <kernel/types.h>
 #include <kernel/page_table.h>
+#include <kernel/virt_phys.h>
 #include <kernel/phys_mem.h>
 #include <kernel/mmu.h>
 #include <string.h>
@@ -255,7 +256,7 @@ static void copy_to_user_space(page_table_t *user_pgd, uint64_t user_vaddr,
             break;  /* 映射失败 */
         }
 
-        /* 通过内核恒等映射（PA=VA）写物理页 */
+        /* 通过 linear mapping 写物理页（phys_to_virt 转换） */
         page_offset = (user_vaddr + offset) & (PAGE_SIZE_4K - 1ULL);
         chunk_size = PAGE_SIZE_4K - page_offset;
         if (chunk_size > (size - offset))
@@ -263,7 +264,7 @@ static void copy_to_user_space(page_table_t *user_pgd, uint64_t user_vaddr,
             chunk_size = size - offset;
         }
 
-        dst = (uint8_t *)(uintptr_t)(paddr + page_offset);
+        dst = (uint8_t *)phys_to_virt(paddr + page_offset);
         {
             uint64_t i;
             for (i = 0ULL; i < chunk_size; i++)
@@ -360,9 +361,9 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         user_pgd = hal_read_ttbr0();
         user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
 
-        /* 分配一页作为 L3 PTE table */
+        /* 分配一页作为 L3 PTE table，通过 linear mapping 访问 */
         paddr_t pte_table_pa = phys_mem_alloc_page();
-        pte_table = (volatile uint64_t *)(uintptr_t)pte_table_pa;
+        pte_table = (volatile uint64_t *)phys_to_virt(pte_table_pa);
         /* 清零 */
         for (pte_idx = 0U; pte_idx < 512U; pte_idx++)
         {

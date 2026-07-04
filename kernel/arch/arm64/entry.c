@@ -23,6 +23,7 @@
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/timer.h>
+#include <kernel/virt_phys.h>
 #include <kernel/ipc_endpoint.h>
 #include <kernel/ipc_types.h>
 #include <kernel/gic.h>
@@ -2624,8 +2625,9 @@ void kernel_main(void)
     /* ---- 初始化物理内存分配器（buddy system，用于用户态页分配）---- */
     {
         extern char __kernel_end[];
-        /* 管理内核镜像之后的 16MB 物理内存（够用户态驱动和进程用） */
-        paddr_t pmem_base = (paddr_t)(((uintptr_t)__kernel_end + 0xFFFU) & ~0xFFFU);
+        /* 管理内核镜像之后的 16MB 物理内存（够用户态驱动和进程用）。
+         * __kernel_end 是高地址 VMA 符号，需减去 KERNEL_VA_OFFSET 得到物理地址。 */
+        paddr_t pmem_base = (paddr_t)(((uintptr_t)__kernel_end - KERNEL_VA_OFFSET + 0xFFFU) & ~0xFFFU);
         uint64_t pmem_size = 16U * 1024U * 1024U;  /* 16MB */
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init\n");
         ret = phys_mem_init(pmem_base, pmem_size);
