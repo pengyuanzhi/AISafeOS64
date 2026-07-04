@@ -419,7 +419,7 @@ void mmu_early_init(void)
     __asm__ volatile("isb");
 
     /* ---- 第6步: 切换 TTBR0 为空表（用户空间初始状态）----
-     * boot.S 的 TTBR0 恒等映射使命命期结束。失效低地址 TLB。
+     * boot.S 的 TTBR0 恒等映射使命周期结束。失效低地址 TLB。
      */
     __asm__ volatile("msr ttbr0_el1, %0" :: "r"(empty_paddr));
     __asm__ volatile("isb");

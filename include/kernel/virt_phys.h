@@ -33,6 +33,13 @@
  *
  * @details 内核空间起始地址 = CONFIG_KERNEL_VADDR_BASE = 0xFFFF000000000000
  *          所有内核符号: VA = PA + KERNEL_VA_OFFSET
+ *
+ * @note linear mapping 覆盖范围（mmu.c build_kernel_pud_table）:
+ *       - PUD[0]: PA 0x00000000~0x3FFFFFFF（1GB Device，含 UART/GIC/virtio MMIO）
+ *       - PUD[1]: PA 0x40000000~0x7FFFFFFF（1GB RAM）
+ *       phys_to_virt 仅对上述范围内的物理地址有效。
+ *       QEMU virt 默认 1GB RAM（PA 0x40000000+），当前覆盖足够。
+ *       若 RAM > 1GB 需扩展 PUD 表。
  */
 #define KERNEL_VA_OFFSET  0xFFFF000000000000ULL
 

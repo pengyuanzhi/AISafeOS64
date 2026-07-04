@@ -300,8 +300,6 @@ arch_setup_elf_thread_context:
 
     ret
 
-    ret
-
 
 /* ========================================================================
  * user_entry_trampoline
