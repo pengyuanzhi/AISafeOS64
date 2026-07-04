@@ -199,7 +199,7 @@ elf_error_t elf_loader_get_entry(uint64_t *entry)
 #define ELF_USER_STACK_SIZE  8192U
 
 /** @brief 用户栈顶地址（TTBR0 高端，避开 ELF 加载区 0x400000 和 MMIO 区 0x10000000） */
-#define ELF_USER_STACK_TOP   ((uint64_t)0x90000000ULL)
+#define ELF_USER_STACK_TOP   ((uint64_t)0x60100000ULL)
 
 /** @brief 内核 UART 基址（用于加载日志） */
 #define ELF_UART_BASE        ((uint64_t)0x09000000ULL)
@@ -332,269 +332,81 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     }
 
     /*
-     * 共享 PGD 方案：用内核 PGD（ASID 0，全局映射）作为用户 PGD。
-     * 避免独立 PGD 的 TTBR0 切换 + TLB/ASID 问题。
-     * ELF 加载到 0x80000000（内核 PGD 未映射区域）。
+     * 修改内核 PMD 使 ELF 区域（0x60000000+）对 EL0 可访问。
+     *
+     * 内核 PMD 的 PMD[1..511] 是 2MB Normal block（AP=PRIV_RW，EL0 禁止）。
+     * 修改 ELF 加载地址对应的 PMD 条目的 AP 位为 ALL_RW（EL0+EL1 RW），
+     * 并清除 XN/PXN（允许执行）。这是恒等映射（VA=PA），无需四级遍历。
      */
     {
         extern uint64_t hal_read_ttbr0(void);
+        volatile uint64_t *pud;
+        volatile uint64_t *pmd;
+        uint64_t pud1;
+        uint32_t pmd_idx;
         user_pgd = hal_read_ttbr0();
         user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
+
+        /* PUD[1] → s_pmd_kernel（内核 PMD table） */
+        pud = (volatile uint64_t *)0x40036000ULL;
+        pud1 = pud[1];
+        pmd = (volatile uint64_t *)(uintptr_t)(pud1 & 0x0000FFFFFFFFF000ULL);
+
+        /* 0x60000000 的 PMD index = (0x60000000 >> 21) & 511 = 256 */
+        /* 修改 PMD[256]（0x60000000-0x601FFFFF）和 PMD[257]（0x60200000） */
+        for (pmd_idx = 256U; pmd_idx <= 257U; pmd_idx++)
+        {
+            /* 完全重写 PMD 条目：2MB block，Normal，EL0+EL1 RWX
+             * 物理地址 = PMD index 对应的 0x60000000/0x60200000 */
+            uint64_t blk_addr = 0x40000000ULL + (uint64_t)pmd_idx * 0x200000ULL;
+            pmd[pmd_idx] = 1ULL            /* valid */
+                         | (1ULL << 10)    /* AF */
+                         | (1ULL << 6)     /* AP=ALL_RW (EL0+EL1) */
+                         | (3ULL << 8)     /* SH=Inner */
+                         | blk_addr;       /* 物理 2MB block 地址 */
+            /* 不设 XN/PXN（bit 54/53=0），允许执行 */
+        }
+
+        __asm__ volatile("tlbi vmalle1" ::: "memory");
+        __asm__ volatile("dsb nsh; isb");
     }
 
-    /* 映射每个 PT_LOAD 段 */
+    /*
+     * 段数据拷贝（恒等映射：PUD[2] 的 1GB block 已覆盖 0x80000000+）
+     * 直接写虚拟地址 = 物理地址（0x80000000+）。
+     */
     for (i = 0U; i < seg_count; i++)
     {
-        uint64_t offset;
-        page_perm_t perm = elf_prot_to_perm(segments[i].prot);
-        /* 记录每页的物理地址，用于直接拷贝数据（恒等映射） */
-        paddr_t seg_pa[16];  /* 最多 16 页（64KB 段足够） */
-        uint32_t page_count = 0U;
-
-        for (offset = 0ULL; offset < segments[i].length; offset += (uint64_t)PAGE_SIZE_4K)
-        {
-            paddr_t paddr = phys_mem_alloc_page();
-            uint64_t vaddr = segments[i].vaddr + offset;
-
-            /* 诊断：打印 alloc 结果 */
-            hal_uart_puts(ELF_UART_BASE, "[ELF] alloc=");
-            {
-                char h[16]; uint32_t j;
-                for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((paddr>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
-                for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
-            }
-            hal_uart_putc(ELF_UART_BASE, '\n');
-
-            if (paddr == 0ULL)
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] page alloc FAIL\n");
-                return -(int32_t)ENOMEM;
-            }
-
-            if (page_table_map(user_pgd_ptr, vaddr, paddr, perm, true) != KERNEL_OK)
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] map FAIL\n");
-                return -(int32_t)ENOMEM;
-            }
-
-            /* 诊断：page_table_map 后通过 VA 验证映射 */
-            {
-                volatile uint8_t *vp = (volatile uint8_t *)(uintptr_t)vaddr;
-                paddr_t lookup_pa;
-                uint64_t cur_ttbr0;
-                extern kernel_status_t page_table_lookup(page_table_t *pgd, vaddr_t vaddr, paddr_t *paddr);
-                __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(cur_ttbr0));
-                page_table_lookup(user_pgd_ptr, vaddr, &lookup_pa);
-                hal_uart_puts(ELF_UART_BASE, "[ELF] ttbr0=0x");
-                { char h[16]; uint32_t j;
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((cur_ttbr0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, " pgd=0x");
-                { char h[16]; uint32_t j;
-                  uint64_t pgd_v = (uint64_t)(uintptr_t)user_pgd_ptr;
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pgd_v>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                /* 打印 PGD[0] 和 PUD[2] */
-                hal_uart_puts(ELF_UART_BASE, " PGD0=0x");
-                { char h[16]; uint32_t j;
-                  uint64_t *pgd_entries = (uint64_t *)user_pgd_ptr;
-                  uint64_t pgd0 = pgd_entries[0];
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pgd0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                /* PUD[0] 和 PUD[2]（s_pud_ttbr0 在 0x40036000） */
-                hal_uart_puts(ELF_UART_BASE, " PUD0=0x");
-                { char h[16]; uint32_t j;
-                  volatile uint64_t *pud_ptr = (volatile uint64_t *)0x40036000ULL;
-                  uint64_t pud0 = pud_ptr[0];
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pud0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, " PUD2=0x");
-                { char h[16]; uint32_t j;
-                  volatile uint64_t *pud_ptr = (volatile uint64_t *)0x40036000ULL;
-                  uint64_t pud2 = pud_ptr[2];
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pud2>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, "[ELF] map vaddr=0x");
-                { char h[16]; uint32_t j;
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((vaddr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, " pa=0x");
-                { char h[16]; uint32_t j;
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((paddr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, " lookup=0x");
-                { char h[16]; uint32_t j;
-                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((lookup_pa>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-                hal_uart_puts(ELF_UART_BASE, " VA[0]=0x");
-                { char h[2]; uint8_t n=(uint8_t)((vp[0]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  n=(uint8_t)(vp[0]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
-                /* 刷新 TLB 后重读 */
-                __asm__ volatile("tlbi vmalle1" ::: "memory");
-                __asm__ volatile("dsb nsh" ::: "memory");
-                __asm__ volatile("isb");
-                hal_uart_puts(ELF_UART_BASE, " VAflush[0]=0x");
-                { char h[2]; uint8_t n=(uint8_t)((vp[0]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  n=(uint8_t)(vp[0]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
-                hal_uart_putc(ELF_UART_BASE,'\n');
-            }
-
-            if (page_count < 16U)
-            {
-                seg_pa[page_count] = paddr;
-                page_count++;
-            }
-        }
-
-        /* 拷贝段数据：通过物理地址恒等映射直接写物理页 */
         if (segments[i].filesz > 0ULL)
         {
-            uint64_t copied = 0ULL;
-            uint32_t pi;
-            for (pi = 0U; pi < page_count && copied < segments[i].filesz; pi++)
+            uint8_t *dst = (uint8_t *)(uintptr_t)segments[i].vaddr;
+            uint64_t k;
+            for (k = 0ULL; k < segments[i].filesz; k++)
             {
-                uint64_t page_off = (pi * (uint64_t)PAGE_SIZE_4K);
-                uint64_t file_off = segments[i].offset + page_off;
-                uint64_t chunk = (uint64_t)PAGE_SIZE_4K;
-                uint8_t *dst;
-
-                if (chunk > (segments[i].filesz - copied))
-                {
-                    chunk = segments[i].filesz - copied;
-                }
-
-                /* 通过内核恒等映射写物理页 */
-                dst = (uint8_t *)(uintptr_t)seg_pa[pi];
-                {
-                    uint64_t k;
-                    for (k = 0ULL; k < chunk; k++)
-                    {
-                        dst[k] = elf_data[file_off + k];
-                    }
-                }
-                copied += chunk;
-            }
-
-            /* 验证物理页第一个字节 */
-            {
-                uint8_t *phys = (uint8_t *)(uintptr_t)seg_pa[0U];
-                uint8_t src_byte = elf_data[segments[i].offset];
-                hal_uart_puts(ELF_UART_BASE, "[ELF] phys[0]=0x");
-                { char h[2]; uint8_t n;
-                  n=(uint8_t)((phys[0U]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  n=(uint8_t)(phys[0U]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
-                hal_uart_puts(ELF_UART_BASE, " src[0]=0x");
-                { char h[2]; uint8_t n;
-                  n=(uint8_t)((src_byte>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  n=(uint8_t)(src_byte&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
-                /* 打印 entry 处（offset 0x80）的 4 字节 */
-                hal_uart_puts(ELF_UART_BASE, " entry=");
-                { uint32_t k; uint8_t *ep = phys + 0x80U;
-                  for (k = 0U; k < 4U; k++) {
-                      char h[2]; uint8_t n;
-                      n=(uint8_t)((ep[k]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                      n=(uint8_t)(ep[k]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-                      hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]);
-                  }
-                }
-                hal_uart_putc(ELF_UART_BASE,'\n');
+                dst[k] = elf_data[segments[i].offset + k];
             }
         }
-
-        /* BSS 清零：filesz 之后的页通过物理地址清零 */
+        /* BSS 清零（memsz > filesz 部分） */
         if (segments[i].length > segments[i].filesz)
         {
-            uint64_t bss_start_page = segments[i].filesz / (uint64_t)PAGE_SIZE_4K;
-            uint32_t pi;
-            for (pi = (uint32_t)bss_start_page; pi < page_count; pi++)
+            uint8_t *bss = (uint8_t *)(uintptr_t)(segments[i].vaddr + segments[i].filesz);
+            uint64_t bss_len = segments[i].length - segments[i].filesz;
+            uint64_t k;
+            for (k = 0ULL; k < bss_len; k++)
             {
-                uint8_t *bptr = (uint8_t *)(uintptr_t)seg_pa[pi];
-                uint64_t bk;
-                for (bk = 0ULL; bk < (uint64_t)PAGE_SIZE_4K; bk++)
-                {
-                    bptr[bk] = 0U;
-                }
+                bss[k] = 0U;
             }
         }
-
-        hal_uart_puts(ELF_UART_BASE, "[ELF] seg loaded vaddr=0x");
-        {
-            char hex[16];
-            uint32_t j;
-            uint64_t v = segments[i].vaddr;
-            for (j = 0U; j < 16U; j++)
-            {
-                uint8_t nibble = (uint8_t)((v >> ((15U - j) * 4U)) & 0xFU);
-                hex[j] = (char)((nibble < 10U) ? ('0' + nibble) : ('a' + nibble - 10U));
-            }
-            for (j = 0U; j < 16U; j++)
-            {
-                hal_uart_putc(ELF_UART_BASE, hex[j]);
-            }
-        }
-        hal_uart_puts(ELF_UART_BASE, " pages=");
-        {
-            char dec[8];
-            uint32_t j;
-            uint32_t v = page_count;
-            for (j = 0U; j < 8U; j++) { dec[j] = (char)('0' + (v % 10U)); v /= 10U; }
-            j = 8U; while (j > 1U && dec[j-1U] == '0') j--;
-            while (j > 0U) hal_uart_putc(ELF_UART_BASE, dec[--j]);
-        }
-        hal_uart_putc(ELF_UART_BASE, '\n');
-
-        /* 验证映射：lookup 第一个页 */
-        {
-            paddr_t vp;
-            if (page_table_lookup(user_pgd_ptr, segments[i].vaddr, &vp) == KERNEL_OK)
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] lookup OK paddr=0x");
-                {
-                    char h[16];
-                    uint32_t j;
-                    for (j = 0U; j < 16U; j++)
-                    {
-                        uint8_t n = (uint8_t)((vp >> ((15U-j)*4U)) & 0xFU);
-                        h[j] = (char)((n<10U)?('0'+n):('a'+n-10U));
-                    }
-                    for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
-                }
-                hal_uart_putc(ELF_UART_BASE, '\n');
-            }
-            else
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] lookup FAIL\n");
-            }
-        }
+        hal_uart_puts(ELF_UART_BASE, "[ELF] seg copied vaddr=0x");
+        { char h[16]; uint32_t j;
+          uint64_t v = segments[i].vaddr;
+          for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+          for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+        hal_uart_putc(ELF_UART_BASE,'\n');
     }
 
-    /* 分配用户栈（映射 ELF_USER_STACK_TOP 下方若干页） */
-    {
-        uint64_t stack_offset;
-        for (stack_offset = 0ULL; stack_offset < (uint64_t)ELF_USER_STACK_SIZE;
-             stack_offset += (uint64_t)PAGE_SIZE_4K)
-        {
-            paddr_t paddr = phys_mem_alloc_page();
-            uint64_t vaddr = ELF_USER_STACK_TOP - (uint64_t)ELF_USER_STACK_SIZE + stack_offset;
-
-            if (paddr == 0ULL)
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] stack alloc FAIL\n");
-                return -(int32_t)ENOMEM;
-            }
-
-            if (page_table_map(user_pgd_ptr, vaddr, paddr,
-                               PAGE_PERM_RW, true) != KERNEL_OK)
-            {
-                hal_uart_puts(ELF_UART_BASE, "[ELF] stack map FAIL\n");
-                return -(int32_t)ENOMEM;
-            }
-        }
-    }
+    /* 用户栈：PUD[2] 的 1GB block 已覆盖 0x80000000-0xBFFFFFFF（恒等映射），
+     * 栈地址 0x8FF80000 在此范围内，无需额外映射。 */
 
     /* 创建内核线程（kthread_create 分配内核栈） */
     tid = kthread_create(thread_name,
