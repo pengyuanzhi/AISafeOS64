@@ -615,6 +615,128 @@ void hal_wfe(void);  /* 替代 wfe 指令（scheduler.c 5处、thread.c 2处、s
 - ❌ **禁止 `gets`**：无任何场景可用
 - ❌ **禁止裸指针算术跨边界**：所有指针 + offset 必须验证不越界
 
+## 强制开发规则：多核性能设计（SMP Performance）
+
+**多核系统的核心性能原则：per-CPU 数据优先，尽量无锁，消除 cache 行伪共享。**
+**锁是最后的手段，不是第一选择。**
+
+### 设计优先级（从优到劣）
+
+1. **✅ per-CPU 独占数据（最优）**：每个 CPU 有自己的副本，完全无锁
+2. **✅ per-CPU freelists + 慢速全局回退**：快路径无锁，仅回退路径加锁
+3. **✅ Read-Copy-Update (RCU) / Epoch 回收**：读路径无锁，写路径复制
+4. **✅ 细粒度自旋锁（per-object）**：每个对象独立锁，减少竞争面
+5. **⚠️ 全局自旋锁（最后手段）**：仅用于极冷路径（初始化/配置）
+6. **❌ 全局互斥锁（禁止在内核使用）**：睡眠锁破坏实时性
+
+### per-CPU 数据原则
+
+1. **热点数据必须 per-CPU 化**：
+   - 就绪队列（已实现：`g_scheduler.cpu_queues[cpu_id]`）
+   - 内存分配器 freelist（**kmalloc 应改造**：per-CPU freelist + 全局中央堆）
+   - 定时器队列（已实现：`s_timer_queues[cpu_id]`）
+   - 睡眠队列（已实现：`s_sleep_queues[cpu_id]`）
+   - IPC 消息缓冲池（应改造：per-CPU 缓存）
+   - 中断统计计数器（应改造：per-CPU 计数）
+
+2. **per-CPU 数据本核访问无需锁**：
+   - CPU X 访问自己的 `cpu_queues[X]` 不需要自旋锁
+   - 只有**跨核访问**（负载均衡/工作窃取/迁移）才需要锁
+   - 当前代码的 per-CPU 就绪队列锁是为迁移设计的——本核快路径不应持锁
+
+3. **per-CPU 数据访问宏**：
+   ```c
+   /* 正确模式：本核访问无需锁 */
+   PerCPUReadyQueue_t *my_q = &g_scheduler.cpu_queues[hal_get_cpu_id()];
+   /* 本核 enqueue/dequeue 无需锁（只有远程迁移时加锁） */
+   ```
+
+### 无锁设计模式
+
+1. **单生产者单消费者（SPSC）环形缓冲**：IC2 通道已实现（`kernel/ipc/ic2.c`）
+   - 读指针仅消费者写，写指针仅生产者写
+   - `LOAD-ACQUIRE` / `STORE-RELEASE` 保证可见性（已用 `hal_dmb_ish`）
+
+2. **原子计数器替代锁**：统计/引用计数用 `atomic_inc_u64` / `atomic_dec_u64`
+   - 如 `s_system_ticks` 已用原子递增（多核安全）
+
+3. **generation 号防 ABA**：端点/能力的 generation 已实现
+   - 无锁回收需要 generation（避免 ABA 问题）
+
+### Cache 行对齐（消除伪共享）
+
+**所有 per-CPU 数据结构必须 cache 行对齐（64 字节），防止伪共享（false sharing）。**
+
+1. **per-CPU 数组对齐**：
+   ```c
+   /* 正确：CACHE_ALIGN 确保每个 CPU 的副本在不同 cache 行 */
+   static PerCPUReadyQueue_t CACHE_ALIGN(64) g_cpu_queues[CONFIG_MAX_CPUS];
+   /* 错误：未对齐，相邻 CPU 数据在同一 cache 行 → 伪共享 */
+   static PerCPUReadyQueue_t g_cpu_queues[CONFIG_MAX_CPUS];
+   ```
+
+2. **必须对齐的 per-CPU 数据**：
+   - 就绪队列（已对齐：`CACHE_ALIGN(64)`）
+   - percpu 数据（`s_percpu_data[cpu_id]` 应对齐）
+   - 定时器队列（`s_timer_queues[cpu_id]` 应对齐）
+   - kmalloc per-CPU freelist（改造后须对齐）
+
+3. **热/冷字段分离**：频繁修改的字段与只读字段分到不同 cache 行
+   ```c
+   typedef struct {
+       /* 热字段（频繁修改）—— 独占 cache 行 */
+       volatile uint64_t nr_running CACHE_ALIGN(64);
+       volatile uint64_t ticks;
+       /* 冷字段（少修改）—— 可共享 cache 行 */
+       KThread_t *idle_thread;
+       uint32_t cpu_id;
+   } PerCPUData_t;
+   ```
+
+### 锁的最低必要原则
+
+1. **本核快路径无锁**：调度 enqueue/dequeue（本核）不应持锁
+   - 仅在**远程迁移路径**加锁（迁移是慢路径，可接受锁开销）
+
+2. **锁只保护真正的跨核共享**：
+   - 端点锁：保护 send/receive 跨核交互（正确）
+   - kmalloc 锁：**不应保护全局 freelist**，应改为 per-CPU freelist
+   - CSpace 锁：保护能力表的跨核访问（正确，但高频 CSpace 应考虑 per-CPU 缓存）
+
+3. **锁粒度递进**：
+   - 先用 per-CPU 避免竞争
+   - 竞争仍严重时用 per-CPU 缓存 + 慢速回退
+   - 最后才用全局锁
+
+### kmalloc 多核性能改造方向（当前问题）
+
+当前 kmalloc 用全局锁（`s_kmalloc_state.lock`），所有 CPU 的 kmalloc/kfree 都竞争同一锁。
+
+**正确改造（slub 风格）**：
+```
+per-CPU freelist（快路径，无锁）
+    ↓ 空闲时
+per-NUMA-node partial list（中速路径，细粒度锁）
+    ↓ 仍空闲时
+全局中央堆（慢路径，全局锁）
+```
+
+这是 Linux SLUB 分配器的设计，确保 99% 的分配在 per-CPU freelist 完成（无锁）。
+
+### 验证指标
+
+- **锁竞争次数**：通过锁等待计数器统计（应趋近于 0）
+- **per-CPU 数据命中率**：快路径无锁命中率应 > 99%
+- **cache 行伪共享检测**：使用 `perf c2c` 或 QEMU cache 模拟
+
+### 禁止事项
+
+- ❌ **禁止 per-CPU 数据本核访问加锁**：本核操作自己的队列/freelist 不需要锁
+- ❌ **禁止热点路径用全局锁**：kmalloc/scheduler/IPC 快路径禁止全局锁
+- ❌ **禁止 per-CPU 数组不对齐**：必须 `CACHE_ALIGN(64)`
+- ❌ **禁止频繁修改的字段与只读字段共享 cache 行**
+- ❌ **禁止本核队列操作关中断**（除非有远程迁移并发可能）
+
 ## 注意事项
 
 - 操作系统开发需要特别关注安全性和稳定性
