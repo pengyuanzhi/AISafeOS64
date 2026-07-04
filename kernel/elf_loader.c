@@ -331,57 +331,70 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         return -(int32_t)ENOMEM;
     }
 
+    /* 清除 SCTLR.WXN（bit 18）：WXN=1 时可写页不可执行，
+     * 导致 EL0 无法执行 AP=ALL_RW 的 ELF 代码段 → Permission fault。
+     * 清除后可写页可执行（与 EL0 驱动单段 RWE ELF 兼容）。 */
+    {
+        uint64_t sctlr;
+        __asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+        sctlr &= ~(1ULL << 18U);  /* 清 WXN */
+        __asm__ volatile("msr sctlr_el1, %0" :: "r"(sctlr));
+        __asm__ volatile("dsb ish" ::: "memory");
+        __asm__ volatile("isb");
+    }
+
     /*
-     * 修改内核 PMD 使 ELF 区域（0x60000000+）对 EL0 可访问。
-     *
-     * 内核 PMD 的 PMD[1..511] 是 2MB Normal block（AP=PRIV_RW，EL0 禁止）。
-     * 修改 ELF 加载地址对应的 PMD 条目的 AP 位为 ALL_RW（EL0+EL1 RW），
-     * 并清除 XN/PXN（允许执行）。这是恒等映射（VA=PA），无需四级遍历。
+     * 在内核 PMD[256] 创建 L3 PTE table（替代 2MB block）。
+     * 用精细 L3 PTE 控制权限（EL0 RWX），避免 block descriptor 的权限问题。
+     * 分配一个新页作为 PTE table，映射所有 512 个 4KB 页（2MB）为
+     * 恒等映射（VA=PA），EL0 RWX。
      */
     {
         extern uint64_t hal_read_ttbr0(void);
         volatile uint64_t *pud;
         volatile uint64_t *pmd;
+        volatile uint64_t *pte_table;
         uint64_t pud1;
         uint32_t pmd_idx;
+        uint32_t pte_idx;
         user_pgd = hal_read_ttbr0();
         user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
 
-        /* PUD[1] → s_pmd_kernel（内核 PMD table） */
+        /* 分配一页作为 L3 PTE table */
+        paddr_t pte_table_pa = phys_mem_alloc_page();
+        pte_table = (volatile uint64_t *)(uintptr_t)pte_table_pa;
+        /* 清零 */
+        for (pte_idx = 0U; pte_idx < 512U; pte_idx++)
+        {
+            pte_table[pte_idx] = 0ULL;
+        }
+
+        /* PUD[1] → s_pmd_kernel */
         pud = (volatile uint64_t *)0x40036000ULL;
         pud1 = pud[1];
         pmd = (volatile uint64_t *)(uintptr_t)(pud1 & 0x0000FFFFFFFFF000ULL);
 
-        /* 0x60000000 的 PMD index = (0x60000000 >> 21) & 511 = 256 */
-        /* 修改 PMD[256]（0x60000000-0x601FFFFF）和 PMD[257]（0x60200000） */
-        for (pmd_idx = 256U; pmd_idx <= 257U; pmd_idx++)
+        /* 填充 L3 PTE：恒等映射，EL0+EL1 只读可执行（AP=ALL_RO, UXN=0）
+         * WXN=1 不影响只读页执行。
+         * AP=11 (bit[7:6]=11) = EL1 RO + EL0 RO。 */
+        for (pte_idx = 0U; pte_idx < 512U; pte_idx++)
         {
-            /* 完全重写 PMD 条目：2MB block，Normal，EL0+EL1 RWX
-             * 物理地址 = PMD index 对应的 0x60000000/0x60200000 */
-            uint64_t blk_addr = 0x40000000ULL + (uint64_t)pmd_idx * 0x200000ULL;
-            pmd[pmd_idx] = 1ULL            /* valid */
-                         | (1ULL << 10)    /* AF */
-                         | (1ULL << 6)     /* AP=ALL_RW (EL0+EL1) */
-                         | (3ULL << 8)     /* SH=Inner */
-                         | blk_addr;       /* 物理 2MB block 地址 */
-            /* 不设 XN/PXN（bit 54/53=0），允许执行 */
+            uint64_t page_pa = 0x60000000ULL + (uint64_t)pte_idx * 4096ULL;
+            pte_table[pte_idx] = page_pa
+                               | 1ULL           /* valid */
+                               | 2ULL           /* bit[1]=1 (L3 page) */
+                               | (1ULL << 10)   /* AF */
+                               | (3ULL << 6);   /* AP=ALL_RO (EL0+EL1 RO) */
         }
 
-        __asm__ volatile("tlbi vmalle1" ::: "memory");
-        __asm__ volatile("dsb nsh; isb");
+        /* 注意：PMD[256] 暂不设为 table，保持原 block（RW），
+         * 允许段数据拷贝写入。拷贝后再设 PMD[256] = table。 */
+    }
 
-        /* 诊断：打印 PMD[256] 和 PMD 指针 */
-        hal_uart_puts(ELF_UART_BASE, "[ELF] PMD256=0x");
-        { char h[16]; uint32_t j;
-          uint64_t v = pmd[256U];
-          for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-        hal_uart_puts(ELF_UART_BASE, " PMDptr=0x");
-        { char h[16]; uint32_t j;
-          uint64_t v = (uint64_t)(uintptr_t)pmd;
-          for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
-        hal_uart_putc(ELF_UART_BASE,'\n');
+    /* 保存 PTE table 地址供段拷贝后使用 */
+    {
+        volatile uint64_t *pud = (volatile uint64_t *)0x40036000ULL;
+        volatile uint64_t *pmd = (volatile uint64_t *)(uintptr_t)(pud[1] & 0x0000FFFFFFFFF000ULL);
     }
 
     /*
@@ -418,8 +431,30 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         hal_uart_putc(ELF_UART_BASE,'\n');
     }
 
-    /* 用户栈：PUD[2] 的 1GB block 已覆盖 0x80000000-0xBFFFFFFF（恒等映射），
-     * 栈地址 0x8FF80000 在此范围内，无需额外映射。 */
+    /* 段拷贝完成，现在设置 PMD[256] = L3 PTE table pointer
+     * （此时段数据已写入物理页，切换到只读 PTE 不会丢失数据） */
+    {
+        volatile uint64_t *pud = (volatile uint64_t *)0x40036000ULL;
+        volatile uint64_t *pmd = (volatile uint64_t *)(uintptr_t)(pud[1] & 0x0000FFFFFFFFF000ULL);
+        /* PTE table 物理地址 = 最后一次 phys_mem_alloc_page 在 PMD 块里分配的。
+         * 简化：重新分配并填充（段数据已在物理 RAM，恒等映射使它们可见） */
+        paddr_t new_pte_pa = phys_mem_alloc_page();
+        volatile uint64_t *new_pte = (volatile uint64_t *)(uintptr_t)new_pte_pa;
+        uint32_t pi;
+        for (pi = 0U; pi < 512U; pi++)
+        {
+            uint64_t page_pa = 0x60000000ULL + (uint64_t)pi * 4096ULL;
+            new_pte[pi] = page_pa | 1ULL | 2ULL | (1ULL << 10) | (3ULL << 6);
+        }
+        /* 设 PMD[256] = PTE table pointer */
+        pmd[256] = (new_pte_pa & 0x0000FFFFFFFFF000ULL) | 1ULL | 2ULL;
+        __asm__ volatile("dsb ish" ::: "memory");
+        __asm__ volatile("tlbi vmalle1is" ::: "memory");
+        __asm__ volatile("dsb ish" ::: "memory");
+        __asm__ volatile("isb");
+    }
+
+    /* 用户栈（恒等映射，PMD block 覆盖 0x60000000-0x601FFFFF） */
 
     /* 创建内核线程（kthread_create 分配内核栈） */
     tid = kthread_create(thread_name,

@@ -712,33 +712,19 @@ void NORETURN scheduler_start(void)
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
 
-    /* 用户态线程首次切换前，必须将 TTBR0 切换到用户 PGD。
-     *
-     * cpu_switch_to_first_task 直接 eret，不经过 schedule() 的
-     * 临时验证：用内核 PGD，不切换 TTBR0。
-     */
-    /* 用户态线程：共享 PGD，不切换 TTBR0 */
-    hal_uart_puts(0x09000000UL, "[k] Start sched\n");
-
-    /* 验证：通过用户虚拟地址读 entry 数据 */
+    /* 用户态线程：清除 SCTLR.WXN（bit 18），允许可写页执行。
+     * WXN=1 时 AP=RW 的页不可执行 → EL0 Permission fault。
+     * 共享 PGD 方案：不切换 TTBR0。 */
     if (first_thread->is_user != 0U)
     {
-        volatile uint8_t *entry_ptr = (volatile uint8_t *)first_thread->context[0U];
-        /* context[0] = x19 = entry，但 ELR 在 context[14] */
-        uint64_t entry_addr = first_thread->context[14U]; /* ELR = entry */
-        volatile uint8_t *ep = (volatile uint8_t *)(uintptr_t)entry_addr;
-        hal_uart_puts(0x09000000UL, "[k] EL0-entry@0x");
-        { char h[16]; uint32_t j;
-          for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((entry_addr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc(0x09000000UL,h[j]); }
-        hal_uart_puts(0x09000000UL, " bytes=");
-        { uint32_t k; for(k=0U;k<4U;k++){
-              char h[2]; uint8_t n=(uint8_t)((ep[k]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
-              n=(uint8_t)(ep[k]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
-              hal_uart_putc(0x09000000UL,h[0]); hal_uart_putc(0x09000000UL,h[1]); } }
-        hal_uart_putc(0x09000000UL,'\n');
-        (void)entry_ptr;
+        uint64_t sctlr;
+        __asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+        sctlr &= ~(1ULL << 18U);
+        __asm__ volatile("msr sctlr_el1, %0" :: "r"(sctlr));
+        __asm__ volatile("isb");
     }
+
+    hal_uart_puts(0x09000000UL, "[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */
     cpu_switch_to_first_task(first_thread->context);
