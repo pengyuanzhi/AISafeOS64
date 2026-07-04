@@ -430,6 +430,25 @@ kernel_status_t scheduler_init(void)
 
         idle_thread = &g_scheduler.thread_table[tid];
         g_scheduler.cpu_queues[cpu_id].idle_thread = idle_thread;
+
+        /* kthread_create 在 CPU0 运行，idle 线程被 enqueue 到 CPU0 队列。
+         * 对于非 CPU0 的 idle 线程，从 CPU0 队列摘除（不放入目标队列）。
+         * pick_next 在队列为空时直接用 idle_thread 指针，无需入队。 */
+        if (cpu_id != 0U)
+        {
+            PerCPUReadyQueue_t *cpu0_q = &g_scheduler.cpu_queues[0U];
+
+            /* 无锁操作（此时只有 CPU0 在运行，初始化阶段） */
+            idle_thread->rq_list.prev->next = idle_thread->rq_list.next;
+            idle_thread->rq_list.next->prev = idle_thread->rq_list.prev;
+            idle_thread->rq_list.next = &idle_thread->rq_list;
+            idle_thread->rq_list.prev = &idle_thread->rq_list;
+            if (cpu0_q->nr_running > 0U)
+            {
+                cpu0_q->nr_running--;
+            }
+            /* 位图不需要清零：pick_next 找不到链表元素时会回退到 idle */
+        }
     }
 
     /* 标记初始化完成 */
