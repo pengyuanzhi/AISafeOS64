@@ -2595,6 +2595,12 @@ void kernel_main(void)
         }
     }
 
+    /* 初始化中断子系统（中断描述符表清零 + 标志置位） */
+    {
+        extern kernel_status_t interrupt_subsys_init(void);
+        (void)interrupt_subsys_init();
+    }
+
     /* ---- 第六步：初始化定时器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Timer init\n");
     timer_init();
