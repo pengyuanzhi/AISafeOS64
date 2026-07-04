@@ -377,6 +377,70 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                 return -(int32_t)ENOMEM;
             }
 
+            /* 诊断：page_table_map 后通过 VA 验证映射 */
+            {
+                volatile uint8_t *vp = (volatile uint8_t *)(uintptr_t)vaddr;
+                paddr_t lookup_pa;
+                uint64_t cur_ttbr0;
+                extern kernel_status_t page_table_lookup(page_table_t *pgd, vaddr_t vaddr, paddr_t *paddr);
+                __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(cur_ttbr0));
+                page_table_lookup(user_pgd_ptr, vaddr, &lookup_pa);
+                hal_uart_puts(ELF_UART_BASE, "[ELF] ttbr0=0x");
+                { char h[16]; uint32_t j;
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((cur_ttbr0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, " pgd=0x");
+                { char h[16]; uint32_t j;
+                  uint64_t pgd_v = (uint64_t)(uintptr_t)user_pgd_ptr;
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pgd_v>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                /* 打印 PGD[0] 和 PUD[2] */
+                hal_uart_puts(ELF_UART_BASE, " PGD0=0x");
+                { char h[16]; uint32_t j;
+                  uint64_t *pgd_entries = (uint64_t *)user_pgd_ptr;
+                  uint64_t pgd0 = pgd_entries[0];
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pgd0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                /* PUD[0] 和 PUD[2]（s_pud_ttbr0 在 0x40036000） */
+                hal_uart_puts(ELF_UART_BASE, " PUD0=0x");
+                { char h[16]; uint32_t j;
+                  volatile uint64_t *pud_ptr = (volatile uint64_t *)0x40036000ULL;
+                  uint64_t pud0 = pud_ptr[0];
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pud0>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, " PUD2=0x");
+                { char h[16]; uint32_t j;
+                  volatile uint64_t *pud_ptr = (volatile uint64_t *)0x40036000ULL;
+                  uint64_t pud2 = pud_ptr[2];
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((pud2>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, "[ELF] map vaddr=0x");
+                { char h[16]; uint32_t j;
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((vaddr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, " pa=0x");
+                { char h[16]; uint32_t j;
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((paddr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, " lookup=0x");
+                { char h[16]; uint32_t j;
+                  for(j=0U;j<16U;j++){uint8_t n=(uint8_t)((lookup_pa>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
+                  for(j=0U;j<16U;j++) hal_uart_putc(ELF_UART_BASE,h[j]); }
+                hal_uart_puts(ELF_UART_BASE, " VA[0]=0x");
+                { char h[2]; uint8_t n=(uint8_t)((vp[0]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  n=(uint8_t)(vp[0]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
+                /* 刷新 TLB 后重读 */
+                __asm__ volatile("tlbi vmalle1" ::: "memory");
+                __asm__ volatile("dsb nsh" ::: "memory");
+                __asm__ volatile("isb");
+                hal_uart_puts(ELF_UART_BASE, " VAflush[0]=0x");
+                { char h[2]; uint8_t n=(uint8_t)((vp[0]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  n=(uint8_t)(vp[0]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
+                hal_uart_putc(ELF_UART_BASE,'\n');
+            }
+
             if (page_count < 16U)
             {
                 seg_pa[page_count] = paddr;
