@@ -302,7 +302,7 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
 
         seg_end = segments[i].vaddr + segments[i].length;
 
-        /* 按页分配和映射 */
+        /* 按页分配物理页 */
         for (addr = segments[i].vaddr; addr < seg_end; addr += PAGE_SIZE_4K)
         {
             paddr_t page_pa = phys_mem_alloc_page();
@@ -322,6 +322,21 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
             if (page_table_map(user_pgd, (vaddr_t)addr, page_pa, perm, true) != KERNEL_OK)
             {
                 return -(int32_t)ENOMEM;
+            }
+        }
+
+        /* 通过 vmspace_map 注册 VMA（红黑树跟踪，供缺页处理查询权限） */
+        {
+            uint32_t vma_flags = VMA_FLAG_READ | VMA_FLAG_WRITE | VMA_FLAG_EXEC;
+            vaddr_t mapped = vmspace_map(user_space,
+                                          (vaddr_t)segments[i].vaddr,
+                                          segments[i].length,
+                                          vma_flags,
+                                          VMA_TYPE_CODE,
+                                          0ULL);
+            if (mapped == (vaddr_t)0)
+            {
+                /* VMA 注册失败（非致命，页表映射已成功） */
             }
         }
 
@@ -346,6 +361,13 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         {
             return -(int32_t)ENOMEM;
         }
+        /* 注册栈 VMA（供缺页处理识别栈区域、自动扩展） */
+        (void)vmspace_map(user_space,
+                          (vaddr_t)(ELF_USER_STACK_TOP - PAGE_SIZE_4K),
+                          PAGE_SIZE_4K,
+                          VMA_FLAG_READ | VMA_FLAG_WRITE | VMA_FLAG_STACK,
+                          VMA_TYPE_STACK,
+                          0ULL);
     }
 
     /* 创建内核线程 */

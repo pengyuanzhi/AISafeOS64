@@ -27,6 +27,7 @@
 #include <kernel/page_table.h>
 #include <kernel/phys_mem.h>
 #include <kernel/barrier.h>
+#include <arch/arm64/hal.h>
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/compiler.h>

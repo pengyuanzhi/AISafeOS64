@@ -24,6 +24,7 @@
 #include <kernel/barrier.h>
 #include <kernel/timer.h>
 #include <kernel/virt_phys.h>
+#include <kernel/vmspace.h>
 #include <kernel/ipc_endpoint.h>
 #include <kernel/ipc_types.h>
 #include <kernel/gic.h>
@@ -222,6 +223,26 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
      */
     if (from_el0 != 0U)
     {
+        /* EL0 缺页处理：通过 VMA 查找判断是否是合法地址 */
+        if ((ec == 0x20U) || (ec == 0x21U) ||
+            (ec == 0x24U) || (ec == 0x25U))
+        {
+            /* Instruction/Data Abort：检查 VMA */
+            vm_space_t *space = vmspace_get_current();
+            if (space != NULL)
+            {
+                vma_t *vma = vmspace_find_vma(space, (vaddr_t)far);
+                if (vma != NULL)
+                {
+                    /* 地址在已注册 VMA 范围内：
+                     * 当前实现终止线程（无 demand paging）。
+                     * 后续 demand paging 实现后，此处应按需映射物理页。 */
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                                   "[exception] EL0 fault in VMA region (demand paging TODO)\n");
+                }
+            }
+        }
+
         /* EL0 异常：终止用户线程 */
         hal_uart_puts((uint64_t)QEMU_UART0_BASE,
                        "[exception] EL0 fault → terminating user thread\n");
