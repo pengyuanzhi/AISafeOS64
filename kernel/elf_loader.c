@@ -345,6 +345,15 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
             paddr_t paddr = phys_mem_alloc_page();
             uint64_t vaddr = segments[i].vaddr + offset;
 
+            /* 诊断：打印 alloc 结果 */
+            hal_uart_puts(ELF_UART_BASE, "[ELF] alloc=");
+            {
+                char h[16]; uint32_t j;
+                for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((paddr>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
+                for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
+            }
+            hal_uart_putc(ELF_UART_BASE, '\n');
+
             if (paddr == 0ULL)
             {
                 hal_uart_puts(ELF_UART_BASE, "[ELF] page alloc FAIL\n");

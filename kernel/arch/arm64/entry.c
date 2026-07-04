@@ -2587,9 +2587,19 @@ void kernel_main(void)
         uint64_t pmem_size = 16U * 1024U * 1024U;  /* 16MB */
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init\n");
         ret = phys_mem_init(pmem_base, pmem_size);
-        if (ret != KERNEL_OK)
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init ret=");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)ret);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " base=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)pmem_base);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+        /* 测试 alloc */
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: phys_mem fail\n");
+            extern paddr_t phys_mem_alloc_page(void);
+            paddr_t test_pa = phys_mem_alloc_page();
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] alloc_page=0x");
+            uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)test_pa);
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
         }
     }
 

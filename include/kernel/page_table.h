@@ -89,10 +89,10 @@
 #define PTE_NG              ((uint64_t)1U << 11U)
 
 /** @brief PXN 位（特权执行禁止） */
-#define PTE_PXN             ((uint64_t)1U << 53U)
+#define PTE_PXN             (1ULL << 53U)
 
 /** @brief XN 位（执行禁止） */
-#define PTE_XN              ((uint64_t)1U << 54U)
+#define PTE_XN              (1ULL << 54U)
 
 /* ========================================================================
  * 页表项属性宏（AP[2:1] 访问权限编码）
@@ -156,8 +156,13 @@
 /** @brief 从物理地址和属性构造 PTE */
 #define PTE_MAKE(paddr, attr)    (((paddr) & ~(PAGE_SIZE_4K - 1ULL)) | (attr))
 
-/** @brief 从 PTE 提取物理地址 */
-#define PTE_PADDR(pte)           ((pte) & ~((1ULL << 12U) - 1ULL))
+/** @brief 从 PTE 提取物理地址
+ *
+ * @details ARM64 PTE 中 bit[47:12] 为物理地址（48 位 PA），
+ *          bit[63:48] 和 bit[11:0] 为属性/标志位。
+ *          提取物理地址需清除低 12 位和高 16 位。
+ */
+#define PTE_PADDR(pte)           ((pte) & 0x0000FFFFFFFFF000ULL)
 
 /** @brief 检查 PTE 是否有效 */
 #define PTE_IS_VALID(pte)        (((pte) & PTE_VALID) != 0ULL)
