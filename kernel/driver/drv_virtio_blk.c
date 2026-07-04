@@ -25,6 +25,7 @@
 #include <kernel/ipc_notification.h>
 #include <sched/thread.h>
 #include <hal.h>
+#include <kernel/virt_phys.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -53,11 +54,11 @@ static void blk_dbg_hex(uint64_t value)
 {
     static const char hex[] = "0123456789ABCDEF";
     int32_t i;
-    hal_uart_putc(0x09000000ULL, '0');
-    hal_uart_putc(0x09000000ULL, 'x');
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '0');
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, 'x');
     for (i = 60; i >= 0; i -= 4)
     {
-        hal_uart_putc(0x09000000ULL,
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE,
                       (uint8_t)hex[(value >> (uint32_t)i) & 0xFULL]);
     }
 }
@@ -482,7 +483,7 @@ static void virtq_write_mmio_regs(virtio_blk_priv_t *priv)
     uint64_t desc_addr;
     uint32_t version;
 
-    desc_addr = (uint64_t)(uintptr_t)priv->desc_table;
+    desc_addr = virt_to_phys(priv->desc_table);
 
     /* 选择 queue 0 */
     mmio_write32(priv->mmio_base, VIRTIO_MMIO_QUEUE_SEL, 0U);
@@ -521,8 +522,8 @@ static void virtq_write_mmio_regs(virtio_blk_priv_t *priv)
         uint64_t avail_addr;
         uint64_t used_addr;
 
-        avail_addr = (uint64_t)(uintptr_t)priv->avail_ring;
-        used_addr = (uint64_t)(uintptr_t)priv->used_ring;
+        avail_addr = virt_to_phys(priv->avail_ring);
+        used_addr = virt_to_phys(priv->used_ring);
 
         mmio_write32(priv->mmio_base, VIRTIO_MMIO_QUEUE_DESC_LOW,
                      (uint32_t)(desc_addr & 0xFFFFFFFFU));
@@ -585,14 +586,14 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     desc_resp = virtq_alloc_desc(priv);
 
     /* 描述符 0: 请求头（设备只读） */
-    desc[desc_hdr].addr = (uint64_t)(uintptr_t)&priv->req_buf.hdr;
+    desc[desc_hdr].addr = virt_to_phys(&priv->req_buf.hdr);
     desc[desc_hdr].len = (uint32_t)sizeof(virtio_blk_req_hdr_t);
     desc[desc_hdr].flags = (uint16_t)(VIRTQ_DESC_F_NEXT);
     desc[desc_hdr].next = desc_data;
 
     /* 描述符 1: 数据缓冲区 — 使用 DMA 专用 req_buf.data
      * （读=设备写, 写=设备读） */
-    desc[desc_data].addr = (uint64_t)(uintptr_t)priv->req_buf.data;
+    desc[desc_data].addr = virt_to_phys(priv->req_buf.data);
     desc[desc_data].len = data_len;
     if (req_type == VIRTIO_BLK_T_IN)
     {
@@ -607,7 +608,7 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     desc[desc_data].next = desc_resp;
 
     /* 描述符 2: 响应状态（设备可写） */
-    desc[desc_resp].addr = (uint64_t)(uintptr_t)&priv->req_buf.resp;
+    desc[desc_resp].addr = virt_to_phys(&priv->req_buf.resp);
     desc[desc_resp].len = (uint32_t)sizeof(virtio_blk_resp_t);
     desc[desc_resp].flags = (uint16_t)(VIRTQ_DESC_F_WRITE);
     desc[desc_resp].next = VIRTQ_DESC_INVALID;
@@ -619,49 +620,49 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     priv->req_buf.resp.status = 0xFFU;
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] submit type=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] submit type=");
     blk_dbg_hex((uint64_t)req_type);
-    hal_uart_puts(0x09000000ULL, " sector=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " sector=");
     blk_dbg_hex(sector);
-    hal_uart_puts(0x09000000ULL, " len=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=");
     blk_dbg_hex((uint64_t)data_len);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   desc[");
     blk_dbg_hex((uint64_t)desc_hdr);
-    hal_uart_puts(0x09000000ULL, "] hdr  addr=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "] hdr  addr=");
     blk_dbg_hex(desc[desc_hdr].addr);
-    hal_uart_puts(0x09000000ULL, " len=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=");
     blk_dbg_hex((uint64_t)desc[desc_hdr].len);
-    hal_uart_puts(0x09000000ULL, " fl=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " fl=");
     blk_dbg_hex((uint64_t)desc[desc_hdr].flags);
-    hal_uart_puts(0x09000000ULL, " nxt=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " nxt=");
     blk_dbg_hex((uint64_t)desc[desc_hdr].next);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   desc[");
     blk_dbg_hex((uint64_t)desc_data);
-    hal_uart_puts(0x09000000ULL, "] data addr=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "] data addr=");
     blk_dbg_hex(desc[desc_data].addr);
-    hal_uart_puts(0x09000000ULL, " len=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=");
     blk_dbg_hex((uint64_t)desc[desc_data].len);
-    hal_uart_puts(0x09000000ULL, " fl=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " fl=");
     blk_dbg_hex((uint64_t)desc[desc_data].flags);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    hal_uart_puts(0x09000000ULL, "[BLK]   desc[");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   desc[");
     blk_dbg_hex((uint64_t)desc_resp);
-    hal_uart_puts(0x09000000ULL, "] resp addr=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "] resp addr=");
     blk_dbg_hex(desc[desc_resp].addr);
-    hal_uart_puts(0x09000000ULL, " fl=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " fl=");
     blk_dbg_hex((uint64_t)desc[desc_resp].flags);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    hal_uart_puts(0x09000000ULL, "[BLK]   req_buf=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   req_buf=");
     blk_dbg_hex((uint64_t)(uintptr_t)&priv->req_buf);
-    hal_uart_puts(0x09000000ULL, " desc_tbl=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " desc_tbl=");
     blk_dbg_hex((uint64_t)(uintptr_t)priv->desc_table);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /* DMA 一致性：清理描述符表，使设备可见 */
@@ -690,13 +691,13 @@ static kernel_status_t virtq_submit_request(virtio_blk_priv_t *priv,
     virtio_dsb();
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK]   avail_idx=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   avail_idx=");
     blk_dbg_hex((uint64_t)avail_idx);
-    hal_uart_puts(0x09000000ULL, " entry=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " entry=");
     blk_dbg_hex((uint64_t)desc_hdr);
-    hal_uart_puts(0x09000000ULL, " ring_idx=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ring_idx=");
     blk_dbg_hex((uint64_t)priv->avail_ring->idx);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /* 通知设备（Kick queue 0） */
@@ -777,15 +778,15 @@ static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv)
     {
         /* 通知对象创建失败（例如调度器未就绪），回退到轮询模式 */
 #if CONFIG_DEBUG_VERBOSE
-        hal_uart_puts(0x09000000ULL, "[BLK] fallback to poll\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] fallback to poll\n");
 #endif
         return virtq_poll_completion(priv);
     }
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] wait start notify_id=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] wait start notify_id=");
     blk_dbg_hex((uint64_t)priv->notify_id);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /* 初始化完成标志 */
@@ -796,9 +797,9 @@ static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv)
     if (ret != KERNEL_OK)
     {
 #if CONFIG_DEBUG_VERBOSE
-        hal_uart_puts(0x09000000ULL, "[BLK] wait failed ret=");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] wait failed ret=");
         blk_dbg_hex((uint64_t)ret);
-        hal_uart_puts(0x09000000ULL, "\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
         return ret;
     }
@@ -815,13 +816,13 @@ static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv)
     desc_id = priv->used_ring_entries[used_idx].id;
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] wait done used_idx=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] wait done used_idx=");
     blk_dbg_hex((uint64_t)used_idx);
-    hal_uart_puts(0x09000000ULL, " desc_id=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " desc_id=");
     blk_dbg_hex((uint64_t)desc_id);
-    hal_uart_puts(0x09000000ULL, " triggered=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " triggered=");
     blk_dbg_hex(triggered);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /* 释放描述符链 */
@@ -843,9 +844,9 @@ static kernel_status_t virtq_wait_completion(virtio_blk_priv_t *priv)
     else
     {
 #if CONFIG_DEBUG_VERBOSE
-        hal_uart_puts(0x09000000ULL, "[BLK] resp status=");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] resp status=");
         blk_dbg_hex((uint64_t)priv->req_buf.resp.status);
-        hal_uart_puts(0x09000000ULL, "\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
         /* 错误处理：根据 VirtIO 响应状态返回对应错误码 */
@@ -879,9 +880,9 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     timeout = 0U;
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] poll start last_used=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] poll start last_used=");
     blk_dbg_hex((uint64_t)priv->vq_state.last_used_idx);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /*
@@ -1015,7 +1016,8 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
         uint32_t found = 0U;
         for (slot = 0U; slot < 32U; slot++)
         {
-            uint64_t addr = 0x0A000000ULL + ((uint64_t)slot * 0x200ULL);
+            /* TTBR1 高地址线性映射：物理 0x0A000000 → 虚拟 0xFFFF00000A000000 */
+            uint64_t addr = 0xFFFF00000A000000ULL + ((uint64_t)slot * 0x200ULL);
             uint32_t mg = mmio_read32(addr, 0x000U);
             uint32_t did = mmio_read32(addr, 0x008U);
             if ((mg == VIRTIO_MAGIC) && (did == VIRTIO_BLK_DEVICE_ID))
@@ -1049,7 +1051,7 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     }
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts((uint64_t)0x09000000ULL, "[BLK] probe: OK\n");
+    hal_uart_puts((uint64_t)(uint64_t)QEMU_UART0_BASE, "[BLK] probe: OK\n");
 #endif
 
     /* 步骤 3: VirtIO Legacy 模式初始化序列 */
@@ -1091,14 +1093,14 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     virtq_write_mmio_regs(&s_blk_priv);
 
 #if CONFIG_DEBUG_VERBOSE
-    hal_uart_puts(0x09000000ULL, "[BLK] virtq setup done\n");
-    hal_uart_puts(0x09000000ULL, "[BLK]   desc=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] virtq setup done\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK]   desc=");
     blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.desc_table);
-    hal_uart_puts(0x09000000ULL, " avail=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " avail=");
     blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.avail_ring);
-    hal_uart_puts(0x09000000ULL, " used=");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " used=");
     blk_dbg_hex((uint64_t)(uintptr_t)s_blk_priv.used_ring);
-    hal_uart_puts(0x09000000ULL, "\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 #endif
 
     /* 步骤 5: 特性确认 */

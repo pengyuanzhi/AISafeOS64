@@ -49,7 +49,7 @@ extern void hal_uart_puts(uint64_t base, const char *str);
 extern void hal_uart_putc(uint64_t base, char c);
 
 
-#define QEMU_UART0_BASE  0x09000000UL
+#define QEMU_UART0_BASE  0xFFFF000009000000UL
 
 /* ========================================================================
  * 用户态驱动内存映射支持

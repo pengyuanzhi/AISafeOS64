@@ -12,6 +12,7 @@
 
 #include <kernel/types.h>
 #include <arch/arm64/hal.h>
+#include <kernel/virt_phys.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -47,7 +48,8 @@
 #define VIRTQ_DESC_F_WRITE            (1U << 1U)
 
 #define VIRTIO_MAGIC                  0x74726976U
-#define VIRTIO_MMIO_BASE              0x0A000000ULL
+/* TTBR1 高地址线性映射：物理 0x0A000000 → 虚拟 0xFFFF00000A000000 */
+#define VIRTIO_MMIO_BASE              0xFFFF00000A000000ULL
 #define VIRTIO_MMIO_SLOT_SIZE         0x200ULL
 #define VIRTIO_MMIO_SLOT_COUNT        32U
 
@@ -202,10 +204,10 @@ static int32_t boot_init_device(uint64_t mmio_base)
 
     mmio_write32(mmio_base, VIRTIO_MMIO_QUEUE_NUM, BOOT_QUEUE_SIZE);
 
-    /* Legacy：QUEUE_ALIGN + QUEUE_PFN（整个 vq_mem 的页帧号） */
+    /* Legacy：QUEUE_ALIGN + QUEUE_PFN（整个 vq_mem 的物理地址页帧号） */
     mmio_write32(mmio_base, VIRTIO_MMIO_QUEUE_ALIGN, 4096U);
     mmio_write32(mmio_base, VIRTIO_MMIO_QUEUE_PFN,
-                 (uint32_t)((uint64_t)(uintptr_t)s_vq_mem >> 12U));
+                 (uint32_t)((uint64_t)virt_to_phys(s_vq_mem) >> 12U));
 
     /* DRIVER_OK */
     mmio_write32(mmio_base, VIRTIO_MMIO_STATUS,
@@ -274,17 +276,17 @@ int32_t boot_blk_read_sector(uint64_t sector, void *buf)
     s_resp_status = 0xFFU;
 
     /* 描述符链：[0]req → [1]data(write) → [2]resp(write) */
-    s_desc[0].addr = (uint64_t)(uintptr_t)&s_req;
+    s_desc[0].addr = virt_to_phys(&s_req);
     s_desc[0].len = (uint32_t)sizeof(boot_blk_req_t);
     s_desc[0].flags = VIRTQ_DESC_F_NEXT;
     s_desc[0].next = 1U;
 
-    s_desc[1].addr = (uint64_t)(uintptr_t)s_data_buf;
+    s_desc[1].addr = virt_to_phys(s_data_buf);
     s_desc[1].len = 512U;
     s_desc[1].flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
     s_desc[1].next = 2U;
 
-    s_desc[2].addr = (uint64_t)(uintptr_t)&s_resp_status;
+    s_desc[2].addr = virt_to_phys(&s_resp_status);
     s_desc[2].len = 1U;
     s_desc[2].flags = VIRTQ_DESC_F_WRITE;
     s_desc[2].next = 0U;

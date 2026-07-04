@@ -333,8 +333,12 @@ void hal_sev(void);
 
 /* ========== QEMU UART 基地址 ========== */
 
-/** @brief QEMU virt 平台 PL011 UART0 基地址 */
-#define QEMU_UART0_BASE 0x09000000UL
+/** @brief QEMU virt 平台 PL011 UART0 基地址（TTBR1 高地址线性映射）
+ *
+ * @details 物理地址 0x09000000 经线性映射偏移 KERNEL_VA_OFFSET
+ *          (0xFFFF000000000000) 映射到高地址 0xFFFF000009000000。
+ */
+#define QEMU_UART0_BASE 0xFFFF000009000000UL
 
 /* ========== 定时器接口 ========== */
 

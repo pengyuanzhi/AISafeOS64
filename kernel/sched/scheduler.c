@@ -778,7 +778,7 @@ void NORETURN scheduler_start(void)
         __asm__ volatile("isb");
     }
 
-    hal_uart_puts(0x09000000UL, "[k] Start sched\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */
     cpu_switch_to_first_task(first_thread->context);

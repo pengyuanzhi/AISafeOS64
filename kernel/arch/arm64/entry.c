@@ -1145,8 +1145,7 @@ static thread_id_t create_service_thread(
     thread->user_pgd = user_pgd;
 
     arch_setup_user_thread_context(thread->context,
-                                   (uint64_t)((uintptr_t)entry)
-                                   | CONFIG_KERNEL_VADDR_BASE,
+                                   (uint64_t)((uintptr_t)entry),
                                    0U,
                                    kernel_sp,
                                    user_sp);
@@ -2521,13 +2520,16 @@ void kernel_main(void)
     uint64_t stack_end;
     kernel_status_t ret;
 
-    /* ---- 第一步：初始化 UART 早期输出 ---- */
+    /* ---- 第一步：升级 MMU 页表为精细映射 ----
+     * boot.S 已用粗粒度页表（1GB 块）开启 MMU 并重定位到高地址 VA。
+     * 此时 kernel_main 已在高地址 VA 运行，可正常访问所有符号。
+     * mmu_early_init 重建 4KB 精细权限页表（RX/R--/RW-）并切换 TTBR0 为空。
+     */
+    mmu_early_init();
+
+    /* ---- 第二步：初始化 UART 早期输出（MMU 已开，高地址可访问）---- */
     hal_uart_init((uint64_t)QEMU_UART0_BASE);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
-
-    /* ---- 第二步：启用 MMU（双地址空间 TTBR0/TTBR1） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU...\n");
-    mmu_early_init();
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU ok\n");
 
 #if CONFIG_DEBUG_VERBOSE

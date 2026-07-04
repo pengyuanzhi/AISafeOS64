@@ -201,8 +201,8 @@ elf_error_t elf_loader_get_entry(uint64_t *entry)
 /** @brief 用户栈顶地址（TTBR0 高端，避开 ELF 加载区 0x400000 和 MMIO 区 0x10000000） */
 #define ELF_USER_STACK_TOP   ((uint64_t)0x60100000ULL)
 
-/** @brief 内核 UART 基址（用于加载日志） */
-#define ELF_UART_BASE        ((uint64_t)0x09000000ULL)
+/** @brief 内核 UART 基址（用于加载日志，TTBR1 高地址线性映射） */
+#define ELF_UART_BASE        ((uint64_t)0xFFFF000009000000ULL)
 
 /**
  * @brief 从 ELF 权限标志转换为 page_perm_t

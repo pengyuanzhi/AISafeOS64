@@ -38,6 +38,7 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/compiler.h>
+#include <kernel/virt_phys.h>
 #include "hal.h"
 
 /* ========================================================================
@@ -88,8 +89,10 @@ static inline uint64_t *walk_table(page_table_t *table, uint32_t index)
 static inline page_table_t *pte_to_table(uint64_t pte)
 {
     paddr_t paddr = PTE_PADDR(pte);
-    /* 恒等映射阶段，物理地址直接作为虚拟地址使用 */
-    return (page_table_t *)(uintptr_t)paddr;
+    /* TTBR1 高地址线性映射：物理地址需经 phys_to_virt 转换为可访问的虚拟地址。
+     * （在恒等映射启动阶段同样可用：phys_to_virt 给出线性映射 VA，
+     *  而 mmu_early_init 同时建立该线性映射，故始终可访问。） */
+    return phys_to_virt(paddr);
 }
 
 /**
@@ -223,7 +226,7 @@ kernel_status_t page_table_subsys_init(void)
     }
 
     /* 将内核 PGD 物理地址写入 TTBR1_EL1 */
-    paddr_t pgd_paddr = (paddr_t)(uintptr_t)kernel_pgd;
+    paddr_t pgd_paddr = virt_to_phys(kernel_pgd);
     hal_write_ttbr1((uint64_t)pgd_paddr);
 
     return KERNEL_OK;
@@ -251,7 +254,8 @@ page_table_t *page_table_alloc(void)
         return NULL;
     }
 
-    page_table_t *table = (page_table_t *)(uintptr_t)paddr;
+    /* TTBR1 高地址线性映射：物理地址经 phys_to_virt 转换为虚拟地址 */
+    page_table_t *table = phys_to_virt(paddr);
 
     /* 清零所有 512 个条目（4KB = 512 * 8 字节） */
     (void)memset(table->entries, 0, sizeof(table->entries));
@@ -276,7 +280,7 @@ void page_table_free(page_table_t *table)
         return;
     }
 
-    paddr_t paddr = (paddr_t)(uintptr_t)table;
+    paddr_t paddr = virt_to_phys(table);
     phys_mem_free_page(paddr);
 }
 
@@ -339,7 +343,7 @@ kernel_status_t page_table_map(page_table_t *pgd,
         {
             return -(int32_t)ENOMEM;
         }
-        paddr_t pud_paddr = (paddr_t)(uintptr_t)pud;
+        paddr_t pud_paddr = virt_to_phys(pud);
         *entry0 = (pud_paddr & ~(PAGE_SIZE_4K - 1ULL)) | PTE_VALID | PTE_TABLE;
         barrier();
     }
@@ -369,7 +373,7 @@ kernel_status_t page_table_map(page_table_t *pgd,
         {
             return -(int32_t)ENOMEM;
         }
-        paddr_t pmd_paddr = (paddr_t)(uintptr_t)pmd;
+        paddr_t pmd_paddr = virt_to_phys(pmd);
         *entry1 = (pmd_paddr & ~(PAGE_SIZE_4K - 1ULL)) | PTE_VALID | PTE_TABLE;
         barrier();
     }
@@ -399,7 +403,7 @@ kernel_status_t page_table_map(page_table_t *pgd,
         {
             return -(int32_t)ENOMEM;
         }
-        paddr_t pte_paddr = (paddr_t)(uintptr_t)pte_table;
+        paddr_t pte_paddr = virt_to_phys(pte_table);
         *entry2 = (pte_paddr & ~(PAGE_SIZE_4K - 1ULL)) | PTE_VALID | PTE_TABLE;
         barrier();
     }
@@ -433,15 +437,15 @@ kernel_status_t page_table_map(page_table_t *pgd,
     /* 诊断：打印 attr */
     if (is_user)
     {
-        hal_uart_puts(0x09000000UL, "[PT] perm=0x");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[PT] perm=0x");
         { char h[16]; uint32_t j;
           for (j=0U;j<16U;j++){uint8_t n=(uint8_t)((perm>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc(0x09000000UL,h[j]); }
-        hal_uart_puts(0x09000000UL, " attr=0x");
+          for(j=0U;j<16U;j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE,h[j]); }
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " attr=0x");
         { char h[16]; uint32_t j;
           for (j=0U;j<16U;j++){uint8_t n=(uint8_t)((attr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc(0x09000000UL,h[j]); }
-        hal_uart_putc(0x09000000UL,'\n');
+          for(j=0U;j<16U;j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE,h[j]); }
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE,'\n');
     }
 
     /* 写入 L3 PTE：物理地址 | 属性 */
@@ -456,20 +460,20 @@ kernel_status_t page_table_map(page_table_t *pgd,
         if (readback_paddr != (paddr & ~(PAGE_SIZE_4K - 1ULL)))
         {
             /* PTE 物理地址被污染 */
-            hal_uart_puts(0x09000000UL, "[PT] CORRUPT! wrote=0x");
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[PT] CORRUPT! wrote=0x");
             {
                 char h[16]; uint32_t j;
                 uint64_t v = PTE_MAKE(paddr, attr);
                 for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
-                for (j = 0U; j < 16U; j++) hal_uart_putc(0x09000000UL, h[j]);
+                for (j = 0U; j < 16U; j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE, h[j]);
             }
-            hal_uart_puts(0x09000000UL, " read=0x");
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, " read=0x");
             {
                 char h[16]; uint32_t j;
                 for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((readback>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
-                for (j = 0U; j < 16U; j++) hal_uart_putc(0x09000000UL, h[j]);
+                for (j = 0U; j < 16U; j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE, h[j]);
             }
-            hal_uart_putc(0x09000000UL, '\n');
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
         }
     }
 
@@ -796,7 +800,7 @@ kernel_status_t page_table_map_block(page_table_t *pgd,
         {
             return -(int32_t)ENOMEM;
         }
-        paddr_t pud_paddr = (paddr_t)(uintptr_t)pud;
+        paddr_t pud_paddr = virt_to_phys(pud);
         *entry0 = (pud_paddr & ~(PAGE_SIZE_4K - 1ULL)) | PTE_VALID | PTE_TABLE;
         barrier();
     }
@@ -826,7 +830,7 @@ kernel_status_t page_table_map_block(page_table_t *pgd,
         {
             return -(int32_t)ENOMEM;
         }
-        paddr_t pmd_paddr = (paddr_t)(uintptr_t)pmd;
+        paddr_t pmd_paddr = virt_to_phys(pmd);
         *entry1 = (pmd_paddr & ~(PAGE_SIZE_4K - 1ULL)) | PTE_VALID | PTE_TABLE;
         barrier();
     }

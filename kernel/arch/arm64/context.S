@@ -229,10 +229,9 @@ arch_setup_user_thread_context:
     /* context[10] = FP(x29) = 0 */
     str     xzr, [x0, #80]
 
-    /* context[11] = LR(x30) = user_entry_trampoline (TTBR1 高地址) */
+    /* context[11] = LR(x30) = user_entry_trampoline (TTBR1 高地址)
+     * 链接脚本将内核链接到高地址 VA，故 ldr = 直接得到高地址。 */
     ldr     x9, =user_entry_trampoline
-    orr     x9, x9, #0x8000000000000000
-    orr     x9, x9, #0x7FFF000000000000
     str     x9, [x0, #88]
 
     /* context[12] = SP = kernel_sp（内核栈） */
@@ -243,8 +242,6 @@ arch_setup_user_thread_context:
 
     /* context[14] = ELR_EL1 = user_entry_trampoline (TTBR1 高地址) */
     ldr     x9, =user_entry_trampoline
-    orr     x9, x9, #0x8000000000000000
-    orr     x9, x9, #0x7FFF000000000000
     str     x9, [x0, #112]
 
     ret
@@ -332,45 +329,30 @@ user_entry_trampoline:
  * ======================================================================== */
 
 /* ========================================================================
- * mmu_switch_to_user_asm(user_pgd_paddr)
+ * mmu_switch_to_user_asm(user_pgd_paddr, ctx)
  *
  * x0 = 用户 PGD 物理地址
+ * x1 = 线程 context 指针（uint64_t *）
  *
- * 通过 TTBR1 高地址执行 TTBR0 切换，避免切换后内核代码（低地址）
- * 取指失败。
+ * 内核已运行在 TTBR1 高地址空间，直接切换 TTBR0 到用户 PGD，
+ * 然后恢复 context 并 eret 进入用户线程。
  *
- * 原理：内核代码同时映射在 TTBR0（恒等映射）和 TTBR1（高地址镜像）。
- * 切换 TTBR0 到用户 PGD 后，低地址用新 TTBR0 翻译，但高地址仍用
- * TTBR1 翻译（不变）。因此在高地址执行 TTBR0 切换是安全的。
+ * 原理：内核代码通过 TTBR1 高地址映射执行。切换 TTBR0 不影响
+ * TTBR1 的内核映射，故切换后继续在内核高地址取指是安全的。
  * ======================================================================== */
     .section .text
     .global mmu_switch_to_user_asm
     .type mmu_switch_to_user_asm, @function
 mmu_switch_to_user_asm:
-    /*
-     * 接收两个参数：
-     * x0 = 用户 PGD 物理地址
-     * x1 = 线程 context 指针（uint64_t *）
-     *
-     * 跳到 TTBR1 高地址，切换 TTBR0，TLB 失效，
-     * 然后直接恢复 context 并 eret（不返回低地址）。
-     * 这样 TLB 失效后不需要再从低地址取指。
-     */
-    adr     x9, .Lswitch_high
-    orr     x9, x9, #0x8000000000000000
-    orr     x9, x9, #0x7FFF000000000000
-    br      x9
-
-.Lswitch_high:
-    /* 在 TTBR1 高地址运行 */
-    msr     ttbr0_el1, x0         /* 切换 TTBR0 到用户 PGD */
+    /* 切换 TTBR0 到用户 PGD */
+    msr     ttbr0_el1, x0
     isb
     /* 不失效 TLB：eret 后硬件自动用新 TTBR0 翻译。
      * tlbi vmalle1 会清空 TTBR1 的内核映射 TLB，导致 eret 后
      * trampoline 取指需要重新遍历页表，在 QEMU 上失败。 */
 
     /*
-     * 直接执行 cpu_switch_to_first_task 的逻辑（内联）
+     * 恢复 context（cpu_switch_to_first_task 的逻辑，内联）
      * x1 = context 指针
      * 恢复 callee-saved 寄存器，设置 SPSR/ELR，eret
      */

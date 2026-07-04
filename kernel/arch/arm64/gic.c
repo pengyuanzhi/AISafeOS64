@@ -15,9 +15,9 @@
  *          - SGI 软件中断发送
  *          - 中断确认（ACK）和结束（EOI）
  *
- *          QEMU virt 平台地址映射（GICv2）：
- *          - GICD (Distributor):  0x08000000
- *          - GICC (CPU Interface): 0x08010000
+ *          QEMU virt 平台地址映射（GICv2，TTBR1 高地址线性映射）：
+ *          - GICD (Distributor):  0xFFFF000008000000  (物理 0x08000000)
+ *          - GICC (CPU Interface): 0xFFFF000008010000 (物理 0x08010000)
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: IN-001~006
@@ -145,21 +145,23 @@
  * @def GICD_BASE_ADDR
  * @brief GICv2 Distributor 基地址
  *
- * @details QEMU virt 平台 GICv2 Distributor 地址为 0x08000000。
- *          实际项目应通过设备树或平台配置获取。
+ * @details QEMU virt 平台 GICv2 Distributor 物理地址 0x08000000，
+ *          经 TTBR1 高地址线性映射偏移 0xFFFF000000000000 后为
+ *          0xFFFF000008000000。实际项目应通过设备树或平台配置获取。
  */
 #ifndef GICD_BASE_ADDR
-#define GICD_BASE_ADDR        ((uintptr_t)0x08000000U)
+#define GICD_BASE_ADDR        ((uintptr_t)0xFFFF000008000000ULL)
 #endif
 
 /**
  * @def GICC_BASE_ADDR
  * @brief GICv2 CPU Interface 基地址
  *
- * @details QEMU virt 平台 GICv2 CPU Interface 地址为 0x08010000。
+ * @details QEMU virt 平台 GICv2 CPU Interface 物理地址 0x08010000，
+ *          经高地址线性映射后为 0xFFFF000008010000。
  */
 #ifndef GICC_BASE_ADDR
-#define GICC_BASE_ADDR        ((uintptr_t)0x08010000U)
+#define GICC_BASE_ADDR        ((uintptr_t)0xFFFF000008010000ULL)
 #endif
 
 /* ========================================================================
