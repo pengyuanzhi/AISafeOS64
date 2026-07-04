@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "hal.h"
+#include "edf.h"
 
 /* 前向声明: ARM64 上下文切换接口（定义在 context.S） */
 extern void context_switch(uint64_t *prev_ctx, uint64_t *next_ctx);
@@ -360,6 +361,9 @@ kernel_status_t scheduler_init(void)
     /* 初始化栈保护子系统（金丝雀检测） */
     (void)stack_guard_subsys_init();
 
+    /* 初始化 EDF 实时调度子系统 */
+    (void)edf_init();
+
     /* 初始化线程栈 Slab 缓存 */
     ret = thread_stack_slab_init();
     if (ret != KERNEL_OK)
@@ -542,6 +546,16 @@ KThread_t *scheduler_pick_next(void)
     cpu_id = hal_get_cpu_id();
     cpu_q = &g_scheduler.cpu_queues[cpu_id];
 
+    /* EDF 实时调度：优先选择截止时间最早的线程（仅 CPU0） */
+    if (cpu_id == 0U)
+    {
+        next = edf_pick_next();
+        if (next != NULL)
+        {
+            return next;
+        }
+    }
+
     /* O(1) 查找最高优先级 */
     highest_prio = bitmap256_find_highest(&cpu_q->bitmap);
 
@@ -678,6 +692,12 @@ void scheduler_tick(void)
     if (current == NULL)
     {
         return;
+    }
+
+    /* EDF 实时调度：周期作业释放 + 截止时间检查（仅 CPU0） */
+    if (cpu_id == 0U)
+    {
+        edf_tick();
     }
 
     /* 仅对 RR 策略的线程处理时间片 */

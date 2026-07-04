@@ -28,9 +28,13 @@
 #include <stdint.h>
 #include <string.h>
 #include "hal.h"
+#include <kernel/timer.h>
 
-/* HAL 接口 */
-extern tick_t hal_get_tick_count(void);
+/* 获取当前系统 tick 数 */
+static tick_t edf_get_tick_now(void)
+{
+    return timer_get_ticks();
+}
 
 /* ========================================================================
  * EDF 就绪队列实例
@@ -168,7 +172,7 @@ kernel_status_t edf_set_params(thread_id_t tid, const edf_params_t *params)
     /* 设置初始绝对截止时间 */
     if (dest->absolute_deadline == EDF_DEADLINE_INVALID)
     {
-        tick_t now = hal_get_tick_count();
+        tick_t now = edf_get_tick_now();
         dest->absolute_deadline = now + dest->relative_deadline;
         dest->next_release = now + dest->period;
     }
@@ -307,7 +311,7 @@ void edf_tick(void)
         return;
     }
 
-    now = hal_get_tick_count();
+    now = edf_get_tick_now();
 
     /* 更新运行时间 */
     params->runtime++;
@@ -375,7 +379,7 @@ void edf_job_release(KThread_t *thread)
         return;
     }
 
-    now = hal_get_tick_count();
+    now = edf_get_tick_now();
 
     /* 设置新周期的截止时间 */
     params->absolute_deadline = now + params->relative_deadline;
