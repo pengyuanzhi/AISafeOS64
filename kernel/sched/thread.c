@@ -179,6 +179,9 @@ thread_id_t kthread_create(const char *name,
                          ? (CONFIG_TIME_SLICE_MS * CONFIG_TICK_RATE_HZ / 1000U)
                          : 0U;
     thread->time_slice_reload = thread->time_slice;
+    /* P1-5：重置亲和性掩码。线程槽位可被复用（DEAD→新建），
+     * 若不清零会继承前一关联线程的亲和性约束。0 表示无约束。 */
+    thread->affinity_mask = 0U;
     thread->rq_list.next = &thread->rq_list;
     thread->rq_list.prev = &thread->rq_list;
     thread->edf_node.next = &thread->edf_node;

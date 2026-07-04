@@ -304,6 +304,23 @@ void smp_tick_check_balance(uint32_t cpu_id);
 void smp_sched_tick(uint32_t cpu_id);
 
 /**
+ * @brief idle 线程执行的负载均衡与工作窃取
+ *
+ * @details 由各 CPU 的 idle 线程在低功耗循环中调用。
+ *          - 若本 CPU 的负载均衡请求标志置位，执行一次负载均衡并清标志；
+ *          - 若本 CPU 就绪队列为空，尝试工作窃取。
+ *
+ *          P1-3 修复后负载均衡不再在定时器中断中执行，由 idle 线程在本
+ *          函数中执行。idle 上下文开中断、可被高优先级线程抢占，
+ *          不会延长中断关闭时间。
+ *
+ * @param cpu_id 当前 CPU 编号
+ *
+ * @note 对应需求: MP-004
+ */
+void smp_idle_balance(uint32_t cpu_id);
+
+/**
  * @brief 将线程从一个 CPU 迁移到另一个 CPU
  *
  * @details 显式迁移，检查亲和性约束后执行迁移并发送 IPI 通知。

@@ -132,17 +132,21 @@ int32_t slab_destroy(slab_cache_t *cache)
  */
 void* slab_alloc(slab_cache_t *cache)
 {
+    slab_node_t *current;
     slab_node_t *node;
+    slab_node_t *last;
+    uint32_t irq_state;
 
     if (cache == NULL)
     {
         return NULL;
     }
 
-    ticket_lock_acquire(&cache->lock);
+    /* 持锁扫描已有 slab 节点，查找空闲对象。
+     * 使用 irqsave 版本：slab 分配可能在中断/系统调用路径被调用。 */
+    irq_state = ticket_lock_acquire_irqsave(&cache->lock);
 
-    /* 查找空闲对象 */
-    slab_node_t *current = cache->slabs;
+    current = cache->slabs;
     while (current != NULL)
     {
         for (uint32_t i = 0U; i < SLAB_MAX_OBJ; i++)
@@ -151,30 +155,59 @@ void* slab_alloc(slab_cache_t *cache)
             {
                 current->used[i] = 1;
                 cache->alloc_count++;
-                ticket_lock_release(&cache->lock);
+                ticket_lock_release_irqrestore(&cache->lock, irq_state);
                 return current->objects[i];
             }
         }
         current = current->next;
     }
 
-    /* 创建新的 Slab 节点 */
+    /* 所有节点已满，需要分配新节点。
+     * 关键：禁止在持 cache->lock 时调用 kmalloc（kmalloc 内部另持全局锁，
+     * 持锁分配会违反"持锁禁止 kmalloc"且可能死锁）。
+     * 因此先释放 cache->lock，再 kmalloc。 */
+    ticket_lock_release_irqrestore(&cache->lock, irq_state);
+
     node = (slab_node_t *)kmalloc(sizeof(slab_node_t));
     if (node == NULL)
     {
-        ticket_lock_release(&cache->lock);
         return NULL;
     }
 
     (void)memset(node, 0, sizeof(slab_node_t));
 
+    /* 重新获取锁后挂入链表。
+     * 因释放过锁，期间其它 CPU 可能已分配新节点并腾出空闲槽，
+     * 故挂入后再次扫描一遍：优先复用已有空闲槽，避免无谓扩张。 */
+    irq_state = ticket_lock_acquire_irqsave(&cache->lock);
+
+    current = cache->slabs;
+    while (current != NULL)
+    {
+        for (uint32_t i = 0U; i < SLAB_MAX_OBJ; i++)
+        {
+            if (current->used[i] == 0)
+            {
+                current->used[i] = 1;
+                cache->alloc_count++;
+                ticket_lock_release_irqrestore(&cache->lock, irq_state);
+
+                /* 不再需要预分配的节点，释放 */
+                kfree(node);
+                return current->objects[i];
+            }
+        }
+        current = current->next;
+    }
+
+    /* 仍无空闲槽，把新节点挂到链表尾部 */
     if (cache->slabs == NULL)
     {
         cache->slabs = node;
     }
     else
     {
-        slab_node_t *last = cache->slabs;
+        last = cache->slabs;
         while (last->next != NULL)
         {
             last = last->next;
@@ -186,7 +219,7 @@ void* slab_alloc(slab_cache_t *cache)
     node->used[0] = 1;
     cache->alloc_count++;
 
-    ticket_lock_release(&cache->lock);
+    ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
     return node->objects[0];
 }
@@ -197,13 +230,15 @@ void* slab_alloc(slab_cache_t *cache)
 int32_t slab_free(slab_cache_t *cache, void *ptr)
 {
     slab_node_t *current;
+    uint32_t irq_state;
 
     if (cache == NULL || ptr == NULL)
     {
         return -EINVAL;
     }
 
-    ticket_lock_acquire(&cache->lock);
+    /* irqsave 版本：与 slab_alloc 保持一致，允许在中断路径调用 */
+    irq_state = ticket_lock_acquire_irqsave(&cache->lock);
 
     /* 查找对象并释放 */
     current = cache->slabs;
@@ -215,14 +250,14 @@ int32_t slab_free(slab_cache_t *cache, void *ptr)
             {
                 current->used[i] = 0;
                 cache->alloc_count--;
-                ticket_lock_release(&cache->lock);
+                ticket_lock_release_irqrestore(&cache->lock, irq_state);
                 return KERNEL_OK;
             }
         }
         current = current->next;
     }
 
-    ticket_lock_release(&cache->lock);
+    ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
     return -ENOSYS; /* 对象未找到 */
 }
@@ -233,15 +268,16 @@ int32_t slab_free(slab_cache_t *cache, void *ptr)
 size_t slab_get_alloc_count(slab_cache_t *cache)
 {
     size_t count;
+    uint32_t irq_state;
 
     if (cache == NULL)
     {
         return 0;
     }
 
-    ticket_lock_acquire(&cache->lock);
+    irq_state = ticket_lock_acquire_irqsave(&cache->lock);
     count = cache->alloc_count;
-    ticket_lock_release(&cache->lock);
+    ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
     return count;
 }

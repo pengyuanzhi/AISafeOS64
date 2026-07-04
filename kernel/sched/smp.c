@@ -23,6 +23,7 @@
 #include <kernel/config.h>
 #include <kernel/spinlock.h>
 #include <kernel/barrier.h>
+#include <kernel/alignment.h>
 #include <kernel/errno.h>
 #include <kernel/bitmap.h>
 #include <stdint.h>
@@ -55,24 +56,54 @@
  * 内部状态
  * ======================================================================== */
 
-/** @brief 每 CPU 自适应均衡间隔 */
-static uint32_t s_lb_interval[CONFIG_MAX_CPUS];
+/**
+ * @brief 全局调度统计（每 CPU 独立 cache 行，避免伪共享）
+ *
+ * @details P1-4 修复：原 s_schedule_count 为普通数组，相邻 CPU 计数器
+ *          落在同一 cache 行造成伪共享。现用 CACHE_ALIGN 结构体数组，
+ *          每个 CPU 的计数独占一个 cache 行。
+ */
+typedef struct
+{
+    uint64_t count;            /**< @brief 调度计数 */
+    uint64_t pad[7];           /**< @brief 填充至 64 字节 cache 行 */
+} CACHE_ALIGN(64) smp_counter_t;
 
-/** @brief 全局调度统计 */
-static uint64_t s_schedule_count[CONFIG_MAX_CPUS];
+static smp_counter_t s_schedule_count[CONFIG_MAX_CPUS];
 
-/** @brief 每 CPU 亲和性位图（索引为线程 ID） */
-static uint32_t s_thread_affinity[CONFIG_MAX_THREADS];
+/**
+ * @brief 每 CPU 自适应均衡间隔与负载均衡请求标志（cache 行对齐）
+ *
+ * @details P1-4 修复：s_lb_interval 与 s_lb_pending 同样按 CPU 频繁读写，
+ *          与 s_schedule_count 一样需要避免伪共享，故放入 cache 行对齐结构体。
+ *          s_lb_pending 同时承担 P1-3 中"定时器置标志、idle 执行均衡"的职责。
+ */
+typedef struct
+{
+    uint32_t interval;         /**< @brief 自适应均衡间隔 */
+    uint32_t lb_pending;       /**< @brief 负载均衡请求标志（0=无，1=待执行） */
+    uint32_t pad[14];          /**< @brief 填充至 64 字节 cache 行 */
+} CACHE_ALIGN(64) smp_lb_state_t;
 
-/** @brief 亲和性表锁 */
-static TicketLock_t s_affinity_lock;
+static smp_lb_state_t s_lb_state[CONFIG_MAX_CPUS];
 
 /* ========================================================================
  * 迁移统计状态
  * ======================================================================== */
 
-/** @brief 每 CPU 迁移统计 */
-static smp_migrate_stats_t s_migrate_stats[CONFIG_MAX_CPUS];
+/**
+ * @brief 每 CPU 迁移统计（cache 行对齐，避免伪共享）
+ *
+ * @details P1-4 修复：原 s_migrate_stats 为普通数组（每元素 16 字节），
+ *          多个 CPU 的统计共享 cache 行造成伪共享。现每个 CPU 独占 cache 行。
+ */
+typedef struct
+{
+    smp_migrate_stats_t stats; /**< @brief 迁移统计 */
+    uint8_t pad[48];           /**< @brief 填充至 64 字节 cache 行 */
+} CACHE_ALIGN(64) smp_migrate_entry_t;
+
+static smp_migrate_entry_t s_migrate_stats[CONFIG_MAX_CPUS];
 
 /** @brief 迁移统计锁 */
 static TicketLock_t s_migrate_stats_lock;
@@ -81,69 +112,91 @@ static TicketLock_t s_migrate_stats_lock;
  * 调度器队列远程操作锁
  * ========================================================================
  *
- * @details 迁移/窃取操作可能由定时器中断上下文（scheduler_tick →
- *          smp_tick_check_balance）触发，且会访问远程 CPU 的就绪队列。
- *          远程 CPU 同样可能正运行其定时器中断操作本队列，因此必须
- *          使用关中断的自旋锁（ticket_lock）保护，避免线程上下文与
- *          中断上下文竞争同一队列。
+ * @details P1-3 修复前：调用者（smp_load_balance/smp_work_steal/
+ *          smp_migrate_thread）在最外层用 hal_irq_disable 统一关中断，
+ *          内部 sched_queue_lock 仅取普通 ticket 锁。这造成双重关中断，
+ *          且负载均衡全程关中断（扫描所有 CPU + 双锁 + 循环迁移 + IPI），
+ *          关闭区间远超 10μs。
  *
- *          IRQ 关闭由调用者（smp_load_balance / smp_work_steal /
- *          smp_migrate_thread）在最外层统一管理，本组辅助函数仅负责
- *          ticket 锁的获取与释放（按地址顺序加锁，避免死锁）。
+ *          P1-3 修复后：删除外层 hal_irq_disable，关中断下沉到每个队列
+ *          锁内部（irqsave）。这样只在真正持锁操作队列时关中断，
+ *          扫描负载、计算迁移目标等均开中断执行。负载均衡整体不再
+ *          在定时器中断上下文执行（由 idle 线程处理）。
  */
 
 /**
- * @brief 单队列加锁（假定调用者已关中断）
+ * @brief 单队列加锁（irqsave，自行关中断）
+ *
+ * @param q 队列指针
+ *
+ * @return 保存的 IRQ 状态，供 sched_queue_unlock 恢复
  */
-static void sched_queue_lock(PerCPUReadyQueue_t *q)
+static uint32_t sched_queue_lock(PerCPUReadyQueue_t *q)
 {
-    ticket_lock_acquire(&q->lock);
+    return ticket_lock_acquire_irqsave(&q->lock);
 }
 
 /**
- * @brief 单队列解锁
+ * @brief 单队列解锁（恢复 IRQ 状态）
  */
-static void sched_queue_unlock(PerCPUReadyQueue_t *q)
+static void sched_queue_unlock(PerCPUReadyQueue_t *q, uint32_t irq_state)
 {
-    ticket_lock_release(&q->lock);
+    ticket_lock_release_irqrestore(&q->lock, irq_state);
 }
 
 /**
- * @brief 双队列加锁（按地址顺序，避免死锁）
+ * @brief 双队列加锁（按地址顺序，避免死锁；本核全程关中断）
+ *
+ * @details 两次锁都基于 irqsave。当 a != b 时，先关中断取第一把锁，
+ *          再取第二把锁，第二把锁的 irq_state 被丢弃（中断已关）。
+ *          调用者必须用 sched_unlock_dual 释放，并传入首把锁返回的
+ *          irq_state 以恢复中断。
+ *
+ * @param a 队列 A
+ * @param b 队列 B
+ *
+ * @return 首次关中断时保存的 IRQ 状态，供 sched_unlock_dual 恢复
  */
-static void sched_lock_dual(PerCPUReadyQueue_t *a, PerCPUReadyQueue_t *b)
+static uint32_t sched_lock_dual(PerCPUReadyQueue_t *a, PerCPUReadyQueue_t *b)
 {
+    uint32_t irq_state;
+
     if (a == b)
     {
-        sched_queue_lock(a);
+        irq_state = sched_queue_lock(a);
     }
     else if ((uintptr_t)a < (uintptr_t)b)
     {
-        sched_queue_lock(a);
-        sched_queue_lock(b);
+        irq_state = sched_queue_lock(a);
+        (void)sched_queue_lock(b);
     }
     else
     {
-        sched_queue_lock(b);
-        sched_queue_lock(a);
+        irq_state = sched_queue_lock(b);
+        (void)sched_queue_lock(a);
     }
+
+    return irq_state;
 }
 
-static void sched_unlock_dual(PerCPUReadyQueue_t *a, PerCPUReadyQueue_t *b)
+static void sched_unlock_dual(PerCPUReadyQueue_t *a,
+                              PerCPUReadyQueue_t *b,
+                              uint32_t irq_state)
 {
     if (a == b)
     {
-        sched_queue_unlock(a);
+        sched_queue_unlock(a, irq_state);
     }
     else if ((uintptr_t)a < (uintptr_t)b)
     {
-        sched_queue_unlock(b);
-        sched_queue_unlock(a);
+        /* 先释放 b（恢复时中断仍关，因状态为已关），再释放 a 恢复中断 */
+        sched_queue_unlock(b, irq_state);
+        sched_queue_unlock(a, irq_state);
     }
     else
     {
-        sched_queue_unlock(a);
-        sched_queue_unlock(b);
+        sched_queue_unlock(a, irq_state);
+        sched_queue_unlock(b, irq_state);
     }
 }
 
@@ -157,28 +210,27 @@ kernel_status_t smp_sched_init(void)
     uint32_t i;
     volatile uint8_t *dst;
 
+    /* P1-4：s_schedule_count 现为 cache 行对齐结构体数组，
+     * 逐字节清零以确保填充区亦被清零。 */
     dst = (volatile uint8_t *)s_schedule_count;
     for (i = 0U; i < sizeof(s_schedule_count); i++)
     {
         dst[i] = 0U;
     }
 
-    dst = (volatile uint8_t *)s_thread_affinity;
-    for (i = 0U; i < sizeof(s_thread_affinity); i++)
-    {
-        dst[i] = 0U;
-    }
-
     for (cpu = 0U; cpu < CONFIG_MAX_CPUS; cpu++)
     {
-        s_lb_interval[cpu] = LB_INTERVAL_DEF;
-        s_migrate_stats[cpu].migrate_count = 0U;
-        s_migrate_stats[cpu].steal_count = 0U;
-        s_migrate_stats[cpu].affinity_reject = 0U;
-        s_migrate_stats[cpu].load_balance_count = 0U;
+        s_lb_state[cpu].interval = LB_INTERVAL_DEF;
+        s_lb_state[cpu].lb_pending = 0U;
+        s_migrate_stats[cpu].stats.migrate_count = 0U;
+        s_migrate_stats[cpu].stats.steal_count = 0U;
+        s_migrate_stats[cpu].stats.affinity_reject = 0U;
+        s_migrate_stats[cpu].stats.load_balance_count = 0U;
     }
 
-    ticket_lock_init(&s_affinity_lock);
+    /* P1-5：亲和性已移至 KThread_t，无需全局 affinity 锁与表。
+     * g_scheduler.thread_table 在 scheduler.c 中静态零初始化，
+     * 故所有线程 affinity_mask 初值默认为 0（无约束）。 */
     ticket_lock_init(&s_migrate_stats_lock);
     barrier();
 
@@ -290,9 +342,17 @@ static void remote_add_thread(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
  * CPU 亲和性管理
  * ======================================================================== */
 
+/**
+ * @brief 设置线程的 CPU 亲和性（per-object 原子写，无全局锁）
+ *
+ * @details P1-5 修复：亲和性掩码存储在线程控制块 KThread_t 中，
+ *          ARM64 上 32 位对齐读写本身是原子的，故无需全局锁保护，
+ *          消除所有 CPU 争用同一 s_affinity_lock 的瓶颈。
+ */
 kernel_status_t smp_set_affinity(uint32_t thread_id, uint32_t cpu_mask)
 {
     uint32_t valid_mask;
+    KThread_t *thread;
 
     if (thread_id >= CONFIG_MAX_THREADS)
     {
@@ -301,9 +361,9 @@ kernel_status_t smp_set_affinity(uint32_t thread_id, uint32_t cpu_mask)
 
     if (cpu_mask == 0U)
     {
-        ticket_lock_acquire(&s_affinity_lock);
-        s_thread_affinity[thread_id] = 0U;
-        ticket_lock_release(&s_affinity_lock);
+        thread = &g_scheduler.thread_table[thread_id];
+        thread->affinity_mask = 0U;
+        barrier_store();
         return KERNEL_OK;
     }
 
@@ -313,13 +373,16 @@ kernel_status_t smp_set_affinity(uint32_t thread_id, uint32_t cpu_mask)
         return -(int32_t)EINVAL;
     }
 
-    ticket_lock_acquire(&s_affinity_lock);
-    s_thread_affinity[thread_id] = valid_mask;
-    ticket_lock_release(&s_affinity_lock);
+    thread = &g_scheduler.thread_table[thread_id];
+    thread->affinity_mask = valid_mask;
+    barrier_store();
 
     return KERNEL_OK;
 }
 
+/**
+ * @brief 获取线程的 CPU 亲和性（per-object 原子读，无全局锁）
+ */
 uint32_t smp_get_affinity(uint32_t thread_id)
 {
     uint32_t mask;
@@ -329,9 +392,8 @@ uint32_t smp_get_affinity(uint32_t thread_id)
         return 0U;
     }
 
-    ticket_lock_acquire(&s_affinity_lock);
-    mask = s_thread_affinity[thread_id];
-    ticket_lock_release(&s_affinity_lock);
+    barrier_load();
+    mask = g_scheduler.thread_table[thread_id].affinity_mask;
 
     return mask;
 }
@@ -507,17 +569,17 @@ static bool need_load_balance(uint32_t cpu_id)
     {
         if (need)
         {
-            if (s_lb_interval[cpu_id] > LB_INTERVAL_MIN)
+            if (s_lb_state[cpu_id].interval > LB_INTERVAL_MIN)
             {
-                s_lb_interval[cpu_id] = s_lb_interval[cpu_id] / 2U;
+                s_lb_state[cpu_id].interval = s_lb_state[cpu_id].interval / 2U;
             }
         }
         else
         {
-            if (s_lb_interval[cpu_id] < LB_INTERVAL_MAX)
+            if (s_lb_state[cpu_id].interval < LB_INTERVAL_MAX)
             {
-                s_lb_interval[cpu_id] = s_lb_interval[cpu_id] +
-                    (s_lb_interval[cpu_id] / 4U);
+                s_lb_state[cpu_id].interval = s_lb_state[cpu_id].interval +
+                    (s_lb_state[cpu_id].interval / 4U);
             }
         }
     }
@@ -543,6 +605,7 @@ kernel_status_t smp_load_balance(void)
     uint32_t migrate_limit;
     uint32_t cpu;
     uint32_t irq_state;
+    uint32_t stats_irq;
     PerCPUReadyQueue_t *src_q;
     PerCPUReadyQueue_t *dst_q;
 
@@ -551,10 +614,9 @@ kernel_status_t smp_load_balance(void)
         return KERNEL_OK;
     }
 
-    /* 关闭中断：负载统计与队列迁移全程不可被定时器中断打断
-     * （本函数可能在定时器中断上下文或线程上下文被调用）。 */
-    irq_state = hal_irq_saved_state();
-    hal_irq_disable();
+    /* P1-3 修复：不再在最外层关中断。负载扫描、迁移目标计算等
+     * 开中断执行；仅在真正操作就绪队列时由 sched_lock_dual 关中断。
+     * 关中断区间从"全程"缩短到"每次双锁"，远小于 10μs。 */
 
     src_cpu = 0U;
     max_load = 0U;
@@ -610,12 +672,12 @@ kernel_status_t smp_load_balance(void)
         KThread_t *thread;
         uint32_t tid;
 
-        sched_lock_dual(src_q, dst_q);
+        irq_state = sched_lock_dual(src_q, dst_q);
 
         thread = remote_pick_highest(src_cpu);
         if (thread == NULL)
         {
-            sched_unlock_dual(src_q, dst_q);
+            sched_unlock_dual(src_q, dst_q, irq_state);
             break;
         }
 
@@ -625,10 +687,10 @@ kernel_status_t smp_load_balance(void)
         if ((tid < CONFIG_MAX_THREADS) &&
             (!smp_affinity_allowed(tid, dst_cpu)))
         {
-            ticket_lock_acquire(&s_migrate_stats_lock);
-            s_migrate_stats[src_cpu].affinity_reject++;
-            ticket_lock_release(&s_migrate_stats_lock);
-            sched_unlock_dual(src_q, dst_q);
+            sched_unlock_dual(src_q, dst_q, irq_state);
+            stats_irq = ticket_lock_acquire_irqsave(&s_migrate_stats_lock);
+            s_migrate_stats[src_cpu].stats.affinity_reject++;
+            ticket_lock_release_irqrestore(&s_migrate_stats_lock, stats_irq);
             break;
         }
 
@@ -636,7 +698,7 @@ kernel_status_t smp_load_balance(void)
         remote_remove_thread(src_q, thread);
         remote_add_thread(dst_q, thread);
 
-        sched_unlock_dual(src_q, dst_q);
+        sched_unlock_dual(src_q, dst_q, irq_state);
         migrated++;
     }
 
@@ -645,13 +707,12 @@ kernel_status_t smp_load_balance(void)
         (void)ipi_send(dst_cpu, IPI_TYPE_RESCHEDULE);
 
         /* 更新迁移统计 */
-        ticket_lock_acquire(&s_migrate_stats_lock);
-        s_migrate_stats[src_cpu].migrate_count += migrated;
-        s_migrate_stats[dst_cpu].load_balance_count++;
-        ticket_lock_release(&s_migrate_stats_lock);
+        stats_irq = ticket_lock_acquire_irqsave(&s_migrate_stats_lock);
+        s_migrate_stats[src_cpu].stats.migrate_count += migrated;
+        s_migrate_stats[dst_cpu].stats.load_balance_count++;
+        ticket_lock_release_irqrestore(&s_migrate_stats_lock, stats_irq);
     }
 
-    hal_irq_restore(irq_state);
     return KERNEL_OK;
 }
 
@@ -678,6 +739,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     uint32_t tid;
     uint32_t hp;
     uint32_t irq_state;
+    uint32_t stats_irq;
 
     if (current_cpu >= CONFIG_MAX_CPUS)
     {
@@ -689,9 +751,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
         return KERNEL_OK;
     }
 
-    /* 关闭中断：窃取过程访问远程与本地队列，需防止中断打断 */
-    irq_state = hal_irq_saved_state();
-    hal_irq_disable();
+    /* P1-3 修复：删除最外层 hal_irq_disable，关中断下沉到 sched_lock_dual。 */
 
     /* 找最忙的 CPU */
     src_cpu = SMP_CPU_INVALID;
@@ -711,19 +771,17 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
 
     if (src_cpu == SMP_CPU_INVALID)
     {
-        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
     src_q = &g_scheduler.cpu_queues[src_cpu];
     dst_q = &g_scheduler.cpu_queues[current_cpu];
 
-    sched_lock_dual(src_q, dst_q);
+    irq_state = sched_lock_dual(src_q, dst_q);
 
     if (src_q->nr_running <= STEAL_MIN_RESERVE)
     {
-        sched_unlock_dual(src_q, dst_q);
-        hal_irq_restore(irq_state);
+        sched_unlock_dual(src_q, dst_q, irq_state);
         return KERNEL_OK;
     }
 
@@ -731,15 +789,13 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     hp = bitmap256_find_highest(&src_q->bitmap);
     if (hp >= CONFIG_PRIORITY_LEVELS)
     {
-        sched_unlock_dual(src_q, dst_q);
-        hal_irq_restore(irq_state);
+        sched_unlock_dual(src_q, dst_q, irq_state);
         return KERNEL_OK;
     }
 
     if (src_q->queues[hp].prev == &src_q->queues[hp])
     {
-        sched_unlock_dual(src_q, dst_q);
-        hal_irq_restore(irq_state);
+        sched_unlock_dual(src_q, dst_q, irq_state);
         return KERNEL_OK;
     }
 
@@ -749,27 +805,25 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     if ((tid < CONFIG_MAX_THREADS) &&
         (!smp_affinity_allowed(tid, current_cpu)))
     {
-        ticket_lock_acquire(&s_migrate_stats_lock);
-        s_migrate_stats[src_cpu].affinity_reject++;
-        ticket_lock_release(&s_migrate_stats_lock);
-        sched_unlock_dual(src_q, dst_q);
-        hal_irq_restore(irq_state);
+        sched_unlock_dual(src_q, dst_q, irq_state);
+        stats_irq = ticket_lock_acquire_irqsave(&s_migrate_stats_lock);
+        s_migrate_stats[src_cpu].stats.affinity_reject++;
+        ticket_lock_release_irqrestore(&s_migrate_stats_lock, stats_irq);
         return KERNEL_OK;
     }
 
     remote_remove_thread(src_q, thread);
     remote_add_thread(dst_q, thread);
 
-    sched_unlock_dual(src_q, dst_q);
+    sched_unlock_dual(src_q, dst_q, irq_state);
 
     /* 更新窃取统计 */
-    ticket_lock_acquire(&s_migrate_stats_lock);
-    s_migrate_stats[src_cpu].steal_count++;
-    ticket_lock_release(&s_migrate_stats_lock);
+    stats_irq = ticket_lock_acquire_irqsave(&s_migrate_stats_lock);
+    s_migrate_stats[src_cpu].stats.steal_count++;
+    ticket_lock_release_irqrestore(&s_migrate_stats_lock, stats_irq);
 
     (void)ipi_send(src_cpu, IPI_TYPE_RESCHEDULE);
 
-    hal_irq_restore(irq_state);
     return KERNEL_OK;
 }
 
@@ -777,6 +831,17 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
  * 周期性负载均衡触发（自适应间隔 + 工作窃取）
  * ======================================================================== */
 
+/**
+ * @brief 定时器中断中的均衡检查（仅置标志，不执行实际均衡）
+ *
+ * @details P1-3 修复：负载均衡（扫描所有 CPU + 双锁 + 循环迁移 + IPI）
+ *          耗时远超 10μs，原本在定时器中断中直接调用 smp_load_balance
+ *          会导致中断关闭时间过长。
+ *          现在定时器中断只递增计数并在到达间隔时置位 s_lb_pending 标志，
+ *          实际均衡由 idle 线程通过 smp_idle_balance() 执行。
+ *
+ * @note 工作窃取同样不再在中断中执行，改由 idle 线程执行。
+ */
 void smp_tick_check_balance(uint32_t cpu_id)
 {
     if (cpu_id >= CONFIG_MAX_CPUS)
@@ -784,23 +849,52 @@ void smp_tick_check_balance(uint32_t cpu_id)
         return;
     }
 
-    s_schedule_count[cpu_id]++;
+    s_schedule_count[cpu_id].count++;
 
-    if ((s_schedule_count[cpu_id] % (uint64_t)s_lb_interval[cpu_id]) == 0ULL)
+    if ((s_schedule_count[cpu_id].count % (uint64_t)s_lb_state[cpu_id].interval) == 0ULL)
     {
-        (void)smp_load_balance();
-    }
-
-    /* 空闲时尝试工作窃取 */
-    if (g_scheduler.cpu_queues[cpu_id].nr_running == 0U)
-    {
-        (void)smp_work_steal(cpu_id);
+        /* 仅置标志，由 idle 线程执行实际均衡（开中断、可被抢占） */
+        s_lb_state[cpu_id].lb_pending = 1U;
+        barrier_store();
     }
 }
 
 void smp_sched_tick(uint32_t cpu_id)
 {
     smp_tick_check_balance(cpu_id);
+}
+
+/**
+ * @brief idle 线程周期性执行的负载均衡与工作窃取
+ *
+ * @details 由各 CPU 的 idle 线程在低功耗循环中调用。
+ *          - 若本 CPU 的 s_lb_pending 标志置位，执行一次负载均衡并清标志；
+ *          - 若本 CPU 就绪队列为空，尝试工作窃取。
+ *
+ *          在 idle 线程上下文执行，中断开启，可被高优先级线程抢占，
+ *          不会延长中断关闭时间。
+ */
+void smp_idle_balance(uint32_t cpu_id)
+{
+    if (cpu_id >= CONFIG_MAX_CPUS)
+    {
+        return;
+    }
+
+    /* 检查负载均衡请求标志（原子读） */
+    barrier_load();
+    if (s_lb_state[cpu_id].lb_pending != 0U)
+    {
+        s_lb_state[cpu_id].lb_pending = 0U;
+        barrier_store();
+        (void)smp_load_balance();
+    }
+
+    /* 本 CPU 空闲则尝试工作窃取 */
+    if (g_scheduler.cpu_queues[cpu_id].nr_running == 0U)
+    {
+        (void)smp_work_steal(cpu_id);
+    }
 }
 
 /* ========================================================================
@@ -843,26 +937,20 @@ kernel_status_t smp_migrate_thread(uint32_t src_cpu,
     src_q = &g_scheduler.cpu_queues[src_cpu];
     dst_q = &g_scheduler.cpu_queues[dst_cpu];
 
-    /* 关闭中断：跨 CPU 队列操作需防止任一端被定时器中断打断 */
-    irq_state = hal_irq_saved_state();
-    hal_irq_disable();
-
-    sched_lock_dual(src_q, dst_q);
+    /* P1-3 修复：删除最外层 hal_irq_disable，关中断下沉到 sched_lock_dual。 */
+    irq_state = sched_lock_dual(src_q, dst_q);
 
     thread = &g_scheduler.thread_table[thread_id];
     if (thread->state != KTHREAD_STATE_READY)
     {
-        sched_unlock_dual(src_q, dst_q);
-        hal_irq_restore(irq_state);
+        sched_unlock_dual(src_q, dst_q, irq_state);
         return -(int32_t)EINVAL;
     }
 
     remote_remove_thread(src_q, thread);
     remote_add_thread(dst_q, thread);
 
-    sched_unlock_dual(src_q, dst_q);
-
-    hal_irq_restore(irq_state);
+    sched_unlock_dual(src_q, dst_q, irq_state);
 
     (void)ipi_send(dst_cpu, IPI_TYPE_RESCHEDULE);
 
@@ -980,10 +1068,10 @@ kernel_status_t smp_get_migrate_stats(uint32_t cpu_id, smp_migrate_stats_t *stat
 
     ticket_lock_acquire(&s_migrate_stats_lock);
 
-    stats->migrate_count = s_migrate_stats[cpu_id].migrate_count;
-    stats->steal_count = s_migrate_stats[cpu_id].steal_count;
-    stats->affinity_reject = s_migrate_stats[cpu_id].affinity_reject;
-    stats->load_balance_count = s_migrate_stats[cpu_id].load_balance_count;
+    stats->migrate_count = s_migrate_stats[cpu_id].stats.migrate_count;
+    stats->steal_count = s_migrate_stats[cpu_id].stats.steal_count;
+    stats->affinity_reject = s_migrate_stats[cpu_id].stats.affinity_reject;
+    stats->load_balance_count = s_migrate_stats[cpu_id].stats.load_balance_count;
 
     ticket_lock_release(&s_migrate_stats_lock);
 

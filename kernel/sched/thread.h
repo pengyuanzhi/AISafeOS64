@@ -123,6 +123,8 @@ typedef struct KThread
     KThreadPolicy_t policy; /**< @brief 调度策略 */
     uint32_t time_slice;   /**< @brief 剩余时间片 */
     uint32_t time_slice_reload; /**< @brief 时间片重载值 */
+    uint32_t affinity_mask; /**< @brief CPU 亲和性位掩码（0=无约束；ARM64 上 32 位原子读写） */
+    uint32_t _affinity_pad; /**< @brief 填充，保持后续字段自然对齐 */
     struct list_head rq_list;  /**< @brief 就绪队列链表节点（仅供位图调度器使用） */
     struct list_head edf_node; /**< @brief EDF 就绪队列链表节点（独立于 rq_list） */
     struct list_head sleep_node; /**< @brief 睡眠队列链表节点 */

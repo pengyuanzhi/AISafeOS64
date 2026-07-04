@@ -334,7 +334,10 @@ static vaddr_t stack_alloc(uint32_t size)
  */
 static void idle_task_entry(void *arg)
 {
+    uint32_t cpu_id;
+
     (void)arg;
+    cpu_id = hal_get_cpu_id();
 
     for (;;)
     {
@@ -345,6 +348,10 @@ static void idle_task_entry(void *arg)
             schedule();
             continue;
         }
+
+        /* P1-3：在 idle 上下文执行负载均衡与工作窃取。
+         * 定时器中断仅置标志，实际迁移在此处完成（开中断、可抢占）。 */
+        smp_idle_balance(cpu_id);
 
         hal_wfe();
     }

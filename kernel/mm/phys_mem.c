@@ -302,6 +302,7 @@ paddr_t phys_mem_alloc_pages(uint32_t order)
     paddr_t result_addr = INVALID_PADDR;
     uint32_t current_order;
     uint32_t nr_pages;
+    uint32_t irq_state;
     page_frame_t *frame;
     struct list_head *node;
 
@@ -311,8 +312,8 @@ paddr_t phys_mem_alloc_pages(uint32_t order)
         return INVALID_PADDR;
     }
 
-    /* 获取 buddy 锁 */
-    ticket_lock_acquire(&s_buddy.lock);
+    /* 获取 buddy 锁（关中断，因本函数可能在中断/系统调用路径被重入） */
+    irq_state = ticket_lock_acquire_irqsave(&s_buddy.lock);
 
     /* 从请求阶数开始，向上查找第一个有空闲块的阶 */
     current_order = order;
@@ -329,7 +330,7 @@ paddr_t phys_mem_alloc_pages(uint32_t order)
     /* 未找到足够大的空闲块 */
     if (current_order > MAX_ORDER)
     {
-        ticket_lock_release(&s_buddy.lock);
+        ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
         return INVALID_PADDR;
     }
 
@@ -390,8 +391,8 @@ paddr_t phys_mem_alloc_pages(uint32_t order)
 
     result_addr = frame->phys_addr;
 
-    /* 释放 buddy 锁 */
-    ticket_lock_release(&s_buddy.lock);
+    /* 释放 buddy 锁（恢复中断） */
+    ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
 
     return result_addr;
 }
@@ -421,6 +422,7 @@ void phys_mem_free_pages(paddr_t paddr, uint32_t order)
 {
     uint32_t index;
     uint32_t nr_pages;
+    uint32_t irq_state;
     page_frame_t *frame;
 
     /* 参数检查 */
@@ -434,14 +436,14 @@ void phys_mem_free_pages(paddr_t paddr, uint32_t order)
         return;
     }
 
-    /* 获取 buddy 锁 */
-    ticket_lock_acquire(&s_buddy.lock);
+    /* 获取 buddy 锁（关中断，因本函数可能在中断/系统调用路径被重入） */
+    irq_state = ticket_lock_acquire_irqsave(&s_buddy.lock);
 
     /* 获取页帧描述符 */
     index = phys_to_index(paddr);
     if (index >= s_frame_count)
     {
-        ticket_lock_release(&s_buddy.lock);
+        ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
         return;
     }
 
@@ -450,7 +452,7 @@ void phys_mem_free_pages(paddr_t paddr, uint32_t order)
     /* 状态检查：必须为已分配状态 */
     if (frame->state != PAGE_ALLOCATED)
     {
-        ticket_lock_release(&s_buddy.lock);
+        ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
         return;
     }
 
@@ -464,7 +466,7 @@ void phys_mem_free_pages(paddr_t paddr, uint32_t order)
     if (frame->ref_count > (uint32_t)0U)
     {
         barrier();
-        ticket_lock_release(&s_buddy.lock);
+        ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
         return;
     }
 
@@ -561,8 +563,8 @@ void phys_mem_free_pages(paddr_t paddr, uint32_t order)
     /* 确保状态修改对其他核可见 */
     barrier();
 
-    /* 释放 buddy 锁 */
-    ticket_lock_release(&s_buddy.lock);
+    /* 释放 buddy 锁（恢复中断） */
+    ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
 }
 
 /**
@@ -622,15 +624,17 @@ page_frame_t *phys_mem_get_frame(paddr_t paddr)
  */
 void phys_mem_get_stats(phys_mem_stats_t *stats)
 {
+    uint32_t irq_state;
+
     if (stats == NULL)
     {
         return;
     }
 
-    /* 在锁保护下复制统计信息 */
-    ticket_lock_acquire(&s_buddy.lock);
+    /* 在锁保护下复制统计信息（关中断，本函数可能在中断路径被调用） */
+    irq_state = ticket_lock_acquire_irqsave(&s_buddy.lock);
     (void)memcpy(stats, &s_stats, sizeof(phys_mem_stats_t));
-    ticket_lock_release(&s_buddy.lock);
+    ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
 }
 
 /**
@@ -652,6 +656,7 @@ kernel_status_t phys_mem_reserve(paddr_t base, uint64_t size)
     uint32_t index;
     uint32_t start_index;
     uint32_t end_index;
+    uint32_t irq_state;
 
     /* 参数检查 */
     if (size == (uint64_t)0U)
@@ -683,8 +688,8 @@ kernel_status_t phys_mem_reserve(paddr_t base, uint64_t size)
     start_index = phys_to_index(base);
     end_index = phys_to_index(end_addr);
 
-    /* 获取 buddy 锁 */
-    ticket_lock_acquire(&s_buddy.lock);
+    /* 获取 buddy 锁（关中断，因本函数可能在持锁/中断路径被重入） */
+    irq_state = ticket_lock_acquire_irqsave(&s_buddy.lock);
 
     for (index = start_index; index < end_index; index++)
     {
@@ -731,8 +736,8 @@ kernel_status_t phys_mem_reserve(paddr_t base, uint64_t size)
         }
     }
 
-    /* 释放 buddy 锁 */
-    ticket_lock_release(&s_buddy.lock);
+    /* 释放 buddy 锁（恢复中断） */
+    ticket_lock_release_irqrestore(&s_buddy.lock, irq_state);
 
     return KERNEL_OK;
 }
