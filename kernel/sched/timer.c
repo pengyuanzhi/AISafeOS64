@@ -48,6 +48,22 @@ extern void scheduler_tick(void);
 /** @brief 定时器 ISTATUS 位（正在触发） */
 #define CNTP_CTL_ISTATUS   (1ULL << 2U)
 
+/**
+ * @brief 单次中断最多处理的软件定时器回调数
+ *
+ * @details 限制回调泛滥，避免单次中断超出实时性预算。
+ *          超出的定时器将在下一次中断继续处理（队列已按到期时间有序）。
+ */
+#define TIMER_IRQ_MAX_CALLBACKS  8U
+
+/**
+ * @brief 单次中断最多唤醒的睡眠线程数
+ *
+ * @details 限制唤醒扫描的最坏情况指令数（WCET）。每次唤醒操作简单且必须及时，
+ *          但仍设上限以保护中断预算。剩余线程将在下一次中断唤醒。
+ */
+#define TIMER_IRQ_MAX_WAKEUPS    16U
+
 /* ========================================================================
  * 全局定时器状态
  * ======================================================================== */
@@ -97,6 +113,86 @@ static TicketLock_t s_sleep_locks[CONFIG_MAX_CPUS];
 /* ========================================================================
  * 内部辅助函数
  * ======================================================================== */
+
+/**
+ * @brief 按 expire_tick 升序将定时器插入队列
+ *
+ * @details 遍历队列，找到第一个 expire_tick 大于新定时器的节点，
+ *          插入到其前面。这样中断处理只需检查队首即可，WCET 可控。
+ *
+ * @param queue      队列头（哨兵）
+ * @param timer      待插入的定时器
+ * @param expire_tick 过期时刻（绝对 tick）
+ */
+static void timer_queue_insert_ordered(struct list_head *queue,
+                                        SoftwareTimer_t *timer,
+                                        tick_t expire_tick)
+{
+    struct list_head *pos;
+
+    /* 遍历队列找到第一个 expire_tick > 新定时器的位置 */
+    for (pos = queue->next; pos != queue; pos = pos->next)
+    {
+        SoftwareTimer_t *cur = container_of(pos, SoftwareTimer_t, node);
+        if (cur->expire_tick > expire_tick)
+        {
+            break;
+        }
+    }
+
+    /* 插入到 pos 之前 */
+    timer->node.next = pos;
+    timer->node.prev = pos->prev;
+    pos->prev->next = &timer->node;
+    pos->prev = &timer->node;
+}
+
+/**
+ * @brief 从双向链表中安全移除节点
+ *
+ * @details 将节点从链表中摘除并自指（next/prev 指向自身），
+ *          表示不在任何队列中。
+ *
+ * @param node 待移除的节点
+ */
+static void list_remove_self(struct list_head *node)
+{
+    node->prev->next = node->next;
+    node->next->prev = node->prev;
+    node->next = node;
+    node->prev = node;
+}
+
+/**
+ * @brief 按 wakeup_tick 升序将睡眠线程插入队列
+ *
+ * @details 与软件定时器队列一致，睡眠队列也按到期时刻升序排列，
+ *          使中断只需检查队首即可完成唤醒扫描，WCET 可控。
+ *
+ * @param queue     队列头（哨兵）
+ * @param thread    待插入的线程
+ * @param wakeup_tick 唤醒时刻（绝对 tick）
+ */
+static void sleep_queue_insert_ordered(struct list_head *queue,
+                                        struct KThread *thread,
+                                        tick_t wakeup_tick)
+{
+    struct list_head *pos;
+
+    for (pos = queue->next; pos != queue; pos = pos->next)
+    {
+        struct KThread *cur = container_of(pos, struct KThread, sleep_node);
+        if (cur->wakeup_tick > wakeup_tick)
+        {
+            break;
+        }
+    }
+
+    thread->sleep_node.next = pos;
+    thread->sleep_node.prev = pos->prev;
+    pos->prev->next = &thread->sleep_node;
+    pos->prev = &thread->sleep_node;
+}
 
 /**
  * @brief 获取每个 tick 对应的计数器周期数
@@ -243,6 +339,9 @@ void timer_interrupt_handler(void)
     struct list_head *timer_queue;
     struct list_head *sleep_queue;
     tick_t current_ticks;
+    uint32_t irq_state;
+    uint32_t timer_count;
+    uint32_t wakeup_count;
 
     /* 递增系统滴答（原子操作，多核安全） */
     (void)atomic_inc_u64((volatile uint64_t *)&s_system_ticks);
@@ -250,13 +349,11 @@ void timer_interrupt_handler(void)
 
     cpu_id = hal_get_cpu_id();
 
-    /* 每 CONFIG_TICK_RATE_HZ 个 tick（约 1 秒）打印一次 CPU 心跳 */
-    if ((current_ticks % (uint64_t)CONFIG_TICK_RATE_HZ) == 0ULL)
-    {
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '[');
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, (char)('0' + (int32_t)cpu_id));
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, ']');
-    }
+    /*
+     * 注意：不要在硬中断上下文中执行任何 UART 输出。
+     * UART 写入是毫秒级阻塞 IO，会严重破坏实时性预算（50μs）。
+     * 心跳统计可在线程上下文（idle / 统计线程）中执行。
+     */
 
     /* 设置下一次比较值 */
     timer_set_next_compare();
@@ -265,83 +362,84 @@ void timer_interrupt_handler(void)
      * 每 CPU 独立处理软件定时器、睡眠唤醒、调度器 tick。
      * per-CPU 队列（s_timer_queues/s_sleep_queues）+ 独立锁保证 SMP 安全。
      * scheduler_tick() 内部按 cpu_id 获取 per-CPU 就绪队列。
+     *
+     * 实时性保护：
+     *  - 使用 irqsave 锁，避免中断嵌套导致死锁；
+     *  - 队列按到期时间有序，中断只需检查队首；
+     *  - 限制单次中断处理的回调数与唤醒数，保证 WCET 可控；
+     *    超出的项留在队列中，下一次中断继续处理。
      */
     {
         timer_queue = &s_timer_queues[cpu_id];
         sleep_queue = &s_sleep_queues[cpu_id];
 
-        /* 处理软件定时器（加锁保护） */
-        ticket_lock_acquire(&s_timer_locks[cpu_id]);
-        while (timer_queue->next != timer_queue)
+        /* 处理软件定时器（irqsave 锁保护 + 数量上限） */
+        irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
+        timer_count = 0U;
+        while ((timer_queue->next != timer_queue) &&
+               (timer_count < TIMER_IRQ_MAX_CALLBACKS))
         {
             SoftwareTimer_t *timer = container_of(timer_queue->next,
                                                    SoftwareTimer_t, node);
 
-            if (timer->expire_tick <= current_ticks)
-            {
-                /* 从队列中移除 */
-                timer->node.prev->next = timer->node.next;
-                timer->node.next->prev = timer->node.prev;
-                timer->node.next = &timer->node;
-                timer->node.prev = &timer->node;
-
-                timer->state = TIMER_STATE_CALLBACK;
-
-                /* 执行回调 */
-                if (timer->callback != NULL)
-                {
-                    timer->callback(timer->callback_arg);
-                }
-
-                /* 如果是周期定时器，重新入队 */
-                if (timer->interval > 0ULL)
-                {
-                    timer->expire_tick += timer->interval;
-                    timer->state = TIMER_STATE_ACTIVE;
-
-                    /* 重新插入到队列头部 */
-                    timer->node.next = timer_queue->next;
-                    timer->node.prev = timer_queue;
-                    timer_queue->next->prev = &timer->node;
-                    timer_queue->next = &timer->node;
-                }
-                else
-                {
-                    timer->state = TIMER_STATE_EXPIRED;
-                }
-            }
-            else
+            /* 队列按 expire_tick 升序，队首未到期则无需继续 */
+            if (timer->expire_tick > current_ticks)
             {
                 break;
             }
-        }
-        ticket_lock_release(&s_timer_locks[cpu_id]);
 
-        /* 处理睡眠线程唤醒（加锁保护） */
-        ticket_lock_acquire(&s_sleep_locks[cpu_id]);
-        while (sleep_queue->next != sleep_queue)
+            /* 从队列中移除 */
+            list_remove_self(&timer->node);
+            timer->state = TIMER_STATE_CALLBACK;
+
+            /* 执行回调（仍持有锁以保护队列一致性） */
+            if (timer->callback != NULL)
+            {
+                timer->callback(timer->callback_arg);
+            }
+
+            /* 如果是周期定时器，按新 expire_tick 有序重新入队 */
+            if (timer->interval > 0ULL)
+            {
+                timer->expire_tick += timer->interval;
+                timer->state = TIMER_STATE_ACTIVE;
+                timer_queue_insert_ordered(timer_queue, timer,
+                                            timer->expire_tick);
+            }
+            else
+            {
+                timer->state = TIMER_STATE_EXPIRED;
+            }
+
+            timer_count++;
+        }
+        ticket_lock_release_irqrestore(&s_timer_locks[cpu_id], irq_state);
+
+        /* 处理睡眠线程唤醒（irqsave 锁保护 + 数量上限） */
+        irq_state = ticket_lock_acquire_irqsave(&s_sleep_locks[cpu_id]);
+        wakeup_count = 0U;
+        while ((sleep_queue->next != sleep_queue) &&
+               (wakeup_count < TIMER_IRQ_MAX_WAKEUPS))
         {
             struct KThread *thread = container_of(sleep_queue->next,
                                                    struct KThread, sleep_node);
 
-            if (thread->wakeup_tick <= current_ticks)
-            {
-                /* 从睡眠队列移除 */
-                thread->sleep_node.prev->next = thread->sleep_node.next;
-                thread->sleep_node.next->prev = thread->sleep_node.prev;
-                thread->sleep_node.next = &thread->sleep_node;
-                thread->sleep_node.prev = &thread->sleep_node;
-
-                /* 唤醒线程（恢复就绪状态并入调度队列） */
-                thread->state = KTHREAD_STATE_READY;
-                scheduler_enqueue(thread);
-            }
-            else
+            /* 睡眠队列按 wakeup_tick 升序，队首未到期则无需继续 */
+            if (thread->wakeup_tick > current_ticks)
             {
                 break;
             }
+
+            /* 从睡眠队列移除 */
+            list_remove_self(&thread->sleep_node);
+
+            /* 唤醒线程（恢复就绪状态并入调度队列） */
+            thread->state = KTHREAD_STATE_READY;
+            scheduler_enqueue(thread);
+
+            wakeup_count++;
         }
-        ticket_lock_release(&s_sleep_locks[cpu_id]);
+        ticket_lock_release_irqrestore(&s_sleep_locks[cpu_id], irq_state);
 
         /* 触发调度器 tick（RR 时间片处理 + 抢占检查） */
         scheduler_tick();
@@ -356,7 +454,7 @@ void kthread_sleep_ticks(tick_t ticks)
 {
     struct KThread *current;
     uint32_t cpu_id;
-    struct list_head *sleep_queue;
+    uint32_t irq_state;
 
     if (ticks == 0ULL)
     {
@@ -370,19 +468,16 @@ void kthread_sleep_ticks(tick_t ticks)
     }
 
     cpu_id = hal_get_cpu_id();
-    sleep_queue = &s_sleep_queues[cpu_id];
 
     /* 设置唤醒时刻 */
     current->wakeup_tick = s_system_ticks + ticks;
     current->state = KTHREAD_STATE_SLEEPING;
 
-    /* 加入当前 CPU 的睡眠队列（加锁保护） */
-    ticket_lock_acquire(&s_sleep_locks[cpu_id]);
-    current->sleep_node.next = sleep_queue->next;
-    current->sleep_node.prev = sleep_queue;
-    sleep_queue->next->prev = &current->sleep_node;
-    sleep_queue->next = &current->sleep_node;
-    ticket_lock_release(&s_sleep_locks[cpu_id]);
+    /* 加入当前 CPU 的睡眠队列（irqsave 锁保护，按 wakeup_tick 有序插入） */
+    irq_state = ticket_lock_acquire_irqsave(&s_sleep_locks[cpu_id]);
+    sleep_queue_insert_ordered(&s_sleep_queues[cpu_id], current,
+                                current->wakeup_tick);
+    ticket_lock_release_irqrestore(&s_sleep_locks[cpu_id], irq_state);
 
     barrier();
 
@@ -408,6 +503,7 @@ int32_t kthread_sleep(uint32_t ms)
 void timer_wakeup_thread(struct KThread *thread)
 {
     uint32_t cpu_id;
+    uint32_t irq_state;
 
     if (thread == NULL)
     {
@@ -421,16 +517,13 @@ void timer_wakeup_thread(struct KThread *thread)
 
     cpu_id = hal_get_cpu_id();
 
-    /* 从当前 CPU 的睡眠队列移除（加锁保护） */
-    ticket_lock_acquire(&s_sleep_locks[cpu_id]);
+    /* 从当前 CPU 的睡眠队列移除（irqsave 锁保护） */
+    irq_state = ticket_lock_acquire_irqsave(&s_sleep_locks[cpu_id]);
     if (thread->sleep_node.next != &thread->sleep_node)
     {
-        thread->sleep_node.prev->next = thread->sleep_node.next;
-        thread->sleep_node.next->prev = thread->sleep_node.prev;
-        thread->sleep_node.next = &thread->sleep_node;
-        thread->sleep_node.prev = &thread->sleep_node;
+        list_remove_self(&thread->sleep_node);
     }
-    ticket_lock_release(&s_sleep_locks[cpu_id]);
+    ticket_lock_release_irqrestore(&s_sleep_locks[cpu_id], irq_state);
 
     /* 恢复为就绪状态并加入调度队列 */
     thread->state = KTHREAD_STATE_READY;
@@ -461,7 +554,7 @@ void timer_init_soft(SoftwareTimer_t *timer, TimerCallback_t callback, void *arg
 void timer_start_oneshot(SoftwareTimer_t *timer, uint32_t ms)
 {
     uint32_t cpu_id;
-    struct list_head *timer_queue;
+    uint32_t irq_state;
 
     if (timer == NULL)
     {
@@ -469,26 +562,20 @@ void timer_start_oneshot(SoftwareTimer_t *timer, uint32_t ms)
     }
 
     cpu_id = hal_get_cpu_id();
-    timer_queue = &s_timer_queues[cpu_id];
-
-    /* 如果已在队列中，先移除（加锁保护） */
-    if (timer->node.next != &timer->node)
-    {
-        timer->node.prev->next = timer->node.next;
-        timer->node.next->prev = timer->node.prev;
-    }
 
     timer->expire_tick = s_system_ticks + MS_TO_TICKS(ms);
     timer->interval = 0ULL;
     timer->state = TIMER_STATE_ACTIVE;
 
-    /* 插入到当前 CPU 的定时器队列头部（加锁保护） */
-    ticket_lock_acquire(&s_timer_locks[cpu_id]);
-    timer->node.next = timer_queue->next;
-    timer->node.prev = timer_queue;
-    timer_queue->next->prev = &timer->node;
-    timer_queue->next = &timer->node;
-    ticket_lock_release(&s_timer_locks[cpu_id]);
+    /* irqsave 锁保护：先移除（若已入队），再按 expire_tick 有序插入 */
+    irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
+    if (timer->node.next != &timer->node)
+    {
+        list_remove_self(&timer->node);
+    }
+    timer_queue_insert_ordered(&s_timer_queues[cpu_id], timer,
+                                timer->expire_tick);
+    ticket_lock_release_irqrestore(&s_timer_locks[cpu_id], irq_state);
 
     barrier();
 }
@@ -496,7 +583,7 @@ void timer_start_oneshot(SoftwareTimer_t *timer, uint32_t ms)
 void timer_start_periodic(SoftwareTimer_t *timer, uint32_t ms)
 {
     uint32_t cpu_id;
-    struct list_head *timer_queue;
+    uint32_t irq_state;
 
     if (timer == NULL)
     {
@@ -504,26 +591,20 @@ void timer_start_periodic(SoftwareTimer_t *timer, uint32_t ms)
     }
 
     cpu_id = hal_get_cpu_id();
-    timer_queue = &s_timer_queues[cpu_id];
-
-    /* 如果已在队列中，先移除 */
-    if (timer->node.next != &timer->node)
-    {
-        timer->node.prev->next = timer->node.next;
-        timer->node.next->prev = timer->node.prev;
-    }
 
     timer->expire_tick = s_system_ticks + MS_TO_TICKS(ms);
     timer->interval = MS_TO_TICKS(ms);
     timer->state = TIMER_STATE_ACTIVE;
 
-    /* 插入到当前 CPU 的定时器队列头部（加锁保护） */
-    ticket_lock_acquire(&s_timer_locks[cpu_id]);
-    timer->node.next = timer_queue->next;
-    timer->node.prev = timer_queue;
-    timer_queue->next->prev = &timer->node;
-    timer_queue->next = &timer->node;
-    ticket_lock_release(&s_timer_locks[cpu_id]);
+    /* irqsave 锁保护：先移除（若已入队），再按 expire_tick 有序插入 */
+    irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
+    if (timer->node.next != &timer->node)
+    {
+        list_remove_self(&timer->node);
+    }
+    timer_queue_insert_ordered(&s_timer_queues[cpu_id], timer,
+                                timer->expire_tick);
+    ticket_lock_release_irqrestore(&s_timer_locks[cpu_id], irq_state);
 
     barrier();
 }
@@ -531,6 +612,7 @@ void timer_start_periodic(SoftwareTimer_t *timer, uint32_t ms)
 void timer_stop(SoftwareTimer_t *timer)
 {
     uint32_t cpu_id;
+    uint32_t irq_state;
 
     if (timer == NULL)
     {
@@ -539,16 +621,13 @@ void timer_stop(SoftwareTimer_t *timer)
 
     cpu_id = hal_get_cpu_id();
 
-    /* 从当前 CPU 的队列中移除（加锁保护） */
-    ticket_lock_acquire(&s_timer_locks[cpu_id]);
+    /* 从当前 CPU 的队列中移除（irqsave 锁保护） */
+    irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
     if (timer->node.next != &timer->node)
     {
-        timer->node.prev->next = timer->node.next;
-        timer->node.next->prev = timer->node.prev;
-        timer->node.next = &timer->node;
-        timer->node.prev = &timer->node;
+        list_remove_self(&timer->node);
     }
-    ticket_lock_release(&s_timer_locks[cpu_id]);
+    ticket_lock_release_irqrestore(&s_timer_locks[cpu_id], irq_state);
 
     timer->state = TIMER_STATE_IDLE;
     barrier();

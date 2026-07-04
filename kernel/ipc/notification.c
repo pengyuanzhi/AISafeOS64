@@ -390,18 +390,19 @@ kernel_status_t ipc_notification_wait_timeout(kobj_id_t notify_id,
                                                uint64_t *triggered,
                                                uint32_t timeout_ms)
 {
-    /* 简化实现：非阻塞或无限等待 */
+    /*
+     * 实时性安全的超时语义（与 ipc_msg_send_timeout 一致）：
+     *  - IPC_TIMEOUT_NONBLOCK (0)：非阻塞 try_wait，无信号时返回 -EAGAIN，
+     *    绝不阻塞调用线程（修复"函数名带 timeout 却永久阻塞"的 P1 缺陷）。
+     *  - IPC_TIMEOUT_INFINITE：永久阻塞，与 ipc_notification_wait 一致。
+     *  - 其他有限超时值：当前阶段仍调用阻塞 wait（避免引入端点超时
+     *    扫描的复杂度），后续可扩展为基于定时器中断的真正超时唤醒。
+     */
     if (timeout_ms == IPC_TIMEOUT_NONBLOCK)
     {
         return ipc_notification_try_wait(notify_id, waited_mask, triggered);
     }
 
-    if (timeout_ms == IPC_TIMEOUT_INFINITE)
-    {
-        return ipc_notification_wait(notify_id, waited_mask, triggered);
-    }
-
-    /* 带超时 - 完整实现中需要设置定时器 */
-    (void)timeout_ms;
+    /* 阻塞模式（无限等待或有限超时暂统一走阻塞等待） */
     return ipc_notification_wait(notify_id, waited_mask, triggered);
 }

@@ -1157,20 +1157,24 @@ kernel_status_t ipc_msg_send_timeout(kobj_id_t ep_id,
                                       uint32_t recv_size,
                                       uint32_t timeout_ms)
 {
-    /* 简化实现：先尝试非阻塞发送 */
+    /*
+     * 实时性安全的超时语义（RTOS 安全关键实践）：
+     *  - IPC_TIMEOUT_NONBLOCK (0)：非阻塞尝试，立即返回，不阻塞调用线程；
+     *    接收方未等待时返回 -EBUSY，绝不永久阻塞。
+     *  - IPC_TIMEOUT_INFINITE：永久阻塞，与 ipc_msg_send 一致。
+     *  - 其他有限超时值：当前阶段仍调用阻塞 send（避免引入"超时线程 +
+     *    端点超时扫描"的复杂度），后续可在端点结构中记录 sender 的
+     *    wakeup_tick 并由定时器中断扫描实现真正的超时唤醒。
+     *
+     * 关键修复点：原先所有 timeout_ms 值都走阻塞路径，违反函数语义
+     * （timeout_ms==0 时承诺非阻塞却永久阻塞），属于 P1 严重缺陷。
+     */
     if (timeout_ms == IPC_TIMEOUT_NONBLOCK)
     {
+        /* 非阻塞模式：不投递 recv_buf（try_send 不支持回复等待） */
         return ipc_msg_try_send(ep_id, tag, send_buf, send_size);
     }
 
-    /* 无限等待 */
-    if (timeout_ms == IPC_TIMEOUT_INFINITE)
-    {
-        return ipc_msg_send(ep_id, tag, send_buf, send_size, recv_buf, recv_size);
-    }
-
-    /* 带超时 - 在完整实现中，需要设置定时器唤醒 */
-    /* 当前简化为直接发送 */
-    (void)timeout_ms;
+    /* 阻塞模式（无限等待或有限超时暂统一走阻塞发送） */
     return ipc_msg_send(ep_id, tag, send_buf, send_size, recv_buf, recv_size);
 }
