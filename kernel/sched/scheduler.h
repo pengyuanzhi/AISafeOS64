@@ -26,6 +26,7 @@
 #include <kernel/list.h>
 #include <kernel/compiler.h>
 #include <kernel/alignment.h>
+#include <kernel/spinlock.h>
 #include <stdbool.h>
 #include "thread.h"
 #include <kernel/mm/slab.h>
@@ -49,7 +50,7 @@ typedef struct CACHE_ALIGN(64)
 {
     bitmap256_t bitmap;                                       /**< @brief 优先级位图 */
     struct list_head queues[CONFIG_PRIORITY_LEVELS];          /**< @brief 每优先级就绪链表 */
-    uint32_t lock;                                            /**< @brief 队列自旋锁 */
+    TicketLock_t lock;                                        /**< @brief 队列自旋锁（关中断保护） */
     uint32_t nr_running;                                      /**< @brief 就绪线程总数 */
     KThread_t *current_thread;                                /**< @brief 当前运行线程 */
     KThread_t *idle_thread;                                   /**< @brief idle 线程 */

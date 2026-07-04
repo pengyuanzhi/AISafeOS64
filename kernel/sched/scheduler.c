@@ -386,7 +386,7 @@ kernel_status_t scheduler_init(void)
             cpu_q->queues[j].prev = &cpu_q->queues[j];
         }
 
-        cpu_q->lock = 0U;
+        ticket_lock_init(&cpu_q->lock);
         cpu_q->nr_running = 0U;
         cpu_q->current_thread = NULL;
         cpu_q->idle_thread = NULL;
@@ -470,6 +470,7 @@ void scheduler_enqueue(KThread_t *thread)
 {
     uint32_t cpu_id;
     PerCPUReadyQueue_t *cpu_q;
+    uint32_t irq_state;
 
     if (thread == NULL)
     {
@@ -478,6 +479,9 @@ void scheduler_enqueue(KThread_t *thread)
 
     cpu_id = hal_get_cpu_id();
     cpu_q = &g_scheduler.cpu_queues[cpu_id];
+
+    /* 关中断 + 获取队列锁，保护位图与链表操作 */
+    irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
     /* 设置位图对应位 */
     bitmap256_set(&cpu_q->bitmap, (uint32_t)thread->prio);
@@ -490,7 +494,8 @@ void scheduler_enqueue(KThread_t *thread)
 
     /* 递增运行计数 */
     cpu_q->nr_running++;
-    barrier();
+
+    ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 }
 
 /* ========================================================================
@@ -501,6 +506,7 @@ void scheduler_dequeue(KThread_t *thread)
 {
     uint32_t cpu_id;
     PerCPUReadyQueue_t *cpu_q;
+    uint32_t irq_state;
 
     if (thread == NULL)
     {
@@ -509,6 +515,9 @@ void scheduler_dequeue(KThread_t *thread)
 
     cpu_id = hal_get_cpu_id();
     cpu_q = &g_scheduler.cpu_queues[cpu_id];
+
+    /* 关中断 + 获取队列锁，保护链表与位图操作 */
+    irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
     /* 从链表中移除 */
     thread->rq_list.prev->next = thread->rq_list.next;
@@ -528,7 +537,7 @@ void scheduler_dequeue(KThread_t *thread)
         cpu_q->nr_running--;
     }
 
-    barrier();
+    ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 }
 
 /* ========================================================================
@@ -542,38 +551,44 @@ KThread_t *scheduler_pick_next(void)
     PerCPUReadyQueue_t *cpu_q;
     struct list_head *first;
     KThread_t *next;
+    uint32_t irq_state;
 
     cpu_id = hal_get_cpu_id();
     cpu_q = &g_scheduler.cpu_queues[cpu_id];
 
-    /* EDF 实时调度：优先选择截止时间最早的线程（仅 CPU0） */
+    /* 关中断 + 获取队列锁，保证读取位图/链表期间不被并发修改 */
+    irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
+
+    /* EDF 实时调度：优先选择截止时间最早的线程（仅 CPU0）。
+     * edf_pick_next 内部有独立锁，在持锁状态下调用是安全的。 */
+    next = NULL;
     if (cpu_id == 0U)
     {
         next = edf_pick_next();
-        if (next != NULL)
+    }
+
+    if (next == NULL)
+    {
+        /* O(1) 查找最高优先级 */
+        highest_prio = bitmap256_find_highest(&cpu_q->bitmap);
+
+        if (highest_prio < CONFIG_PRIORITY_LEVELS)
         {
-            return next;
+            /* 从对应优先级链表头部取出第一个线程 */
+            first = cpu_q->queues[highest_prio].next;
+            next = container_of(first, KThread_t, rq_list);
         }
     }
 
-    /* O(1) 查找最高优先级 */
-    highest_prio = bitmap256_find_highest(&cpu_q->bitmap);
+    ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 
-    if (highest_prio < CONFIG_PRIORITY_LEVELS)
+    /* 没有就绪线程，返回 idle 线程（idle 不在就绪队列中，无需持锁访问） */
+    if (next == NULL)
     {
-        /* 从对应优先级链表头部取出第一个线程 */
-        first = cpu_q->queues[highest_prio].next;
-        next = container_of(first, KThread_t, rq_list);
-        return next;
+        next = cpu_q->idle_thread;
     }
 
-    /* 没有就绪线程，返回 idle 线程 */
-    if (cpu_q->idle_thread != NULL)
-    {
-        return cpu_q->idle_thread;
-    }
-
-    return NULL;
+    return next;
 }
 
 /* ========================================================================
@@ -607,61 +622,114 @@ void schedule(void)
     KThread_t *prev;
     KThread_t *next;
     uint32_t cpu_id;
+    PerCPUReadyQueue_t *cpu_q;
+    uint32_t irq_state;
 
     cpu_id = hal_get_cpu_id();
-    prev = g_scheduler.cpu_queues[cpu_id].current_thread;
-    next = scheduler_pick_next();
+    cpu_q = &g_scheduler.cpu_queues[cpu_id];
+    prev = cpu_q->current_thread;
+
+    /* 持锁覆盖整个调度决策过程（pick_next + dequeue + enqueue +
+     * 设置 current_thread），避免并发修改就绪队列。
+     * 关中断 + 自旋锁：本函数可能在定时器中断上下文中被调用。 */
+    irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
+
+    /* ---- 内联 pick_next（不再单独调用 scheduler_pick_next，避免嵌套加锁） ---- */
+    next = NULL;
+    if (cpu_id == 0U)
+    {
+        /* EDF 实时调度（仅 CPU0），edf_pick_next 内部有独立锁，持锁调用安全 */
+        next = edf_pick_next();
+    }
+    if (next == NULL)
+    {
+        /* O(1) 位图查找最高优先级 */
+        uint32_t highest = bitmap256_find_highest(&cpu_q->bitmap);
+        if (highest < CONFIG_PRIORITY_LEVELS)
+        {
+            next = container_of(cpu_q->queues[highest].next, KThread_t, rq_list);
+        }
+    }
+    if (next == NULL)
+    {
+        /* 队列为空，回退到 idle 线程 */
+        next = cpu_q->idle_thread;
+    }
 
     if (next == NULL)
     {
+        /* 无可运行线程也无可用的 idle 线程 */
+        ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
         return;
     }
 
-    /* 从就绪队列中移除下一个线程（防止同时在队列和运行状态） */
+    /* ---- 内联 dequeue next（已在锁内） ---- */
     if (next->state == KTHREAD_STATE_READY)
     {
-        scheduler_dequeue(next);
+        next->rq_list.prev->next = next->rq_list.next;
+        next->rq_list.next->prev = next->rq_list.prev;
+        next->rq_list.next = &next->rq_list;
+        next->rq_list.prev = &next->rq_list;
+        if (cpu_q->queues[next->prio].next == &cpu_q->queues[next->prio])
+        {
+            bitmap256_clear(&cpu_q->bitmap, (uint32_t)next->prio);
+        }
+        if (cpu_q->nr_running > 0U)
+        {
+            cpu_q->nr_running--;
+        }
     }
 
     /* 如果下一个线程与当前线程相同，无需切换 */
     if (prev == next)
     {
+        ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
         return;
     }
 
-    /* 将当前线程从运行状态改为就绪状态并重新入队 */
+    /* ---- 内联 enqueue prev（已在锁内） ---- */
     if ((prev != NULL) && (prev->state == KTHREAD_STATE_RUNNING))
     {
         prev->state = KTHREAD_STATE_READY;
-        scheduler_enqueue(prev);
+        bitmap256_set(&cpu_q->bitmap, (uint32_t)prev->prio);
+        prev->rq_list.next = &cpu_q->queues[prev->prio];
+        prev->rq_list.prev = cpu_q->queues[prev->prio].prev;
+        cpu_q->queues[prev->prio].prev->next = &prev->rq_list;
+        cpu_q->queues[prev->prio].prev = &prev->rq_list;
+        cpu_q->nr_running++;
     }
 
-    /* 设置下一个线程为当前线程 */
-    scheduler_load_current(next);
+    /* ---- 设置 current_thread（内联 scheduler_load_current） ---- */
+    cpu_q->current_thread = next;
+    next->state = KTHREAD_STATE_RUNNING;
 
     /* 保存当前 ELR/SPSR 到 prev context (context[13]/[14]) */
-    prev->context[13U] = hal_read_elr();
-    prev->context[14U] = hal_read_spsr();
+    if (prev != NULL)
+    {
+        prev->context[13U] = hal_read_elr();
+        prev->context[14U] = hal_read_spsr();
+    }
 
-    /* P0-2: 用户态地址空间隔离 - 切换 TTBR0
-     * TODO: schedule() 里的常规切换需要独立的汇编处理
-     * （当前仅 scheduler_start 的首次切换工作） */
+    /* 用户态地址空间隔离：仅用户线程需要切换 TTBR0。
+     * 内核线程（idle 等）TTBR0 保持空，无需切换。
+     * TTBR1（内核高地址）永远不变。 */
     if (next->is_user != 0U)
     {
-        /* 常规切换暂不处理（单驱动线程不会触发 schedule） */
+        /* 用户线程：TTBR0 设为用户 PGD */
+        mmu_switch_to_user(next->user_pgd);
     }
-    else
-    {
-        mmu_switch_to_kernel();
-    }
+    /* 内核线程：不切换 TTBR0（保持空），避免不必要的 TLB 失效 */
 
     /* 恢复 next 的 ELR/SPSR */
     hal_write_elr(next->context[13U]);
     hal_write_spsr(next->context[14U]);
     hal_isb();
 
+    /* 释放锁（必须在 context_switch 之前，避免持锁切换栈导致锁无法释放） */
+    ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
+
     /* 栈金丝雀检查：检测 prev 线程是否发生栈溢出 */
-    if ((prev->guard.enabled) &&
+    if ((prev != NULL) && (prev->guard.enabled) &&
         (!stack_guard_check(&prev->guard)))
     {
         hal_uart_puts((uint64_t)QEMU_UART0_BASE,
@@ -765,18 +833,6 @@ void NORETURN scheduler_start(void)
 
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
-
-    /* 用户态线程：清除 SCTLR.WXN（bit 18），允许可写页执行。
-     * WXN=1 时 AP=RW 的页不可执行 → EL0 Permission fault。
-     * 共享 PGD 方案：不切换 TTBR0。 */
-    if (first_thread->is_user != 0U)
-    {
-        uint64_t sctlr;
-        __asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
-        sctlr &= ~(1ULL << 18U);
-        __asm__ volatile("msr sctlr_el1, %0" :: "r"(sctlr));
-        __asm__ volatile("isb");
-    }
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
 

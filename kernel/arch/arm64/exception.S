@@ -211,18 +211,47 @@ exception_vector_table:
 /**
  * @brief EL1h IRQ 异常处理
  *
- * @details 保存 x0-x3，调用 irq_handler（C 函数），
- *          恢复 x0-x3，eret 返回。
+ * @details 保存所有 caller-saved 寄存器（x0-x18），调用 irq_handler（C 函数），
+ *          恢复全部寄存器，eret 返回。
+ *
+ *          ARM64 C ABI：x0-x18 为 caller-saved（被中断代码可能正在使用），
+ *          x19-x28 为 callee-saved（由 C 函数自行保存/恢复）。
+ *          IRQ 处理器必须保存 x0-x18，否则 C 函数使用的 x4-x18
+ *          会覆盖被中断代码的寄存器值。
+ *
+ *          栈帧布局（SP 向下生长）：
+ *          [sp+0xF0] x18          [sp+0xE0] x17,x16
+ *          [sp+0xD0] x15,x14      [sp+0xC0] x13,x12
+ *          [sp+0xB0] x11,x10      [sp+0xA0] x9,x8
+ *          [sp+0x90] x7,x6        [sp+0x80] x5,x4
+ *          [sp+0x70] x3,x2        [sp+0x60] x1,x0
+ *          共 19 个寄存器 = 152 字节（向上对齐到 16 = 160）
  */
 .Lirq_handler_spx:
-    /* 保存通用寄存器 */
+    /* 保存 x0-x18（caller-saved 寄存器集） */
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
+    stp     x4, x5, [sp, #-16]!
+    stp     x6, x7, [sp, #-16]!
+    stp     x8, x9, [sp, #-16]!
+    stp     x10, x11, [sp, #-16]!
+    stp     x12, x13, [sp, #-16]!
+    stp     x14, x15, [sp, #-16]!
+    stp     x16, x17, [sp, #-16]!
+    str     x18, [sp, #-16]!          /* x18 单独保存，对齐到 16 字节 */
 
     /* 调用 IRQ 处理函数（C 语言入口） */
     bl      irq_handler
 
-    /* 恢复通用寄存器 */
+    /* 恢复 x0-x18（逆序） */
+    ldr     x18, [sp], #16
+    ldp     x16, x17, [sp], #16
+    ldp     x14, x15, [sp], #16
+    ldp     x12, x13, [sp], #16
+    ldp     x10, x11, [sp], #16
+    ldp     x8, x9, [sp], #16
+    ldp     x6, x7, [sp], #16
+    ldp     x4, x5, [sp], #16
     ldp     x2, x3, [sp], #16
     ldp     x0, x1, [sp], #16
     eret

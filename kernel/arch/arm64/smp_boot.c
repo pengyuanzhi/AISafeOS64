@@ -402,10 +402,11 @@ void smp_secondary_entry(uint32_t cpu_id)
     s_secondary_ready[cpu_id] = 1U;
     barrier();
 
-    /* 使能中断（IRQ） */
-    hal_irq_enable();
-
-    /* 从核进入调度循环 */
+    /* 从核进入调度循环。
+     * 注意：不在此处使能中断（hal_irq_enable）。
+     * cpu_switch_to_first_task 的 eret 会从 SPSR=0x5（EL1h, IRQ 使能）恢复，
+     * 自动使能中断。这确保中断在切换到 idle 线程栈后才到达，
+     * 避免 8KB .stacks 段栈上的中断处理溢出。 */
     scheduler_start_secondary();
 
     /* 永不到达 */

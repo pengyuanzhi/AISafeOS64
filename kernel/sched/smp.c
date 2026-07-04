@@ -27,6 +27,7 @@
 #include <kernel/bitmap.h>
 #include <stdint.h>
 #include "scheduler.h"
+#include "hal.h"
 
 /* ========================================================================
  * 内部常量定义
@@ -78,22 +79,38 @@ static TicketLock_t s_migrate_stats_lock;
 
 /* ========================================================================
  * 调度器队列远程操作锁
- * ======================================================================== */
+ * ========================================================================
+ *
+ * @details 迁移/窃取操作可能由定时器中断上下文（scheduler_tick →
+ *          smp_tick_check_balance）触发，且会访问远程 CPU 的就绪队列。
+ *          远程 CPU 同样可能正运行其定时器中断操作本队列，因此必须
+ *          使用关中断的自旋锁（ticket_lock）保护，避免线程上下文与
+ *          中断上下文竞争同一队列。
+ *
+ *          IRQ 关闭由调用者（smp_load_balance / smp_work_steal /
+ *          smp_migrate_thread）在最外层统一管理，本组辅助函数仅负责
+ *          ticket 锁的获取与释放（按地址顺序加锁，避免死锁）。
+ */
 
+/**
+ * @brief 单队列加锁（假定调用者已关中断）
+ */
 static void sched_queue_lock(PerCPUReadyQueue_t *q)
 {
-    while (!atomic_cas_u32(&q->lock, 0U, 1U))
-    {
-        cpu_relax();
-    }
+    ticket_lock_acquire(&q->lock);
 }
 
+/**
+ * @brief 单队列解锁
+ */
 static void sched_queue_unlock(PerCPUReadyQueue_t *q)
 {
-    barrier_store();
-    q->lock = 0U;
+    ticket_lock_release(&q->lock);
 }
 
+/**
+ * @brief 双队列加锁（按地址顺序，避免死锁）
+ */
 static void sched_lock_dual(PerCPUReadyQueue_t *a, PerCPUReadyQueue_t *b)
 {
     if (a == b)
@@ -525,6 +542,7 @@ kernel_status_t smp_load_balance(void)
     uint32_t migrated;
     uint32_t migrate_limit;
     uint32_t cpu;
+    uint32_t irq_state;
     PerCPUReadyQueue_t *src_q;
     PerCPUReadyQueue_t *dst_q;
 
@@ -532,6 +550,11 @@ kernel_status_t smp_load_balance(void)
     {
         return KERNEL_OK;
     }
+
+    /* 关闭中断：负载统计与队列迁移全程不可被定时器中断打断
+     * （本函数可能在定时器中断上下文或线程上下文被调用）。 */
+    irq_state = hal_irq_saved_state();
+    hal_irq_disable();
 
     src_cpu = 0U;
     max_load = 0U;
@@ -628,6 +651,7 @@ kernel_status_t smp_load_balance(void)
         ticket_lock_release(&s_migrate_stats_lock);
     }
 
+    hal_irq_restore(irq_state);
     return KERNEL_OK;
 }
 
@@ -653,6 +677,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     PerCPUReadyQueue_t *dst_q;
     uint32_t tid;
     uint32_t hp;
+    uint32_t irq_state;
 
     if (current_cpu >= CONFIG_MAX_CPUS)
     {
@@ -663,6 +688,10 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     {
         return KERNEL_OK;
     }
+
+    /* 关闭中断：窃取过程访问远程与本地队列，需防止中断打断 */
+    irq_state = hal_irq_saved_state();
+    hal_irq_disable();
 
     /* 找最忙的 CPU */
     src_cpu = SMP_CPU_INVALID;
@@ -682,6 +711,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
 
     if (src_cpu == SMP_CPU_INVALID)
     {
+        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
@@ -693,6 +723,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     if (src_q->nr_running <= STEAL_MIN_RESERVE)
     {
         sched_unlock_dual(src_q, dst_q);
+        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
@@ -701,12 +732,14 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
     if (hp >= CONFIG_PRIORITY_LEVELS)
     {
         sched_unlock_dual(src_q, dst_q);
+        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
     if (src_q->queues[hp].prev == &src_q->queues[hp])
     {
         sched_unlock_dual(src_q, dst_q);
+        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
@@ -720,6 +753,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
         s_migrate_stats[src_cpu].affinity_reject++;
         ticket_lock_release(&s_migrate_stats_lock);
         sched_unlock_dual(src_q, dst_q);
+        hal_irq_restore(irq_state);
         return KERNEL_OK;
     }
 
@@ -735,6 +769,7 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
 
     (void)ipi_send(src_cpu, IPI_TYPE_RESCHEDULE);
 
+    hal_irq_restore(irq_state);
     return KERNEL_OK;
 }
 
@@ -780,6 +815,7 @@ kernel_status_t smp_migrate_thread(uint32_t src_cpu,
     PerCPUReadyQueue_t *src_q;
     PerCPUReadyQueue_t *dst_q;
     KThread_t *thread;
+    uint32_t irq_state;
 
     (void)priority;
 
@@ -807,12 +843,17 @@ kernel_status_t smp_migrate_thread(uint32_t src_cpu,
     src_q = &g_scheduler.cpu_queues[src_cpu];
     dst_q = &g_scheduler.cpu_queues[dst_cpu];
 
+    /* 关闭中断：跨 CPU 队列操作需防止任一端被定时器中断打断 */
+    irq_state = hal_irq_saved_state();
+    hal_irq_disable();
+
     sched_lock_dual(src_q, dst_q);
 
     thread = &g_scheduler.thread_table[thread_id];
     if (thread->state != KTHREAD_STATE_READY)
     {
         sched_unlock_dual(src_q, dst_q);
+        hal_irq_restore(irq_state);
         return -(int32_t)EINVAL;
     }
 
@@ -820,6 +861,8 @@ kernel_status_t smp_migrate_thread(uint32_t src_cpu,
     remote_add_thread(dst_q, thread);
 
     sched_unlock_dual(src_q, dst_q);
+
+    hal_irq_restore(irq_state);
 
     (void)ipi_send(dst_cpu, IPI_TYPE_RESCHEDULE);
 
