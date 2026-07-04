@@ -570,8 +570,16 @@ void mmu_switch_to_user(uint64_t user_pgd_paddr)
 
     __asm__ volatile("msr ttbr0_el1, %0" :: "r"(user_pgd_paddr));
     __asm__ volatile("isb");
-    __asm__ volatile("tlbi vmalle1is");
-    __asm__ volatile("dsb ish");
+    /* 仅失效 TTBR0（非 Inner Shareable），避免影响 TTBR1 内核映射的 TLB。
+     *
+     * 此前用 tlbi vmalle1is（全 EL1 VA，Inner Shareable）会失效 TTBR1
+     * 的内核映射 TLB 条目，导致 mmu_switch_to_user 自身后续指令取指
+     * 需要 TLB refill，在 QEMU 上出现 "unable to read memory"。
+     * 改为 tlbi vmalle1（非 IS，仅当前 CPU），且理论上只需要失效
+     * TTBR0 的条目。
+     */
+    __asm__ volatile("tlbi vmalle1");
+    __asm__ volatile("dsb nsh");
     __asm__ volatile("isb");
 }
 

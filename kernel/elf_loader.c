@@ -331,6 +331,34 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     }
     user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
 
+    /*
+     * 映射内核代码到用户 PGD（恒等映射）
+     *
+     * 用户线程运行时 TTBR0 是用户 PGD。当内核在 mmu_switch_to_user 等
+     * 函数里切换 TTBR0 后，后续指令取指用新 TTBR0。如果用户 PGD 不映射
+     * 内核代码地址（0x40000000+），取指失败。
+     *
+     * 映射整个内核 .text.boot + .text 区域（0x40000000 到 __text_end）
+     * 到用户 PGD 的相同地址，EL0 只读可执行。这保证了：
+     * - 异常向量表（0x40000800）在 SVC 时可取指
+     * - mmu_switch_to_user / cpu_switch_to_first_task 等内核函数可执行
+     * - user_entry_trampoline 可执行
+     */
+    {
+        extern char __text_end[];
+        uint64_t kern_start = 0x40000000ULL;
+        uint64_t kern_end = (uint64_t)(uintptr_t)__text_end;
+        uint64_t kaddr;
+        kern_end = (kern_end + PAGE_SIZE_4K - 1ULL) & ~(PAGE_SIZE_4K - 1ULL);
+
+        for (kaddr = kern_start; kaddr < kern_end; kaddr += PAGE_SIZE_4K)
+        {
+            /* 恒等映射：物理地址 = 虚拟地址，EL0 只读可执行 */
+            page_table_map(user_pgd_ptr, kaddr, kaddr,
+                           PAGE_PERM_RX, true);
+        }
+    }
+
     /* 映射每个 PT_LOAD 段 */
     for (i = 0U; i < seg_count; i++)
     {
