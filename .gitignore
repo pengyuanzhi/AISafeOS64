@@ -213,3 +213,4 @@ ENV/
 lib/musl_upstream/
 build_arm64/
 build_host/
+aisafe64.dis
