@@ -381,7 +381,7 @@ if(1)  # 临时禁用 CMAKE_CROSSCOMPILING 检查
     )
 
     # ================================================================
-    # 特殊处理：dev/driver_framework.c（Rust/C 混合）
+    # 用户态 virtio-blk 驱动（独立 ELF）
     # ================================================================
-    # add_subdirectory(dev)  # 待迁移
+    add_subdirectory(dev)
 endif()

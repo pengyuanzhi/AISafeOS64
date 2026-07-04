@@ -516,30 +516,20 @@ uint64_t mmu_create_user_pgd(void)
 {
     uint32_t i;
     uint64_t pgd_paddr;
-    uint64_t pud1_paddr;
 
     for (i = 0U; i < 16U; i++)
     {
         if ((s_user_pgd_bitmap & (1UL << i)) == 0U)
         {
             s_user_pgd_bitmap |= (1UL << i);
+            /* 用户 PGD 作为 TTBR0 使用，必须从空开始。
+             *
+             * 注意：内核映射通过 TTBR1_EL1 独立提供（mmu_early_init 设置），
+             * 用户 PGD（TTBR0）不需要复制内核映射。
+             * 此前错误地复制了 s_pgd_ttbr1 到用户 PGD，导致用户 PGD[0]
+             * 被内核映射占用，page_table_map 无法映射用户空间低地址。
+             */
             clear_table(s_user_pgds[i]);
-
-            /* 复制内核 TTBR1 映射到用户 PGD
-             * TTBR1 地址的 PGD 索引从 0 开始（因为 0xFFFF0000 基地址）
-             * 需要复制 s_pgd_ttbr1 的所有有效 entries */
-            pud1_paddr = (uint64_t)(uintptr_t)&s_pud_ttbr1[0U];
-            {
-                uint32_t j;
-                /* 复制 TTBR1 的低 entries (s_pgd_ttbr1[0] 指向 s_pud_ttbr1) */
-                for (j = 0U; j < 512U; j++)
-                {
-                    if (s_pgd_ttbr1[j] != 0ULL)
-                    {
-                        s_user_pgds[i][j] = s_pgd_ttbr1[j];
-                    }
-                }
-            }
 
             pgd_paddr = (uint64_t)(uintptr_t)&s_user_pgds[i][0U];
             return pgd_paddr;

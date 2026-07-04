@@ -260,14 +260,16 @@ arch_setup_user_thread_context:
     .global arch_setup_elf_thread_context
     .type arch_setup_elf_thread_context, @function
 arch_setup_elf_thread_context:
-    /* context[0] = x19 = entry（原始 TTBR0 地址，不加偏移） */
+    /* context[0] = x19 = entry（原始 TTBR0 地址，trampoline 的 br x19 跳转目标） */
     str     x1, [x0, #0]
 
     /* context[1] = x20 = arg */
     str     x2, [x0, #8]
 
-    /* 清零 x21 ~ x28 */
-    str     xzr, [x0, #16]
+    /* context[2] = x21 = user_sp（trampoline 用 mov sp, x21 设置用户栈） */
+    str     x4, [x0, #16]
+
+    /* 清零 x22 ~ x28 */
     str     xzr, [x0, #24]
     str     xzr, [x0, #32]
     str     xzr, [x0, #40]
@@ -279,8 +281,13 @@ arch_setup_elf_thread_context:
     /* context[10] = FP(x29) = 0 */
     str     xzr, [x0, #80]
 
-    /* context[11] = LR(x30) = entry（TTBR0，独立 ELF 直接入口） */
-    str     x1, [x0, #88]
+    /* context[11] = LR(x30) = user_entry_trampoline (TTBR1 高地址)
+     * trampoline 做 mov sp,x21; mov x0,x20; br x19
+     * x19=entry(TTBR0) 跳转到独立 ELF 入口 */
+    ldr     x9, =user_entry_trampoline
+    orr     x9, x9, #0x8000000000000000
+    orr     x9, x9, #0x7FFF000000000000
+    str     x9, [x0, #88]
 
     /* context[12] = SP = kernel_sp（内核栈） */
     str     x3, [x0, #96]
@@ -288,11 +295,11 @@ arch_setup_elf_thread_context:
     /* context[13] = SPSR_EL1 = 0x0（EL0t，所有中断使能） */
     str     xzr, [x0, #104]
 
-    /* context[14] = ELR_EL1 = entry（TTBR0 低地址，直接跳转） */
-    str     x1, [x0, #112]
-
-    /* context[2] = x21 = user_sp（调度器切换时恢复到 SP_EL0） */
-    str     x4, [x0, #16]
+    /* context[14] = ELR_EL1 = user_entry_trampoline (TTBR1 高地址) */
+    ldr     x9, =user_entry_trampoline
+    orr     x9, x9, #0x8000000000000000
+    orr     x9, x9, #0x7FFF000000000000
+    str     x9, [x0, #112]
 
     ret
 

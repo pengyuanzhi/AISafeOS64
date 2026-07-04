@@ -38,6 +38,7 @@
 #include <kernel/process.h>
 #include <kernel/mm/kmalloc.h>
 #include <kernel/mm/slab.h>
+#include <kernel/phys_mem.h>
 #include "../../sched/scheduler.h"
 #include "../../sched/thread.h"
 
@@ -2578,6 +2579,20 @@ void kernel_main(void)
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: kmalloc init fail\n");
     }
 
+    /* ---- 初始化物理内存分配器（buddy system，用于用户态页分配）---- */
+    {
+        extern char __kernel_end[];
+        /* 管理内核镜像之后的 16MB 物理内存（够用户态驱动和进程用） */
+        paddr_t pmem_base = (paddr_t)(((uintptr_t)__kernel_end + 0xFFFU) & ~0xFFFU);
+        uint64_t pmem_size = 16U * 1024U * 1024U;  /* 16MB */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init\n");
+        ret = phys_mem_init(pmem_base, pmem_size);
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: phys_mem fail\n");
+        }
+    }
+
     /* ---- 第七步：初始化调度器 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Sched init\n");
     ret = scheduler_init();
@@ -3219,43 +3234,49 @@ void kernel_main(void)
     /* 生产模式：直接启动调度器 */
 #endif /* CONFIG_DEBUG */
 
-    /* ---- 初始化引导块设备读取器（用于加载用户态驱动 ELF）---- */
+    /* ---- 加载用户态驱动 ELF（引导读取器读盘 + elf_load_and_run）---- */
     {
         extern int32_t boot_blk_init(void);
-        extern int32_t boot_blk_read_sector(uint64_t sector, void *buf);
-        int32_t boot_ret = boot_blk_init();
+        extern int32_t boot_blk_read(uint64_t offset, void *buf, uint32_t size);
+        extern kernel_status_t elf_load_and_run(const uint8_t *elf_data,
+                                                 uint32_t elf_size,
+                                                 const char *thread_name);
+        /* 静态 ELF 读取缓冲（足够容纳驱动 ELF，约 68KB） */
+        static uint8_t s_elf_buf[73728] __attribute__((aligned(8)));
+        int32_t boot_ret;
+
+        boot_ret = boot_blk_init();
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_blk_init = ");
         uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)boot_ret);
         hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
-        /* 测试读扇区 0（验证引导读取器工作） */
         if (boot_ret == 0)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read start\n");
-            static uint8_t s_boot_test[512] __attribute__((aligned(8)));
-            int32_t rd_ret = boot_blk_read_sector(0U, s_boot_test);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read(0) = ");
+            /* 从磁盘扇区 0 读取 ELF 文件（144 扇区 = 72KB） */
+            int32_t rd_ret = boot_blk_read(0ULL, s_elf_buf, 73728U);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read ELF = ");
             uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)rd_ret);
-            if (rd_ret == 0)
+
+            /* 验证 ELF 魔数 */
+            if ((rd_ret == 0) &&
+                (s_elf_buf[0U] == 0x7FU) &&
+                (s_elf_buf[1U] == (uint8_t)'E') &&
+                (s_elf_buf[2U] == (uint8_t)'L') &&
+                (s_elf_buf[3U] == (uint8_t)'F'))
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " [0]=0x");
-                uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_boot_test[0U]);
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " [1]=0x");
-                uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_boot_test[1U]);
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELF?=");
-                if ((s_boot_test[0U] == 0x7FU) &&
-                    (s_boot_test[1U] == (uint8_t)'E') &&
-                    (s_boot_test[2U] == (uint8_t)'L') &&
-                    (s_boot_test[3U] == (uint8_t)'F'))
-                {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "YES");
-                }
-                else
-                {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "no");
-                }
+                kernel_status_t load_ret;
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (ELF OK)\n");
+
+                /* 加载 ELF 到用户空间并创建线程 */
+                load_ret = elf_load_and_run(s_elf_buf, 73728U, "drv_blk");
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] elf_load_and_run = ");
+                uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)load_ret);
+                hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
             }
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            else
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (not ELF)\n");
+            }
         }
     }
 

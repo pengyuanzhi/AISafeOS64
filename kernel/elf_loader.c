@@ -229,27 +229,50 @@ static page_perm_t elf_prot_to_perm(uint8_t prot)
  *          mmu_create_user_pgd 复制了 TTBR1 内核映射，切换 TTBR0 后内核代码
  *          仍可通过 TTBR1 访问，安全。
  */
+/**
+ * @brief 将数据拷贝到用户地址空间（通过物理地址恒等映射）
+ *
+ * @details 不切换 TTBR0（避免 TLB 刷新导致内核代码不可执行），
+ *          而是通过 page_table_lookup 查找用户虚拟地址对应的物理地址，
+ *          利用内核的恒等映射（物理地址=虚拟地址）直接写物理页。
+ */
 static void copy_to_user_space(page_table_t *user_pgd, uint64_t user_vaddr,
                                 const uint8_t *src, uint64_t size)
 {
-    /* 保存当前 TTBR0，切换到用户 PGD */
-    uint64_t saved_ttbr0 = hal_read_ttbr0();
-    hal_write_ttbr0((uint64_t)(uintptr_t)user_pgd);
-    hal_isb();
+    uint64_t offset = 0ULL;
 
-    /* 通过用户虚拟地址拷贝数据 */
+    while (offset < size)
     {
-        uint8_t *dst = (uint8_t *)(uintptr_t)user_vaddr;
-        uint64_t i;
-        for (i = 0ULL; i < size; i++)
-        {
-            dst[i] = src[i];
-        }
-    }
+        paddr_t paddr;
+        uint64_t page_offset;
+        uint64_t chunk_size;
+        uint8_t *dst;
 
-    /* 切回内核 PGD */
-    hal_write_ttbr0(saved_ttbr0);
-    hal_isb();
+        /* 查找用户虚拟地址对应的物理地址 */
+        if (page_table_lookup(user_pgd, user_vaddr + offset, &paddr) != KERNEL_OK)
+        {
+            break;  /* 映射失败 */
+        }
+
+        /* 通过内核恒等映射（PA=VA）写物理页 */
+        page_offset = (user_vaddr + offset) & (PAGE_SIZE_4K - 1ULL);
+        chunk_size = PAGE_SIZE_4K - page_offset;
+        if (chunk_size > (size - offset))
+        {
+            chunk_size = size - offset;
+        }
+
+        dst = (uint8_t *)(uintptr_t)(paddr + page_offset);
+        {
+            uint64_t i;
+            for (i = 0ULL; i < chunk_size; i++)
+            {
+                dst[i] = src[offset + i];
+            }
+        }
+
+        offset += chunk_size;
+    }
 }
 
 kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
@@ -332,6 +355,33 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
             }
         }
 
+        /* 诊断：段映射完成 */
+        hal_uart_puts(ELF_UART_BASE, "[ELF] seg mapped vaddr=0x");
+        {
+            char hex[16];
+            uint32_t j;
+            uint64_t v = segments[i].vaddr;
+            for (j = 0U; j < 16U; j++)
+            {
+                uint8_t nibble = (uint8_t)((v >> ((15U - j) * 4U)) & 0xFU);
+                hex[j] = (char)((nibble < 10U) ? ('0' + nibble) : ('a' + nibble - 10U));
+            }
+            for (j = 0U; j < 16U; j++)
+            {
+                hal_uart_putc(ELF_UART_BASE, hex[j]);
+            }
+        }
+        hal_uart_puts(ELF_UART_BASE, " filesz=");
+        {
+            char dec[8];
+            uint32_t j;
+            uint64_t v = segments[i].filesz;
+            for (j = 0U; j < 8U; j++) { dec[j] = (char)('0' + (v % 10ULL)); v /= 10ULL; }
+            j = 8U; while (j > 1U && dec[j-1U] == '0') j--;
+            while (j > 0U) hal_uart_putc(ELF_UART_BASE, dec[--j]);
+        }
+        hal_uart_putc(ELF_UART_BASE, '\n');
+
         /* 拷贝段数据（filesz 字节）到用户空间 */
         if (segments[i].filesz > 0ULL)
         {
@@ -340,24 +390,33 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                                segments[i].filesz);
         }
 
-        /* BSS 区域清零（filesz 到 memsz 之间） */
+        /* BSS 区域清零（filesz 到 memsz 之间），通过物理地址恒等映射 */
         if (segments[i].length > segments[i].filesz)
         {
+            uint64_t bss_vaddr = segments[i].vaddr + segments[i].filesz;
             uint64_t bss_size = segments[i].length - segments[i].filesz;
-            /* 临时切换 TTBR0 清零 BSS */
-            uint64_t saved_ttbr0 = hal_read_ttbr0();
-            hal_write_ttbr0((uint64_t)(uintptr_t)user_pgd_ptr);
-            hal_isb();
+            uint64_t boff;
+            for (boff = 0ULL; boff < bss_size; boff += PAGE_SIZE_4K)
             {
-                uint8_t *bss = (uint8_t *)(uintptr_t)(segments[i].vaddr + segments[i].filesz);
-                uint64_t k;
-                for (k = 0ULL; k < bss_size; k++)
+                paddr_t bpaddr;
+                uint64_t bchunk = PAGE_SIZE_4K;
+                uint8_t *bptr;
+                uint64_t bk;
+
+                if (page_table_lookup(user_pgd_ptr, bss_vaddr + boff, &bpaddr) != KERNEL_OK)
                 {
-                    bss[k] = 0U;
+                    break;
+                }
+                if (bchunk > (bss_size - boff))
+                {
+                    bchunk = bss_size - boff;
+                }
+                bptr = (uint8_t *)(uintptr_t)bpaddr;
+                for (bk = 0ULL; bk < bchunk; bk++)
+                {
+                    bptr[bk] = 0U;
                 }
             }
-            hal_write_ttbr0(saved_ttbr0);
-            hal_isb();
         }
     }
 
