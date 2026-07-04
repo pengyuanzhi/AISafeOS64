@@ -305,10 +305,18 @@ void *kmalloc(size_t size)
         return NULL;
     }
 
-    /* 未初始化检查 */
+    /*
+     * P0-7 修复：
+     *   原代码在 kmalloc() 内部做懒初始化：initialized != 1 时调用
+     *   kmalloc_init()。多核并发首次调用时，kmalloc_init 重置锁会
+     *   导致状态不一致与死锁。
+     *   kmalloc_init 必须在 kernel_main 中显式、单线程地调用一次
+     *   （当前已是如此），运行期不得再触发。
+     *   因此这里不再尝试初始化，未初始化时直接返回 NULL。
+     */
     if (s_kmalloc_state.initialized != 1U)
     {
-        (void)kmalloc_init();
+        return NULL;
     }
 
     /* 大小限制 */

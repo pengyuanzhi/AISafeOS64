@@ -26,6 +26,7 @@
 #include <kernel/vmspace.h>
 #include <kernel/page_table.h>
 #include <kernel/phys_mem.h>
+#include <kernel/virt_phys.h>
 #include <kernel/barrier.h>
 #include <arch/arm64/hal.h>
 #include <kernel/errno.h>
@@ -183,6 +184,29 @@ static vm_space_t s_kernel_space;
 static vm_space_t *s_current_space[CONFIG_MAX_CPUS];
 
 /* ========================================================================
+ * vm_space_t 静态对象池（P0-5）
+ *
+ * 原实现 vmspace_create 用 page_table_alloc()（4KB 页表内存）当
+ * vm_space_t 容器，类型不匹配且浪费/破坏页表分配器。现改用静态池：
+ *   - s_space_pool:       预分配的 vm_space_t 数组
+ *   - s_space_free_stack: 空闲槽位索引栈
+ *   - s_space_free_count: 栈中空闲数量
+ *   - s_space_pool_lock:  保护并发分配/归还
+ * ======================================================================== */
+
+/** @brief vm_space_t 静态池 */
+static vm_space_t s_space_pool[CONFIG_MAX_VM_SPACES];
+
+/** @brief 空闲槽位索引栈（栈顶在数组末尾，与 VMA 池约定一致） */
+static uint32_t s_space_free_stack[CONFIG_MAX_VM_SPACES];
+
+/** @brief 空闲槽位数量 */
+static uint32_t s_space_free_count;
+
+/** @brief vm_space_t 池锁 */
+static TicketLock_t s_space_pool_lock;
+
+/* ========================================================================
  * 地址空间子系统初始化
  * ======================================================================== */
 
@@ -201,6 +225,15 @@ kernel_status_t vmspace_subsys_init(void)
     }
     s_vma_free_count = CONFIG_MAX_VMAS;
     ticket_lock_init(&s_vma_pool_lock);
+
+    /* P0-5：初始化 vm_space_t 静态池（索引栈，栈顶在数组末尾） */
+    (void)memset(s_space_pool, 0, sizeof(s_space_pool));
+    for (i = 0U; i < CONFIG_MAX_VM_SPACES; i++)
+    {
+        s_space_free_stack[i] = (CONFIG_MAX_VM_SPACES - 1U) - i;
+    }
+    s_space_free_count = CONFIG_MAX_VM_SPACES;
+    ticket_lock_init(&s_space_pool_lock);
 
     /* 初始化内核地址空间 */
     s_kernel_space.pgd = NULL; /* 由 page_table_subsys_init 设置 */
@@ -245,10 +278,21 @@ kernel_status_t vmspace_create(vm_space_t **space)
         return -(int32_t)ENOMEM;
     }
 
-    /* 分配 vm_space_t 结构 */
-    /* 简化实现：使用静态分配的空间池 */
-    /* 在完整实现中，从对象池分配 */
-    new_space = (vm_space_t *)page_table_alloc();
+    /*
+     * P0-5 修复：
+     *   原实现用 page_table_alloc()（4KB 页表内存）当 vm_space_t 容器，
+     *   类型不匹配且破坏页表分配器。现从静态对象池分配 vm_space_t。
+     */
+    new_space = NULL;
+    ticket_lock_acquire(&s_space_pool_lock);
+    if (s_space_free_count > 0U)
+    {
+        uint32_t slot = s_space_free_stack[s_space_free_count - 1U];
+        s_space_free_count--;
+        new_space = &s_space_pool[slot];
+    }
+    ticket_lock_release(&s_space_pool_lock);
+
     if (new_space == NULL)
     {
         asid_free(new_asid);
@@ -259,7 +303,15 @@ kernel_status_t vmspace_create(vm_space_t **space)
     new_space->pgd = page_table_alloc();
     if (new_space->pgd == NULL)
     {
-        page_table_free((page_table_t *)new_space);
+        /* P0-5：归还 vm_space_t 到静态池 */
+        ticket_lock_acquire(&s_space_pool_lock);
+        if (s_space_free_count < CONFIG_MAX_VM_SPACES)
+        {
+            s_space_free_stack[s_space_free_count] =
+                (uint32_t)(new_space - &s_space_pool[0]);
+            s_space_free_count++;
+        }
+        ticket_lock_release(&s_space_pool_lock);
         asid_free(new_asid);
         return -(int32_t)ENOMEM;
     }
@@ -357,8 +409,15 @@ void vmspace_destroy(vm_space_t *space)
             uint64_t entry = space->pgd->entries[i];
             if (PTE_IS_VALID(entry) && PTE_IS_TABLE(entry))
             {
+                /*
+                 * P0-6 修复：
+                 *   pte_addr 是从 PTE 中解析出的物理地址（PA），
+                 *   原代码 page_table_free((page_table_t *)(uintptr_t)pte_addr)
+                 *   把 PA 当虚拟指针用，访问非法地址。
+                 *   page_table_free 期望的是内核虚拟地址，需先 phys_to_virt。
+                 */
                 paddr_t pte_addr = PTE_PADDR(entry);
-                page_table_free((page_table_t *)((uintptr_t)pte_addr));
+                page_table_free((page_table_t *)phys_to_virt(pte_addr));
             }
         }
         page_table_free(space->pgd);
@@ -369,8 +428,25 @@ void vmspace_destroy(vm_space_t *space)
     /* 释放 ASID */
     asid_free(space->asid);
 
-    /* 释放空间结构 */
-    page_table_free((page_table_t *)space);
+    /*
+     * P0-5 修复：
+     *   原实现用 page_table_free((page_table_t *)space) 释放 vm_space_t，
+     *   把 vm_space_t 当页表归还，破坏页表分配器。
+     *   现归还到静态 vm_space_t 对象池。仅对池内对象归还，
+     *   池外对象（理论上不存在）忽略以防越界。
+     */
+    if ((space >= &s_space_pool[0]) &&
+        (space < &s_space_pool[CONFIG_MAX_VM_SPACES]))
+    {
+        ticket_lock_acquire(&s_space_pool_lock);
+        if (s_space_free_count < CONFIG_MAX_VM_SPACES)
+        {
+            s_space_free_stack[s_space_free_count] =
+                (uint32_t)(space - &s_space_pool[0]);
+            s_space_free_count++;
+        }
+        ticket_lock_release(&s_space_pool_lock);
+    }
 }
 
 /* ========================================================================
@@ -392,10 +468,22 @@ void vmspace_switch(vm_space_t *space)
 
     if (space->pgd != NULL)
     {
-        pgd_phys = (paddr_t)((uintptr_t)space->pgd);
+        /*
+         * P0-4 修复：
+         *   原代码 pgd_phys = (paddr_t)((uintptr_t)space->pgd) 直接把
+         *   高地址虚拟指针（TTBR1 区，0xFFFF...）当物理地址写 TTBR0，
+         *   导致取页表时访问非法物理地址，必然 fault。
+         *   现通过 virt_to_phys 取得 PGD 的真实物理地址。
+         *
+         *   关于 ASID：ARMv8 中 ASID 应放在 TTBR0 的高位（bit48+），
+         *   原代码 | asid 把 ASID 放进低位会污染物理地址位，错误。
+         *   当前阶段暂不 OR ASID（置 0），由 ASID 机制另作处理，
+         *   优先保证写入的 PA 正确。
+         */
+        pgd_phys = virt_to_phys(space->pgd);
 
-        /* 设置 TTBR0_EL1 */
-        hal_write_ttbr0((uint64_t)pgd_phys | (uint64_t)space->asid);
+        /* 设置 TTBR0_EL1，写入真实物理地址（ASID 暂设为 0） */
+        hal_write_ttbr0((uint64_t)pgd_phys);
     }
 
     barrier();

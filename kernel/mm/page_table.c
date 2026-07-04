@@ -434,48 +434,17 @@ kernel_status_t page_table_map(page_table_t *pgd,
     /* 计算页面属性 */
     uint64_t attr = compute_pte_attr(perm, is_user);
 
-    /* 诊断：打印 attr */
-    if (is_user)
-    {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[PT] perm=0x");
-        { char h[16]; uint32_t j;
-          for (j=0U;j<16U;j++){uint8_t n=(uint8_t)((perm>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE,h[j]); }
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " attr=0x");
-        { char h[16]; uint32_t j;
-          for (j=0U;j<16U;j++){uint8_t n=(uint8_t)((attr>>((15U-j)*4U))&0xFU);h[j]=(char)((n<10U)?('0'+n):('a'+n-10U));}
-          for(j=0U;j<16U;j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE,h[j]); }
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE,'\n');
-    }
+    /*
+     * 调试代码已移除（P0-1）：
+     *   原先在 is_user 路径上向 UART 打印 perm/attr 十六进制，
+     *   并在写入后读回 PTE 校验。UART 是毫秒级阻塞设备，
+     *   出现在用户态页映射热路径上会严重拖慢系统并破坏实时性。
+     *   热路径上不得保留任何 UART 输出。
+     */
 
     /* 写入 L3 PTE：物理地址 | 属性 */
     *entry3 = PTE_MAKE(paddr, attr);
     barrier();
-
-    /* 诊断：用户态映射时读回 PTE 验证 */
-    if (is_user)
-    {
-        uint64_t readback = *entry3;
-        paddr_t readback_paddr = PTE_PADDR(readback);
-        if (readback_paddr != (paddr & ~(PAGE_SIZE_4K - 1ULL)))
-        {
-            /* PTE 物理地址被污染 */
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[PT] CORRUPT! wrote=0x");
-            {
-                char h[16]; uint32_t j;
-                uint64_t v = PTE_MAKE(paddr, attr);
-                for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
-                for (j = 0U; j < 16U; j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE, h[j]);
-            }
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, " read=0x");
-            {
-                char h[16]; uint32_t j;
-                for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((readback>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
-                for (j = 0U; j < 16U; j++) hal_uart_putc((uint64_t)QEMU_UART0_BASE, h[j]);
-            }
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
-        }
-    }
 
     return KERNEL_OK;
 }

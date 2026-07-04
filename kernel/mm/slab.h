@@ -22,10 +22,17 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <kernel/spinlock.h>
 
 /* ========================================================================
  * 配置
- * ======================================================================== */
+ * ========================================================================
+ *
+ * P0-2 修复说明：
+ *   头文件原将 lock 字段声明为 void*（8 字节），而 slab.c 把它当作
+ *   TicketLock_t（12 字节）使用，导致 ticket_lock_acquire/release
+ *   越界写入相邻字段，造成内存踩踏。现已统一为 TicketLock_t 类型。
+ */
 
 #ifndef SLAB_OBJECT_SIZE
 #define SLAB_OBJECT_SIZE  64  /* 对象大小 */
@@ -58,7 +65,7 @@ struct slab_cache
     void        *slabs;       /**< @brief Slab 链表 */
     size_t      num_slabs;    /**< @brief Slab 节点数量 */
     size_t      alloc_count;  /**< @brief 已分配对象数量 */
-    void        *lock;        /**< @brief 自旋锁 */
+    TicketLock_t lock;        /**< @brief 自旋锁（P0-2：原 void* 改为 TicketLock_t，避免越界踩踏） */
 };
 
 /* ========================================================================

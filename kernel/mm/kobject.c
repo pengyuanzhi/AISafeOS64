@@ -405,12 +405,26 @@ void kobj_remove_child(KObjHeader_t *parent, KObjHeader_t *child)
  *
  * @note 对应需求: KR-019
  * @warning 必须在子系统锁保护下调用全局链表操作
+ *
+ * P0-3 修复说明（违反 MISRA C:2012 规则 17.2 "函数不得递归调用"）：
+ *   原实现中 kobj_ref_dec -> kobj_destroy -> (遍历 children)
+ *   -> kobj_ref_dec -> kobj_destroy 形成间接递归，深层对象树会
+ *   耗尽栈空间。现已改为完全迭代式：使用显式数组当工作栈，
+ *   不再调用 kobj_ref_dec。对每个子对象直接做引用计数原子递减，
+ *   归零则压栈继续销毁其孙对象。
  */
 void kobj_destroy(KObjHeader_t *obj)
 {
-    struct list_head *pos;
-    struct list_head *n;
-    KObjHeader_t *child;
+    /*
+     * 显式工作栈（迭代式级联销毁，避免递归）。
+     * 栈深度上限：理论上等于对象树最大深度。此处取与每种类型对象池
+     * 容量同量级的上限，足以覆盖最深的父子链。
+     */
+    #define KOBJ_DESTROY_STACK_SIZE  (KOBJ_POOL_CAPACITY * (uint32_t)KOBJ_TYPE_COUNT + 1U)
+
+    KObjHeader_t *destroy_stack[KOBJ_DESTROY_STACK_SIZE];
+    uint32_t stack_top;
+    KObjHeader_t *current_obj;
     kobj_type_t obj_type;
 
     if (obj == NULL)
@@ -418,55 +432,83 @@ void kobj_destroy(KObjHeader_t *obj)
         return;
     }
 
-    obj_type = obj->type;
-
     /* 类型边界检查 */
-    if ((uint32_t)obj_type >= (uint32_t)KOBJ_TYPE_COUNT)
+    if ((uint32_t)obj->type >= (uint32_t)KOBJ_TYPE_COUNT)
     {
         return;
     }
 
-    ticket_lock_acquire(&s_subsys_lock);
+    /* 压入初始待销毁对象 */
+    destroy_stack[0U] = obj;
+    stack_top = 1U;
 
     /*
-     * 遍历 children 链表，级联销毁所有子对象。
-     * 使用 list_for_each_safe 因为 kobj_ref_dec 可能修改链表。
-     * 注意：此处不使用递归，kobj_ref_dec 在 ref_count 归零时
-     * 会再次调用 kobj_destroy，形成迭代式级联销毁。
+     * 迭代处理栈上的对象，直到栈空。
+     * 每个对象出栈后：把它所有 children 的引用计数原子递减，
+     * 归零的 child 压栈等待销毁（不再调用 kobj_ref_dec，避免递归）。
      */
-    list_for_each_safe(pos, n, &obj->children)
+    while (stack_top > 0U)
     {
-        child = list_entry(pos, KObjHeader_t, sibling);
+        stack_top--;
+        current_obj = destroy_stack[stack_top];
 
-        /* 从兄弟链表中移除 */
-        list_del_init(&child->sibling);
+        /* 二次校验类型边界（防御） */
+        if ((uint32_t)current_obj->type >= (uint32_t)KOBJ_TYPE_COUNT)
+        {
+            continue;
+        }
+        obj_type = current_obj->type;
 
-        /* 重置父对象 ID */
-        child->parent_id = KOBJ_ID_INVALID;
+        ticket_lock_acquire(&s_subsys_lock);
 
         /*
-         * 减少子对象引用计数。
-         * 如果子对象引用计数归零，kobj_ref_dec 会再次
-         * 调用 kobj_destroy 完成级联销毁。
-         * 注意：这里在持锁状态下递归调用 kobj_ref_dec -> kobj_destroy，
-         * 会再次尝试获取锁。
-         * 同一把锁不能重复获取，因此此处先释放锁再递减，避免死锁。
+         * 处理当前对象的所有子对象。
+         * 直接对每个 child 做引用计数原子递减 + 归零判断 + 压栈，
+         * 全部迭代完成，绝不调用 kobj_ref_dec。
          */
+        while (!list_empty(&current_obj->children))
+        {
+            struct list_head *pos;
+            KObjHeader_t *child;
+            int32_t child_new_count;
+
+            pos = current_obj->children.next;
+            child = list_entry(pos, KObjHeader_t, sibling);
+
+            /* 从兄弟链表摘除并重置父 ID */
+            list_del_init(&child->sibling);
+            child->parent_id = KOBJ_ID_INVALID;
+
+            /*
+             * 原子递减 child 引用计数（与 kobj_ref_dec 等价的单步操作）。
+             * 锁仅保护链表结构，引用计数本身靠原子操作保证多核安全。
+             */
+            child_new_count = __atomic_sub_fetch(&child->ref_count, 1,
+                                                 __ATOMIC_ACQ_REL);
+
+            if (child_new_count <= 0)
+            {
+                /* 归零：压栈等待销毁其孙对象 */
+                if (stack_top < KOBJ_DESTROY_STACK_SIZE)
+                {
+                    destroy_stack[stack_top] = child;
+                    stack_top++;
+                }
+                /* 栈溢出时不压入，避免越界（理论上不应发生） */
+            }
+        }
+
+        /* 从全局对象链表中移除 */
+        list_del_init(&current_obj->global_node);
+
         ticket_lock_release(&s_subsys_lock);
-        (void)kobj_ref_dec(child);
-        ticket_lock_acquire(&s_subsys_lock);
+
+        /* 清零对象内存（释放前清除敏感数据） */
+        (void)memset(current_obj, 0, KOBJ_POOL_OBJ_SIZE);
+
+        /* 释放回对应类型的对象池 */
+        object_pool_free(&s_object_pools[obj_type], (void *)current_obj);
     }
-
-    /* 从全局对象链表中移除 */
-    list_del_init(&obj->global_node);
-
-    ticket_lock_release(&s_subsys_lock);
-
-    /* 清零对象内存（释放前清除敏感数据） */
-    (void)memset(obj, 0, KOBJ_POOL_OBJ_SIZE);
-
-    /* 释放回对应类型的对象池 */
-    object_pool_free(&s_object_pools[obj_type], (void *)obj);
 }
 
 /**
