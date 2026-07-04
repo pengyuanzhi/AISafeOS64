@@ -706,6 +706,17 @@ void NORETURN scheduler_start(void)
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
 
+    /* 用户态线程首次切换前，必须将 TTBR0 切换到用户 PGD。
+     *
+     * cpu_switch_to_first_task 直接 eret，不经过 schedule() 的
+     * mmu_switch_to_user 路径。如果不切换 TTBR0，eret 后用户地址
+     * 在内核恒等映射 PGD 里不可见，导致 Data Abort。
+     */
+    if (first_thread->is_user != 0U)
+    {
+        mmu_switch_to_user(first_thread->user_pgd);
+    }
+
     hal_uart_puts(0x09000000UL, "[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */
@@ -766,6 +777,12 @@ void NORETURN scheduler_start_secondary(void)
 
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
+
+    /* 用户态线程首次切换前切换 TTBR0（同 scheduler_start） */
+    if (first_thread->is_user != 0U)
+    {
+        mmu_switch_to_user(first_thread->user_pgd);
+    }
 
     /* 切换到第一个任务（永不返回） */
     cpu_switch_to_first_task(first_thread->context);

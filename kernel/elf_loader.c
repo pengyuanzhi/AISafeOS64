@@ -336,6 +336,9 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     {
         uint64_t offset;
         page_perm_t perm = elf_prot_to_perm(segments[i].prot);
+        /* 记录每页的物理地址，用于直接拷贝数据（恒等映射） */
+        paddr_t seg_pa[16];  /* 最多 16 页（64KB 段足够） */
+        uint32_t page_count = 0U;
 
         for (offset = 0ULL; offset < segments[i].length; offset += (uint64_t)PAGE_SIZE_4K)
         {
@@ -353,10 +356,61 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                 hal_uart_puts(ELF_UART_BASE, "[ELF] map FAIL\n");
                 return -(int32_t)ENOMEM;
             }
+
+            if (page_count < 16U)
+            {
+                seg_pa[page_count] = paddr;
+                page_count++;
+            }
         }
 
-        /* 诊断：段映射完成 */
-        hal_uart_puts(ELF_UART_BASE, "[ELF] seg mapped vaddr=0x");
+        /* 拷贝段数据：通过物理地址恒等映射直接写物理页 */
+        if (segments[i].filesz > 0ULL)
+        {
+            uint64_t copied = 0ULL;
+            uint32_t pi;
+            for (pi = 0U; pi < page_count && copied < segments[i].filesz; pi++)
+            {
+                uint64_t page_off = (pi * (uint64_t)PAGE_SIZE_4K);
+                uint64_t file_off = segments[i].offset + page_off;
+                uint64_t chunk = (uint64_t)PAGE_SIZE_4K;
+                uint8_t *dst;
+
+                if (chunk > (segments[i].filesz - copied))
+                {
+                    chunk = segments[i].filesz - copied;
+                }
+
+                /* 通过内核恒等映射写物理页 */
+                dst = (uint8_t *)(uintptr_t)seg_pa[pi];
+                {
+                    uint64_t k;
+                    for (k = 0ULL; k < chunk; k++)
+                    {
+                        dst[k] = elf_data[file_off + k];
+                    }
+                }
+                copied += chunk;
+            }
+        }
+
+        /* BSS 清零：filesz 之后的页通过物理地址清零 */
+        if (segments[i].length > segments[i].filesz)
+        {
+            uint64_t bss_start_page = segments[i].filesz / (uint64_t)PAGE_SIZE_4K;
+            uint32_t pi;
+            for (pi = (uint32_t)bss_start_page; pi < page_count; pi++)
+            {
+                uint8_t *bptr = (uint8_t *)(uintptr_t)seg_pa[pi];
+                uint64_t bk;
+                for (bk = 0ULL; bk < (uint64_t)PAGE_SIZE_4K; bk++)
+                {
+                    bptr[bk] = 0U;
+                }
+            }
+        }
+
+        hal_uart_puts(ELF_UART_BASE, "[ELF] seg loaded vaddr=0x");
         {
             char hex[16];
             uint32_t j;
@@ -371,53 +425,16 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                 hal_uart_putc(ELF_UART_BASE, hex[j]);
             }
         }
-        hal_uart_puts(ELF_UART_BASE, " filesz=");
+        hal_uart_puts(ELF_UART_BASE, " pages=");
         {
             char dec[8];
             uint32_t j;
-            uint64_t v = segments[i].filesz;
-            for (j = 0U; j < 8U; j++) { dec[j] = (char)('0' + (v % 10ULL)); v /= 10ULL; }
+            uint32_t v = page_count;
+            for (j = 0U; j < 8U; j++) { dec[j] = (char)('0' + (v % 10U)); v /= 10U; }
             j = 8U; while (j > 1U && dec[j-1U] == '0') j--;
             while (j > 0U) hal_uart_putc(ELF_UART_BASE, dec[--j]);
         }
         hal_uart_putc(ELF_UART_BASE, '\n');
-
-        /* 拷贝段数据（filesz 字节）到用户空间 */
-        if (segments[i].filesz > 0ULL)
-        {
-            copy_to_user_space(user_pgd_ptr, segments[i].vaddr,
-                               elf_data + segments[i].offset,
-                               segments[i].filesz);
-        }
-
-        /* BSS 区域清零（filesz 到 memsz 之间），通过物理地址恒等映射 */
-        if (segments[i].length > segments[i].filesz)
-        {
-            uint64_t bss_vaddr = segments[i].vaddr + segments[i].filesz;
-            uint64_t bss_size = segments[i].length - segments[i].filesz;
-            uint64_t boff;
-            for (boff = 0ULL; boff < bss_size; boff += PAGE_SIZE_4K)
-            {
-                paddr_t bpaddr;
-                uint64_t bchunk = PAGE_SIZE_4K;
-                uint8_t *bptr;
-                uint64_t bk;
-
-                if (page_table_lookup(user_pgd_ptr, bss_vaddr + boff, &bpaddr) != KERNEL_OK)
-                {
-                    break;
-                }
-                if (bchunk > (bss_size - boff))
-                {
-                    bchunk = bss_size - boff;
-                }
-                bptr = (uint8_t *)(uintptr_t)bpaddr;
-                for (bk = 0ULL; bk < bchunk; bk++)
-                {
-                    bptr[bk] = 0U;
-                }
-            }
-        }
     }
 
     /* 分配用户栈（映射 ELF_USER_STACK_TOP 下方若干页） */
@@ -448,7 +465,7 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     tid = kthread_create(thread_name,
                          (kthread_entry_t)header.e_entry,
                          NULL,
-                         (priority_t)120U,
+                         (priority_t)200U,
                          KTHREAD_POLICY_FIFO,
                          CONFIG_STACK_SIZE_DEFAULT);
     if (tid == THREAD_ID_INVALID)
