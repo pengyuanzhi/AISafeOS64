@@ -395,6 +395,11 @@ void hal_wfe(void);  /* 替代 wfe 指令（scheduler.c 5处、thread.c 2处、s
 - ❌ **禁用条件编译掩盖问题**：如 `#if 0` 或 `#if CONFIG_DEBUG` 排除有问题的代码
 - ❌ **禁止"能用就行"**：代码不仅要工作，还必须设计合理、架构正确
 - ❌ **禁止绕过 HAL**：内核核心代码不得直接操作硬件寄存器
+- ❌ **禁止 Demand Paging / 内存换出**：硬实时系统要求 WCET 可静态分析。
+  demand paging 引入不可预测的缺页中断延迟（毫秒级），破坏时序确定性。
+  所有用户内存必须**预映射（eager mapping）**，物理内存必须预留保证。
+  参照 seL4/QNX/VxWorks 等安全关键 RTOS 的设计：无换出、无 overcommit。
+  缺页即程序错误（越界/空指针），终止出错线程。
 
 ### 验证标准
 

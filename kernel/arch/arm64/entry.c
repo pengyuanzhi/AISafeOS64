@@ -223,22 +223,29 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
      */
     if (from_el0 != 0U)
     {
-        /* EL0 缺页处理：通过 VMA 查找判断是否是合法地址 */
+        /* EL0 缺页处理（实时系统设计）：
+         * 安全关键 RTOS 不使用 demand paging（破坏 WCET 可分析性）。
+         * 所有用户内存必须在程序启动时预映射（eager mapping）。
+         * 缺页 = 程序错误（越界访问/空指针），终止出错线程。
+         * VMA 查找仅用于诊断（告知出错区域类型）。 */
         if ((ec == 0x20U) || (ec == 0x21U) ||
             (ec == 0x24U) || (ec == 0x25U))
         {
-            /* Instruction/Data Abort：检查 VMA */
             vm_space_t *space = vmspace_get_current();
             if (space != NULL)
             {
                 vma_t *vma = vmspace_find_vma(space, (vaddr_t)far);
                 if (vma != NULL)
                 {
-                    /* 地址在已注册 VMA 范围内：
-                     * 当前实现终止线程（无 demand paging）。
-                     * 后续 demand paging 实现后，此处应按需映射物理页。 */
+                    /* VMA 命中但缺页：权限不符或预映射遗漏，诊断后终止 */
                     hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                                   "[exception] EL0 fault in VMA region (demand paging TODO)\n");
+                                   "[exception] EL0 page fault in mapped VMA region\n");
+                }
+                else
+                {
+                    /* 地址不在任何 VMA 范围：非法访问 */
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                                   "[exception] EL0 illegal address access\n");
                 }
             }
         }
