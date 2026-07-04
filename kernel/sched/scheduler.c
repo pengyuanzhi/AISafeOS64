@@ -338,6 +338,14 @@ static void idle_task_entry(void *arg)
 
     for (;;)
     {
+        /* idle 线程检查 need_resched：中断中可能请求了重调度，
+         * 此处执行实际的上下文切换（idle 是最低优先级，切换安全）。 */
+        if (scheduler_test_and_clear_need_resched() != 0U)
+        {
+            schedule();
+            continue;
+        }
+
         hal_wfe();
     }
 }
@@ -390,6 +398,7 @@ kernel_status_t scheduler_init(void)
         cpu_q->nr_running = 0U;
         cpu_q->current_thread = NULL;
         cpu_q->idle_thread = NULL;
+        cpu_q->need_resched = 0U;
     }
 
     /* 初始化线程表 */
@@ -408,6 +417,8 @@ kernel_status_t scheduler_init(void)
         thread->time_slice_reload = 0U;
         thread->rq_list.next = &thread->rq_list;
         thread->rq_list.prev = &thread->rq_list;
+        thread->edf_node.next = &thread->edf_node;
+        thread->edf_node.prev = &thread->edf_node;
         thread->sleep_node.next = &thread->sleep_node;
         thread->sleep_node.prev = &thread->sleep_node;
         thread->wakeup_tick = 0ULL;
@@ -614,6 +625,49 @@ void scheduler_load_current(KThread_t *thread)
 }
 
 /* ========================================================================
+ * need_resched 标志管理
+ * ======================================================================== */
+
+void scheduler_set_need_resched(void)
+{
+    uint32_t cpu_id;
+    cpu_id = hal_get_cpu_id();
+    g_scheduler.cpu_queues[cpu_id].need_resched = 1U;
+    barrier();
+}
+
+uint32_t scheduler_test_and_clear_need_resched(void)
+{
+    uint32_t cpu_id;
+    PerCPUReadyQueue_t *cpu_q;
+    uint32_t flag;
+
+    cpu_id = hal_get_cpu_id();
+    cpu_q = &g_scheduler.cpu_queues[cpu_id];
+
+    flag = cpu_q->need_resched;
+    if (flag != 0U)
+    {
+        cpu_q->need_resched = 0U;
+        barrier();
+    }
+
+    return flag;
+}
+
+void scheduler_irq_exit_check(void)
+{
+    /* IRQ 出口路径调用：中断仍关闭（由汇编向量保证）。
+     * 若中断中标记了需要重调度，则在此处调用 schedule()。
+     * 此处位于 IRQ 处理边界，context_switch 的切栈不会破坏 IRQ 帧栈
+     * （帧栈已恢复到被中断线程的内核栈）。 */
+    if (scheduler_test_and_clear_need_resched() != 0U)
+    {
+        schedule();
+    }
+}
+
+/* ========================================================================
  * 触发调度
  * ======================================================================== */
 
@@ -703,6 +757,17 @@ void schedule(void)
     cpu_q->current_thread = next;
     next->state = KTHREAD_STATE_RUNNING;
 
+    /* 临界区到此为止：锁仅保护 pick_next + dequeue + enqueue +
+     * current_thread 设置。后续 ELR/SPSR/MMU/guard/context_switch
+     * 不操作就绪队列，移到锁外执行以缩短临界区。
+     *
+     * 注意：这里用 ticket_lock_release（而非 release_irqrestore）保持中断关闭。
+     * 从释锁到 context_switch 之间若开启中断，定时器 IRQ 可能重入
+     * schedule()（scheduler_irq_exit_check），而此时 prev 上下文尚未保存，
+     * 会破坏寄存器。故此窗口内必须禁用中断，待 context_switch 切到 next
+     * 后再恢复（见函数末尾）。 */
+    ticket_lock_release(&cpu_q->lock);
+
     /* 保存当前 ELR/SPSR 到 prev context (context[13]/[14]) */
     if (prev != NULL)
     {
@@ -725,9 +790,6 @@ void schedule(void)
     hal_write_spsr(next->context[14U]);
     hal_isb();
 
-    /* 释放锁（必须在 context_switch 之前，避免持锁切换栈导致锁无法释放） */
-    ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
-
     /* 栈金丝雀检查：检测 prev 线程是否发生栈溢出 */
     if ((prev != NULL) && (prev->guard.enabled) &&
         (!stack_guard_check(&prev->guard)))
@@ -740,8 +802,14 @@ void schedule(void)
         kthread_exit();
     }
 
-    /* 执行上下文切换 */
+    /* 执行上下文切换（切换到 next 的栈与 callee-saved 寄存器） */
     context_switch(prev->context, next->context);
+
+    /* ---- 此处是"被切换回来"的线程恢复执行的位置 ----
+     * context_switch 返回意味着本线程（作为 next）被重新调度。
+     * 此时中断仍关闭（切走时关掉的），恢复进入 schedule() 前的中断状态。
+     * 注意：irq_state 是本线程上次进入 schedule() 时保存的 DAIF。 */
+    hal_irq_restore(irq_state);
 }
 
 /* ========================================================================
@@ -776,19 +844,22 @@ void scheduler_tick(void)
             current->time_slice--;
             if (current->time_slice == 0U)
             {
-                /* 时间片耗尽，重载并触发调度 */
+                /* 时间片耗尽，重载并请求重调度。
+                 * 不在中断中直接调 schedule()，仅置位 need_resched，
+                 * 由 IRQ 出口（scheduler_irq_exit_check）或 idle 线程处理。 */
                 current->time_slice = current->time_slice_reload;
-                schedule();
+                scheduler_set_need_resched();
                 return;
             }
         }
     }
 
-    /* 优先级抢占检查：如果就绪队列中有更高优先级线程，立即抢占 */
+    /* 优先级抢占检查：如果就绪队列中有更高优先级线程，请求重调度。
+     * 同样仅置位 need_resched，不在中断上下文执行 context_switch。 */
     next = scheduler_pick_next();
     if ((next != NULL) && (next != current) && (next->prio > current->prio))
     {
-        schedule();
+        scheduler_set_need_resched();
     }
 
     /* SMP 负载均衡检查 */

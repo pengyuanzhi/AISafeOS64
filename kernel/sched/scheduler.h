@@ -54,6 +54,7 @@ typedef struct CACHE_ALIGN(64)
     uint32_t nr_running;                                      /**< @brief 就绪线程总数 */
     KThread_t *current_thread;                                /**< @brief 当前运行线程 */
     KThread_t *idle_thread;                                   /**< @brief idle 线程 */
+    volatile uint32_t need_resched;                           /**< @brief 需重新调度标志（中断中置位，出口/闲时检查） */
 } PerCPUReadyQueue_t;
 
 /* ========================================================================
@@ -183,9 +184,39 @@ KThread_t *scheduler_pick_next(void);
 /**
  * @brief 时钟滴答处理
  *
- * @details 处理 RR 时间片递减，时间片耗尽时触发调度
+ * @details 处理 RR 时间片递减，时间片耗尽时触发调度。
+ *          本函数可能在中断上下文中调用，故不直接调 schedule()，
+ *          而是置位 need_resched，由 IRQ 出口或 idle 线程检查后调度。
  */
 void scheduler_tick(void);
+
+/**
+ * @brief 设置当前 CPU 的 need_resched 标志
+ *
+ * @details 在中断上下文中检测到需要重新调度时调用。
+ *          仅置位标志，不执行实际的上下文切换（避免在中断中切换栈）。
+ */
+void scheduler_set_need_resched(void);
+
+/**
+ * @brief 检查并清除当前 CPU 的 need_resched 标志
+ *
+ * @return 非 0 表示需要重新调度（标志已清除），0 表示无需调度
+ *
+ * @details 由 IRQ 出口路径或 idle 线程调用。读取后自动清除标志。
+ */
+uint32_t scheduler_test_and_clear_need_resched(void);
+
+/**
+ * @brief 中断返回前的重调度检查
+ *
+ * @details 在 IRQ 处理完成、返回到被中断线程之前调用。
+ *          若 need_resched 已置位，则在此处（中断已关闭、即将退出）
+ *          调用 schedule()，确保上下文切换不发生在 IRQ 嵌套栈帧中。
+ *          schedule() 内的 context_switch 会切栈，但切换发生在 IRQ 即将
+ *          返回的边界，符合 ARM64 中断返回语义。
+ */
+void scheduler_irq_exit_check(void);
 
 /**
  * @brief 设置当前 CPU 的运行线程

@@ -30,16 +30,19 @@
  *          - next_ticket: 下一个要发放的票号
  *          - serving_ticket: 当前正在服务的票号
  *          - 当 next_ticket == serving_ticket 时，锁空闲
+ *
+ * @note 不再使用 cpu_id 做递归检测：原检测依赖非原子读且 release 后
+ *       残留值导致误判 trap，在正常加锁路径触发随机崩溃，已移除。
+ *       ticket lock 不应递归获取，调用方需保证不在持锁时再次 acquire。
  */
 typedef struct
 {
     volatile uint32_t next_ticket;    /**< @brief 下一个发放的票号 */
     volatile uint32_t serving_ticket; /**< @brief 当前服务的票号 */
-    uint32_t cpu_id;                  /**< @brief 持有者的 CPU ID（调试用） */
 } TicketLock_t;
 
 /** @brief Ticket Lock 静态初始化 */
-#define TICKET_LOCK_INIT { 0U, 0U, 0xFFFFFFFFU }
+#define TICKET_LOCK_INIT { 0U, 0U }
 
 /* ========== 自旋锁 API ========== */
 

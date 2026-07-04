@@ -91,7 +91,6 @@ void ticket_lock_init(TicketLock_t *lock)
 
     lock->next_ticket = 0U;
     lock->serving_ticket = 0U;
-    lock->cpu_id = 0xFFFFFFFFU;
 }
 
 /* ============================================================================
@@ -105,12 +104,6 @@ void ticket_lock_acquire(TicketLock_t *lock)
     if (lock == NULL)
     {
         return;
-    }
-
-    if ((lock->cpu_id == hal_get_cpu_id()) &&
-        (lock->next_ticket != lock->serving_ticket))
-    {
-        __builtin_trap();
     }
 
     /* 原子地获取一个票号 */
@@ -130,9 +123,6 @@ void ticket_lock_acquire(TicketLock_t *lock)
         /* 使用 HAL 事件等待接口降低功耗 */
         hal_wfe();
     }
-
-    lock->cpu_id = hal_get_cpu_id();
-
 }
 
 /* ============================================================================
@@ -151,15 +141,9 @@ void ticket_lock_release(TicketLock_t *lock)
     serving = ticket_lock_load(&lock->serving_ticket);
     if (serving == ticket_lock_load(&lock->next_ticket))
     {
+        /* 锁空闲，无可释放（避免误判） */
         return;
     }
-
-    if (lock->cpu_id != hal_get_cpu_id())
-    {
-        return;
-    }
-
-    lock->cpu_id = 0xFFFFFFFFU;
 
     ticket_lock_store_release(&lock->serving_ticket, serving + 1U);
 
@@ -190,7 +174,6 @@ bool ticket_lock_try_acquire(TicketLock_t *lock)
     success = ticket_lock_cas(&lock->next_ticket, &expected, expected + 1U);
     if (success)
     {
-        lock->cpu_id = hal_get_cpu_id();
         return true;
     }
 
@@ -223,12 +206,6 @@ uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)
     if (lock == NULL)
     {
         return irq_state;
-    }
-
-    if ((lock->cpu_id == hal_get_cpu_id()) &&
-        (lock->next_ticket != lock->serving_ticket))
-    {
-        __builtin_trap();
     }
 
     hal_irq_disable();

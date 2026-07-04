@@ -14,9 +14,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define USER_CPU_ID  0U
-#define CPU_NONE     0xFFU
-
 void ticket_lock_init(TicketLock_t *lock)
 {
     if (lock == NULL)
@@ -26,7 +23,6 @@ void ticket_lock_init(TicketLock_t *lock)
 
     lock->next_ticket = 0U;
     lock->serving_ticket = 0U;
-    lock->cpu_id = CPU_NONE;
 }
 
 void ticket_lock_acquire(TicketLock_t *lock)
@@ -45,8 +41,6 @@ void ticket_lock_acquire(TicketLock_t *lock)
     {
         serving = __atomic_load_n(&lock->serving_ticket, __ATOMIC_ACQUIRE);
     } while (serving != my_ticket);
-
-    lock->cpu_id = USER_CPU_ID;
 }
 
 void ticket_lock_release(TicketLock_t *lock)
@@ -56,7 +50,6 @@ void ticket_lock_release(TicketLock_t *lock)
         return;
     }
 
-    lock->cpu_id = CPU_NONE;
     __atomic_store_n(&lock->serving_ticket,
                      lock->serving_ticket + 1U,
                      __ATOMIC_RELEASE);
@@ -80,7 +73,6 @@ bool ticket_lock_try_acquire(TicketLock_t *lock)
         if (__atomic_compare_exchange_n(&lock->next_ticket, &next, next + 1U,
                                          false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
         {
-            lock->cpu_id = USER_CPU_ID;
             return true;
         }
     }
@@ -95,7 +87,7 @@ bool ticket_lock_is_held(const TicketLock_t *lock)
         return false;
     }
 
-    return (lock->cpu_id != CPU_NONE);
+    return (lock->next_ticket != lock->serving_ticket) ? true : false;
 }
 
 uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)

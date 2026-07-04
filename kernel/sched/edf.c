@@ -103,7 +103,7 @@ kernel_status_t edf_init(void)
     {
         INIT_LIST_HEAD(&s_edf_queues[cpu].tasks);
         s_edf_queues[cpu].count = 0U;
-        s_edf_queues[cpu].lock = 0U;
+        ticket_lock_init(&s_edf_queues[cpu].lock);
         s_edf_queues[cpu].total_utilization = 0ULL;
 
         for (i = 0U; i < CONFIG_MAX_THREADS; i++)
@@ -224,6 +224,7 @@ void edf_enqueue(KThread_t *thread)
     KThread_t *entry;
     edf_params_t *thread_params;
     edf_params_t *entry_params;
+    uint32_t irq_state;
 
     if (thread == NULL)
     {
@@ -238,11 +239,14 @@ void edf_enqueue(KThread_t *thread)
         return;
     }
 
+    /* 关中断 + 自旋锁，SMP 下保护链表插入排序 */
+    irq_state = ticket_lock_acquire_irqsave(&queue->lock);
+
     /* 按绝对截止时间升序插入 */
     pos = queue->tasks.next;
     while (pos != &queue->tasks)
     {
-        entry = container_of(pos, KThread_t, rq_list);
+        entry = container_of(pos, KThread_t, edf_node);
         entry_params = edf_get_thread_params(entry->tid);
 
         if (entry_params != NULL)
@@ -256,11 +260,13 @@ void edf_enqueue(KThread_t *thread)
         pos = pos->next;
     }
 
-    /* 在 pos 之前插入 */
-    list_add_tail(&thread->rq_list, pos);
+    /* 在 pos 之前插入（使用独立的 edf_node，不复用 rq_list） */
+    list_add_tail(&thread->edf_node, pos);
     queue->count++;
 
     barrier();
+
+    ticket_lock_release_irqrestore(&queue->lock, irq_state);
 }
 
 /* ========================================================================
@@ -274,12 +280,20 @@ KThread_t *edf_pick_next(void)
 
     queue = edf_get_queue();
 
+    /* 调用者（schedule/scheduler_pick_next）已通过 irqsave 持有 cpu_q->lock，
+     * 中断已关闭。此处使用独立的 EDF 队列锁保护链表读取，
+     * 仅用普通 acquire/release（中断已禁用，无需再次 irqsave）。 */
+    ticket_lock_acquire(&queue->lock);
+
     if (list_empty(&queue->tasks) != 0)
     {
+        ticket_lock_release(&queue->lock);
         return NULL;
     }
 
-    next = list_first_entry(&queue->tasks, KThread_t, rq_list);
+    next = list_first_entry(&queue->tasks, KThread_t, edf_node);
+
+    ticket_lock_release(&queue->lock);
     return next;
 }
 
@@ -319,8 +333,10 @@ void edf_tick(void)
     /* 检查是否超过 WCET */
     if (params->runtime >= params->wcet)
     {
-        /* WCET 耗尽，让出 CPU */
-        schedule();
+        /* WCET 耗尽，让出 CPU。
+         * edf_tick 运行于中断上下文，仅置位 need_resched，
+         * 由 IRQ 出口或 idle 线程执行实际调度。 */
+        scheduler_set_need_resched();
         return;
     }
 
@@ -328,8 +344,8 @@ void edf_tick(void)
     if (now >= params->absolute_deadline)
     {
         params->overrun_count++;
-        /* 截止时间到达，重新调度 */
-        schedule();
+        /* 截止时间到达，请求重新调度（不在中断中切换栈） */
+        scheduler_set_need_resched();
         return;
     }
 }

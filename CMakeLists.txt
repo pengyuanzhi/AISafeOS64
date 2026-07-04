@@ -255,7 +255,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME test_kmalloc COMMAND test_kmalloc)
 
     # test_kmalloc_kernel — kmalloc 内核实现测试
-    add_executable(test_kmalloc_kernel tests/test_kmalloc_kernel.c kernel/mm/kmalloc.c lib/kernel_string.c)
+    add_executable(test_kmalloc_kernel tests/test_kmalloc_kernel.c kernel/mm/kmalloc.c lib/kernel_string.c tests/mock_spinlock.c)
     target_include_directories(test_kmalloc_kernel PRIVATE ${CMAKE_SOURCE_DIR} ${TEST_INCLUDE_DIRS})
     target_compile_options(test_kmalloc_kernel PRIVATE -std=c11 -Wall -Wextra -Wno-unused-function -Wno-sign-comparison -Wno-missing-prototypes -Wno-missing-declarations -Wno-old-style-definition -Wno-nested-externs -Wno-implicit-function-declaration -Wno-error)
     target_compile_definitions(test_kmalloc_kernel PRIVATE TEST_HOST_MODE)

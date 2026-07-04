@@ -181,6 +181,8 @@ thread_id_t kthread_create(const char *name,
     thread->time_slice_reload = thread->time_slice;
     thread->rq_list.next = &thread->rq_list;
     thread->rq_list.prev = &thread->rq_list;
+    thread->edf_node.next = &thread->edf_node;
+    thread->edf_node.prev = &thread->edf_node;
     thread->sleep_node.next = &thread->sleep_node;
     thread->sleep_node.prev = &thread->sleep_node;
     thread->wakeup_tick = 0ULL;

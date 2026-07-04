@@ -22,6 +22,7 @@
 #include <kernel/types.h>
 #include <kernel/config.h>
 #include <kernel/list.h>
+#include <kernel/spinlock.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "thread.h"
@@ -81,7 +82,7 @@ typedef struct
 {
     struct list_head tasks;       /**< @brief 就绪任务链表 */
     uint32_t count;              /**< @brief 就绪任务计数 */
-    uint32_t lock;               /**< @brief 队列锁 */
+    TicketLock_t lock;           /**< @brief 队列自旋锁（SMP 并发保护） */
     uint64_t total_utilization;  /**< @brief CPU 利用率（千分比） */
 } edf_ready_queue_t;
 

@@ -123,7 +123,8 @@ typedef struct KThread
     KThreadPolicy_t policy; /**< @brief 调度策略 */
     uint32_t time_slice;   /**< @brief 剩余时间片 */
     uint32_t time_slice_reload; /**< @brief 时间片重载值 */
-    struct list_head rq_list;  /**< @brief 就绪队列链表节点 */
+    struct list_head rq_list;  /**< @brief 就绪队列链表节点（仅供位图调度器使用） */
+    struct list_head edf_node; /**< @brief EDF 就绪队列链表节点（独立于 rq_list） */
     struct list_head sleep_node; /**< @brief 睡眠队列链表节点 */
     tick_t wakeup_tick;    /**< @brief 唤醒时刻（绝对 tick） */
     uint8_t is_user;       /**< @brief 是否为用户态线程（非0=EL0线程） */

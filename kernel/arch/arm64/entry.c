@@ -319,6 +319,12 @@ void irq_handler(void)
 
     /* 通知 GIC 中断处理完成 */
     gic_end_of_interrupt(irq);
+
+    /* 中断返回前检查重调度标志。
+     * scheduler_tick/edf_tick 在中断中仅置位 need_resched，
+     * 此处（中断已处理完成、即将返回）执行实际调度，
+     * 避免 context_switch 在 IRQ 处理中途切栈导致栈混淆。 */
+    scheduler_irq_exit_check();
 }
 
 /**
