@@ -135,7 +135,12 @@ static uint64_t compute_pte_attr(page_perm_t perm, bool is_user)
         bool has_write = ((perm & PAGE_PERM_WRITE) != 0U);
         bool has_exec = ((perm & PAGE_PERM_EXEC) != 0U);
 
-        if (has_write)
+        if (has_write && has_exec)
+        {
+            /* 用户态 RWX（ELF 单段含代码+数据，需要可读写可执行） */
+            attr = PTE_VALID | PTE_AF | PTE_AP_ALL_RW | PTE_NG;
+        }
+        else if (has_write)
         {
             /* 用户态可读写（执行禁止） */
             attr = PTE_USER_DATA;

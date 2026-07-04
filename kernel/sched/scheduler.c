@@ -41,6 +41,10 @@ extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
                                       uint64_t arg, uint64_t stack_top);
 extern void cpu_switch_to_first_task(uint64_t *ctx);
 
+/* 汇编版 mmu_switch_to_user（通过 TTBR1 高地址执行 TTBR0 切换，
+ * 避免切换后低地址内核代码取指失败） */
+extern void mmu_switch_to_user_asm(uint64_t user_pgd);
+
 /* 前向声明: 链接脚本定义的堆起止符号 */
 extern char __heap_start[];
 extern char __heap_end[];
@@ -606,7 +610,7 @@ void schedule(void)
     /* P0-2: 用户态地址空间隔离 - 切换 TTBR0 */
     if (next->is_user != 0U)
     {
-        mmu_switch_to_user(next->user_pgd);
+        mmu_switch_to_user_asm(next->user_pgd);
     }
     else
     {
@@ -709,13 +713,12 @@ void NORETURN scheduler_start(void)
     /* 用户态线程首次切换前，必须将 TTBR0 切换到用户 PGD。
      *
      * cpu_switch_to_first_task 直接 eret，不经过 schedule() 的
-     * mmu_switch_to_user 路径。如果不切换 TTBR0，eret 后用户地址
-     * 在内核恒等映射 PGD 里不可见，导致 Data Abort。
+     * 临时验证：用内核 PGD，不切换 TTBR0。
      */
-    if (first_thread->is_user != 0U)
-    {
-        mmu_switch_to_user(first_thread->user_pgd);
-    }
+    /* if (first_thread->is_user != 0U)
+       {
+           mmu_switch_to_user_asm(first_thread->user_pgd);
+       } */
 
     hal_uart_puts(0x09000000UL, "[k] Start sched\n");
 
@@ -781,7 +784,7 @@ void NORETURN scheduler_start_secondary(void)
     /* 用户态线程首次切换前切换 TTBR0（同 scheduler_start） */
     if (first_thread->is_user != 0U)
     {
-        mmu_switch_to_user(first_thread->user_pgd);
+        mmu_switch_to_user_asm(first_thread->user_pgd);
     }
 
     /* 切换到第一个任务（永不返回） */

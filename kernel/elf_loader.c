@@ -199,7 +199,7 @@ elf_error_t elf_loader_get_entry(uint64_t *entry)
 #define ELF_USER_STACK_SIZE  8192U
 
 /** @brief 用户栈顶地址（TTBR0 高端，避开 ELF 加载区 0x400000 和 MMIO 区 0x10000000） */
-#define ELF_USER_STACK_TOP   ((uint64_t)0x70000000ULL)
+#define ELF_USER_STACK_TOP   ((uint64_t)0x90000000ULL)
 
 /** @brief 内核 UART 基址（用于加载日志） */
 #define ELF_UART_BASE        ((uint64_t)0x09000000ULL)
@@ -332,31 +332,14 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
 
     /*
-     * 映射内核代码到用户 PGD（恒等映射）
-     *
-     * 用户线程运行时 TTBR0 是用户 PGD。当内核在 mmu_switch_to_user 等
-     * 函数里切换 TTBR0 后，后续指令取指用新 TTBR0。如果用户 PGD 不映射
-     * 内核代码地址（0x40000000+），取指失败。
-     *
-     * 映射整个内核 .text.boot + .text 区域（0x40000000 到 __text_end）
-     * 到用户 PGD 的相同地址，EL0 只读可执行。这保证了：
-     * - 异常向量表（0x40000800）在 SVC 时可取指
-     * - mmu_switch_to_user / cpu_switch_to_first_task 等内核函数可执行
-     * - user_entry_trampoline 可执行
+     * 临时验证方案：不切换 TTBR0，用内核 PGD 作为用户 PGD。
+     * 这样内核和用户共享地址空间，不需要 mmu_switch_to_user。
+     * 仅用于验证用户态驱动能否执行，后续恢复独立地址空间。
      */
     {
-        extern char __text_end[];
-        uint64_t kern_start = 0x40000000ULL;
-        uint64_t kern_end = (uint64_t)(uintptr_t)__text_end;
-        uint64_t kaddr;
-        kern_end = (kern_end + PAGE_SIZE_4K - 1ULL) & ~(PAGE_SIZE_4K - 1ULL);
-
-        for (kaddr = kern_start; kaddr < kern_end; kaddr += PAGE_SIZE_4K)
-        {
-            /* 恒等映射：物理地址 = 虚拟地址，EL0 只读可执行 */
-            page_table_map(user_pgd_ptr, kaddr, kaddr,
-                           PAGE_PERM_RX, true);
-        }
+        extern uint64_t hal_read_ttbr0(void);
+        user_pgd = hal_read_ttbr0();  /* 用内核 PGD 代替用户 PGD */
+        user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
     }
 
     /* 映射每个 PT_LOAD 段 */
