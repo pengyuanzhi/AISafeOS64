@@ -21,6 +21,7 @@
 #include <kernel/mm/kmalloc.h>
 #include <kernel/string.h>
 #include <kernel/errno.h>
+#include <kernel/spinlock.h>
 
 /* ========================================================================
  * 分配块头部结构
@@ -104,6 +105,7 @@ static struct
     block_header_t *first;      /**< @brief 空闲链表头指针 */
     kmalloc_stats_t stats;      /**< @brief 分配统计 */
     uint32_t initialized;       /**< @brief 初始化标志 */
+    TicketLock_t lock;          /**< @brief SMP 自旋锁（保护空闲链表） */
 } s_kmalloc_state;
 
 /* ========================================================================
@@ -279,6 +281,7 @@ int32_t kmalloc_init(void)
     /* 初始化分配器状态 */
     s_kmalloc_state.first = first_block;
     s_kmalloc_state.initialized = 1U;
+    ticket_lock_init(&s_kmalloc_state.lock);
 
     /* 清零统计 */
     (void)kernel_memset(&s_kmalloc_state.stats, 0, sizeof(kmalloc_stats_t));
@@ -294,6 +297,7 @@ void *kmalloc(size_t size)
     block_header_t *current;
     size_t total_size;
     void *result;
+    uint32_t irq_state;
 
     /* 参数验证 */
     if (size == 0U)
@@ -316,6 +320,9 @@ void *kmalloc(size_t size)
     /* 计算实际分配大小（对齐 + 头部） */
     total_size = ALIGN_UP(size, KMALLOC_ALIGN) + BLOCK_HEADER_SIZE;
 
+    /* SMP 安全：获取自旋锁（关中断，防止中断上下文并发） */
+    irq_state = ticket_lock_acquire_irqsave(&s_kmalloc_state.lock);
+
     /* 首次适配搜索 */
     current = s_kmalloc_state.first;
     while (current != NULL)
@@ -331,6 +338,7 @@ void *kmalloc(size_t size)
     if (current == NULL)
     {
         /* 没有找到足够大的空闲块 */
+        ticket_lock_release_irqrestore(&s_kmalloc_state.lock, irq_state);
         return NULL;
     }
 
@@ -354,6 +362,9 @@ void *kmalloc(size_t size)
 
     /* 返回数据区域（跳过头部） */
     result = (void *)((uint8_t *)current + BLOCK_HEADER_SIZE);
+
+    /* 释放自旋锁（恢复中断状态） */
+    ticket_lock_release_irqrestore(&s_kmalloc_state.lock, irq_state);
 
     return result;
 }
@@ -380,6 +391,7 @@ void *kzalloc(size_t size)
 void kfree(void *ptr)
 {
     block_header_t *block;
+    uint32_t irq_state;
 
     if (ptr == NULL)
     {
@@ -396,10 +408,14 @@ void kfree(void *ptr)
         return;
     }
 
+    /* SMP 安全：获取自旋锁（关中断） */
+    irq_state = ticket_lock_acquire_irqsave(&s_kmalloc_state.lock);
+
     /* 检查是否已经释放（双重释放检测） */
     if (block->is_free == 1U)
     {
         /* 双重释放，忽略 */
+        ticket_lock_release_irqrestore(&s_kmalloc_state.lock, irq_state);
         return;
     }
 
@@ -425,6 +441,9 @@ void kfree(void *ptr)
 
     /* 合并相邻空闲块 */
     merge_free_blocks(block);
+
+    /* 释放自旋锁（恢复中断状态） */
+    ticket_lock_release_irqrestore(&s_kmalloc_state.lock, irq_state);
 }
 
 /**
@@ -452,12 +471,16 @@ void kfree_secure(void *ptr, size_t size)
  */
 int32_t kmalloc_get_stats(kmalloc_stats_t *stats)
 {
+    uint32_t irq_state;
+
     if (stats == NULL)
     {
         return -(int32_t)EINVAL;
     }
 
+    irq_state = ticket_lock_acquire_irqsave(&s_kmalloc_state.lock);
     *stats = s_kmalloc_state.stats;
+    ticket_lock_release_irqrestore(&s_kmalloc_state.lock, irq_state);
 
     return 0;
 }
