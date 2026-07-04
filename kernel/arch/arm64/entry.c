@@ -2675,6 +2675,16 @@ void kernel_main(void)
         hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: cap subsys fail\n");
     }
 
+    /* ---- 初始化虚拟地址空间子系统（VMA 管理）---- */
+    {
+        extern kernel_status_t vmspace_subsys_init(void);
+        ret = vmspace_subsys_init();
+        if (ret != KERNEL_OK)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: vmspace subsys fail\n");
+        }
+    }
+
     /* ---- 第八步：初始化 SMP 多核 ---- */
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] SMP init\n");
 

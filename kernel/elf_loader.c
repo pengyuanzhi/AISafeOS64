@@ -21,6 +21,7 @@
 #include <kernel/types.h>
 #include <kernel/page_table.h>
 #include <kernel/virt_phys.h>
+#include <kernel/vmspace.h>
 #include <kernel/phys_mem.h>
 #include <kernel/mmu.h>
 #include <string.h>
@@ -253,6 +254,7 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     uint32_t seg_count = 0U;
     uint32_t i;
     elf_error_t err;
+    vm_space_t *user_space;       /* 用户虚拟地址空间（vmspace 抽象） */
     uint64_t user_pgd_pa;        /* 用户 PGD 物理地址（写 TTBR0 用） */
     page_table_t *user_pgd;      /* 用户 PGD 虚拟指针（C 代码访问用） */
     thread_id_t tid;
@@ -273,13 +275,13 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         return -(int32_t)EINVAL;
     }
 
-    /* 创建用户地址空间（独立 PGD，TTBR0 用户空间） */
-    user_pgd_pa = mmu_create_user_pgd();
-    if (user_pgd_pa == 0ULL)
+    /* 通过 vmspace 子系统创建用户地址空间（VMA 跟踪 + ASID + PGD） */
+    if (vmspace_create(&user_space) != KERNEL_OK)
     {
         return -(int32_t)ENOMEM;
     }
-    user_pgd = (page_table_t *)phys_to_virt(user_pgd_pa);
+    user_pgd = user_space->pgd;
+    user_pgd_pa = (uint64_t)virt_to_phys(user_pgd);
 
     /* 为每个 ELF 段分配物理页并映射到用户地址空间 */
     for (i = 0U; i < seg_count; i++)
