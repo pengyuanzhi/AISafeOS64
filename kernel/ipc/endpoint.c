@@ -500,12 +500,25 @@ kernel_status_t ipc_endpoint_create(thread_id_t owner_tid, kobj_id_t *ep_id)
 kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
 {
     ipc_endpoint_t *ep;
+    KThread_t *current;
     uint32_t irq_state;
 
     ep = get_endpoint(ep_id);
     if (!endpoint_is_valid(ep))
     {
         return -(int32_t)EINVAL;
+    }
+
+    current = kthread_get_current();
+    if (current == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 访问控制：只有端点 owner 才能 destroy */
+    if (ep->owner_tid != current->tid)
+    {
+        return -(int32_t)EACCES;
     }
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
@@ -721,6 +734,13 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
         return -(int32_t)ESRCH;
     }
 
+    /* 访问控制：只有端点 owner 才能 receive
+     * （能力系统过渡方案，后续将替换为 cap_validate） */
+    if (ep->owner_tid != current->tid)
+    {
+        return -(int32_t)EACCES;
+    }
+
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
 
     /* 保存接收方缓冲区信息 */
@@ -781,6 +801,7 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
                                uint32_t reply_size)
 {
     ipc_endpoint_t *ep;
+    KThread_t *current;
     uint32_t irq_state;
 
     (void)status;
@@ -789,6 +810,19 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
     if (!endpoint_is_valid(ep))
     {
         return -(int32_t)EINVAL;
+    }
+
+    current = kthread_get_current();
+    if (current == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 访问控制：只有端点 owner 才能 reply
+     * （能力系统过渡方案） */
+    if (ep->owner_tid != current->tid)
+    {
+        return -(int32_t)EACCES;
     }
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);

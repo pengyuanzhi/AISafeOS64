@@ -130,6 +130,7 @@ typedef struct KThread
     uint8_t _reserved[3];  /**< @brief 填充对齐 */
     vaddr_t user_sp;       /**< @brief 用户态栈指针（EL0 线程使用） */
     uint64_t user_pgd;     /**< @brief 用户态 PGD 物理地址（EL0 线程使用） */
+    void *cspace;          /**< @brief 线程关联的 CSpace（cspace_t*，能力空间） */
     stack_guard_config_t guard; /**< @brief 栈金丝雀保护配置 */
     char name[KTHREAD_NAME_MAX]; /**< @brief 线程名称 */
 } KThread_t;

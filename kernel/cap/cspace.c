@@ -32,6 +32,7 @@
 #include <kernel/config.h>
 #include <stdint.h>
 #include <string.h>
+#include "../../sched/scheduler.h"
 
 /* ========================================================================
  * 静态数据结构
@@ -797,8 +798,15 @@ cspace_t *cspace_from_root(cap_slot_t cspace_root)
  */
 cspace_t *cspace_get_current(void)
 {
-    /* TODO: 从当前线程 TCB 获取关联的 CSpace */
-    return NULL;
+    KThread_t *current;
+
+    current = kthread_get_current();
+    if (current == NULL)
+    {
+        return NULL;
+    }
+
+    return (cspace_t *)current->cspace;
 }
 
 /* ========================================================================
