@@ -262,14 +262,10 @@ void timer_interrupt_handler(void)
     timer_set_next_compare();
 
     /*
-     * 软件定时器队列、睡眠队列、调度器 tick 涉及与调度器的复杂交互，
-     * 当前仅在 CPU0 处理保证稳定性。从核只做 tick 递增和比较值重设。
-     *
-     * 每 CPU 队列和锁基础设施已就绪（s_timer_queues/s_sleep_queues/
-     * s_timer_locks/s_sleep_locks），待从核 context_switch 和 schedule()
-     * 路径完善后，可放开队列处理到所有 CPU。
+     * 每 CPU 独立处理软件定时器、睡眠唤醒、调度器 tick。
+     * per-CPU 队列（s_timer_queues/s_sleep_queues）+ 独立锁保证 SMP 安全。
+     * scheduler_tick() 内部按 cpu_id 获取 per-CPU 就绪队列。
      */
-    if (cpu_id == 0U)
     {
         timer_queue = &s_timer_queues[cpu_id];
         sleep_queue = &s_sleep_queues[cpu_id];
