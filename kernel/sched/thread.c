@@ -168,6 +168,11 @@ thread_id_t kthread_create(const char *name,
     thread->entry_arg = arg;
     thread->stack_base = stack_top - (vaddr_t)stack_size;
     thread->stack_size = stack_size;
+
+    /* 栈金丝雀保护：在栈底写入魔数值，调度切换时检测溢出 */
+    (void)stack_guard_setup(thread->stack_base, (uint64_t)stack_size,
+                             &thread->guard);
+
     thread->prio = prio;
     thread->policy = policy;
     thread->time_slice = (policy == KTHREAD_POLICY_RR)

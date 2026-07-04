@@ -357,6 +357,9 @@ kernel_status_t scheduler_init(void)
         return KERNEL_OK;
     }
 
+    /* 初始化栈保护子系统（金丝雀检测） */
+    (void)stack_guard_subsys_init();
+
     /* 初始化线程栈 Slab 缓存 */
     ret = thread_stack_slab_init();
     if (ret != KERNEL_OK)
@@ -623,6 +626,18 @@ void schedule(void)
     hal_write_elr(next->context[13U]);
     hal_write_spsr(next->context[14U]);
     hal_isb();
+
+    /* 栈金丝雀检查：检测 prev 线程是否发生栈溢出 */
+    if ((prev->guard.enabled) &&
+        (!stack_guard_check(&prev->guard)))
+    {
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                       "[GUARD] Stack overflow detected in thread ");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, prev->name);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        /* 栈溢出：终止线程 */
+        kthread_exit();
+    }
 
     /* 执行上下文切换 */
     context_switch(prev->context, next->context);

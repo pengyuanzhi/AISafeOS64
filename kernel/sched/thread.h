@@ -24,6 +24,7 @@
 #include <kernel/config.h>
 #include <kernel/list.h>
 #include <kernel/alignment.h>
+#include <kernel/stack_guard.h>
 #include <stdint.h>
 
 /* ========================================================================
@@ -129,6 +130,7 @@ typedef struct KThread
     uint8_t _reserved[3];  /**< @brief 填充对齐 */
     vaddr_t user_sp;       /**< @brief 用户态栈指针（EL0 线程使用） */
     uint64_t user_pgd;     /**< @brief 用户态 PGD 物理地址（EL0 线程使用） */
+    stack_guard_config_t guard; /**< @brief 栈金丝雀保护配置 */
     char name[KTHREAD_NAME_MAX]; /**< @brief 线程名称 */
 } KThread_t;
 
