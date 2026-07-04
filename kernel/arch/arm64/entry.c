@@ -2623,16 +2623,17 @@ void kernel_main(void)
         extern kernel_status_t drv_virtio_blk_register(void);
 
         (void)drv_uart_register();
-        (void)drv_virtio_blk_register();
+        /* virtio-blk 驱动注册禁用：已由引导读取器(boot_blk)接管设备，
+         * 后续将由用户态驱动 ELF 接管。避免 probe 重新初始化设备冲突。 */
+        /* (void)drv_virtio_blk_register(); */
 
         /* 注册 QEMU 平台设备 */
         /* PL011 UART @ 0x09000000, IRQ 33 */
         (void)device_register("pl011", DRIVER_TYPE_UART,
                               (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
 
-        /* VirtIO Block MMIO（probe 内部扫描 32 slot 自动发现设备） */
-        (void)device_register("virtio,blk", DRIVER_TYPE_BLOCK,
-                              (paddr_t)0x0A000000ULL, 0x200ULL, 48U, NULL);
+        /* VirtIO Block 由引导读取器管理，不再注册到驱动框架 */
+        /* (void)device_register("virtio,blk", ...); */
 
         /* 执行设备探测 */
         ret = device_probe_all();
@@ -2652,7 +2653,8 @@ void kernel_main(void)
         (void)ret;
     }
 
-    /* ---- VirtIO Block 读写验证 ---- */
+    /* ---- VirtIO Block 读写验证（已由引导读取器 boot_blk 接管，此处禁用）---- */
+#if 0
     {
         static uint8_t s_blk_buf[512U] __attribute__((aligned(8)));
         int64_t blk_ret;
@@ -2695,6 +2697,7 @@ void kernel_main(void)
             }
         }
     }
+#endif
 
     /* ---- VirtIO MMIO 设备扫描（已由上方读写验证覆盖，此处删除重复）---- */
 
@@ -3215,6 +3218,46 @@ void kernel_main(void)
 #else
     /* 生产模式：直接启动调度器 */
 #endif /* CONFIG_DEBUG */
+
+    /* ---- 初始化引导块设备读取器（用于加载用户态驱动 ELF）---- */
+    {
+        extern int32_t boot_blk_init(void);
+        extern int32_t boot_blk_read_sector(uint64_t sector, void *buf);
+        int32_t boot_ret = boot_blk_init();
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_blk_init = ");
+        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)boot_ret);
+        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+
+        /* 测试读扇区 0（验证引导读取器工作） */
+        if (boot_ret == 0)
+        {
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read start\n");
+            static uint8_t s_boot_test[512] __attribute__((aligned(8)));
+            int32_t rd_ret = boot_blk_read_sector(0U, s_boot_test);
+            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read(0) = ");
+            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)rd_ret);
+            if (rd_ret == 0)
+            {
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " [0]=0x");
+                uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_boot_test[0U]);
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " [1]=0x");
+                uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_boot_test[1U]);
+                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELF?=");
+                if ((s_boot_test[0U] == 0x7FU) &&
+                    (s_boot_test[1U] == (uint8_t)'E') &&
+                    (s_boot_test[2U] == (uint8_t)'L') &&
+                    (s_boot_test[3U] == (uint8_t)'F'))
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "YES");
+                }
+                else
+                {
+                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "no");
+                }
+            }
+            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        }
+    }
 
     /* 启动性能基准测试（线程在 scheduler_start 后执行） */
     kern_bench_start();

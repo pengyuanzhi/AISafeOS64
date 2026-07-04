@@ -122,6 +122,7 @@ set(KERNEL_DRIVER_SOURCES
     driver/driver_module.c
     driver/drv_uart.c
     driver/drv_virtio_blk.c
+    driver/drv_boot_blk.c
 )
 
 # ==============================================================================
