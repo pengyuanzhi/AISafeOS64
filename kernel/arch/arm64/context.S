@@ -176,6 +176,13 @@ cpu_switch_to_first_task:
     ldr     x9, [x0, #112]           /* context[14] = ELR */
     msr     elr_el1, x9
 
+    /* 如果 SPSR 指示 EL0（SPSR=0），设置 SP_EL0 = context[2]（x21 = user_sp） */
+    ldr     x9, [x0, #104]           /* 重读 SPSR */
+    cbnz    x9, .Lskip_sp_el0        /* 非 EL0 跳过 */
+    ldr     x9, [x0, #16]            /* context[2] = x21 = user_sp */
+    msr     sp_el0, x9
+.Lskip_sp_el0:
+
     /* 确保所有系统寄存器写入完成 */
     isb
 
@@ -281,13 +288,8 @@ arch_setup_elf_thread_context:
     /* context[10] = FP(x29) = 0 */
     str     xzr, [x0, #80]
 
-    /* context[11] = LR(x30) = user_entry_trampoline (TTBR1 高地址)
-     * trampoline 做 mov sp,x21; mov x0,x20; br x19
-     * x19=entry(TTBR0) 跳转到独立 ELF 入口 */
-    ldr     x9, =user_entry_trampoline
-    orr     x9, x9, #0x8000000000000000
-    orr     x9, x9, #0x7FFF000000000000
-    str     x9, [x0, #88]
+    /* context[11] = LR(x30) = entry（直接 ELF 入口，不用 trampoline） */
+    str     x1, [x0, #88]
 
     /* context[12] = SP = kernel_sp（内核栈） */
     str     x3, [x0, #96]
@@ -295,11 +297,11 @@ arch_setup_elf_thread_context:
     /* context[13] = SPSR_EL1 = 0x0（EL0t，所有中断使能） */
     str     xzr, [x0, #104]
 
-    /* context[14] = ELR_EL1 = user_entry_trampoline (TTBR1 高地址) */
-    ldr     x9, =user_entry_trampoline
-    orr     x9, x9, #0x8000000000000000
-    orr     x9, x9, #0x7FFF000000000000
-    str     x9, [x0, #112]
+    /* context[14] = ELR_EL1 = entry（直接 ELF 入口，TTBR0 低地址）
+     * cpu_switch_to_first_task 会设置 SP_EL0 = context[2] = user_sp */
+    str     x1, [x0, #112]
+
+    ret
 
     ret
 
@@ -346,32 +348,49 @@ user_entry_trampoline:
     .type mmu_switch_to_user_asm, @function
 mmu_switch_to_user_asm:
     /*
-     * 步骤 1：计算本函数在 TTBR1 高地址的对应地址。
-     * 高地址 = 低地址 | 0xFFFF000000000000
+     * 接收两个参数：
+     * x0 = 用户 PGD 物理地址
+     * x1 = 线程 context 指针（uint64_t *）
+     *
+     * 跳到 TTBR1 高地址，切换 TTBR0，TLB 失效，
+     * 然后直接恢复 context 并 eret（不返回低地址）。
+     * 这样 TLB 失效后不需要再从低地址取指。
      */
-    adr     x9, .Lswitch_high        /* 获取低地址 PC */
+    adr     x9, .Lswitch_high
     orr     x9, x9, #0x8000000000000000
     orr     x9, x9, #0x7FFF000000000000
-    br      x9                        /* 跳到 TTBR1 高地址执行 */
+    br      x9
 
 .Lswitch_high:
-    /* 现在在 TTBR1 高地址运行，切换 TTBR0 不影响取指 */
-
-    /* 保存 user_pgd（x0）到临时寄存器 */
-    mov     x10, x0
-
-    /* 写 TTBR0_EL1 = 用户 PGD */
-    msr     ttbr0_el1, x10
+    /* 在 TTBR1 高地址运行 */
+    msr     ttbr0_el1, x0         /* 切换 TTBR0 到用户 PGD */
     isb
+    /* 不失效 TLB：eret 后硬件自动用新 TTBR0 翻译。
+     * tlbi vmalle1 会清空 TTBR1 的内核映射 TLB，导致 eret 后
+     * trampoline 取指需要重新遍历页表，在 QEMU 上失败。 */
 
-    /* 失效 TLB（仅当前 CPU，非 Inner Shareable） */
-    tlbi    vmalle1
-    dsb     nsh
+    /*
+     * 直接执行 cpu_switch_to_first_task 的逻辑（内联）
+     * x1 = context 指针
+     * 恢复 callee-saved 寄存器，设置 SPSR/ELR，eret
+     */
+    ldp     x19, x20, [x1, #0]
+    ldp     x21, x22, [x1, #16]
+    ldp     x23, x24, [x1, #32]
+    ldp     x25, x26, [x1, #48]
+    ldp     x27, x28, [x1, #64]
+    ldp     x29, x30, [x1, #80]
+
+    ldr     x9, [x1, #96]          /* SP */
+    mov     sp, x9
+
+    ldr     x9, [x1, #104]         /* SPSR */
+    msr     spsr_el1, x9
+    ldr     x9, [x1, #112]         /* ELR */
+    msr     elr_el1, x9
+
     isb
-
-    /* 返回（LR 仍在低地址，但切回后 TTBR0 是用户 PGD，
-     * 调用者必须在用户 PGD 映射的低地址区域） */
-    ret
+    eret                            /* 进入用户线程（永不返回） */
 
 
 /* ========================================================================

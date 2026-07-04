@@ -135,6 +135,23 @@ static uint64_t compute_pte_attr(page_perm_t perm, bool is_user)
         bool has_write = ((perm & PAGE_PERM_WRITE) != 0U);
         bool has_exec = ((perm & PAGE_PERM_EXEC) != 0U);
 
+        /* 检查是否使用全局映射（不绑 ASID，EL0+EL1 共享） */
+        bool use_global = ((perm & 0x80U) != 0U);  /* bit 7 = global 标志 */
+
+        if (use_global)
+        {
+            /* 全局映射：EL0+EL1 可访问，不设 nG（不绑 ASID） */
+            if (has_write)
+            {
+                attr = PTE_VALID | PTE_AF | PTE_AP_ALL_RW;  /* 全局 RW */
+            }
+            else
+            {
+                attr = PTE_VALID | PTE_AF | PTE_AP_ALL_RO;  /* 全局 RO */
+            }
+            return attr;
+        }
+
         if (has_write && has_exec)
         {
             /* 用户态 RWX（ELF 单段含代码+数据，需要可读写可执行） */

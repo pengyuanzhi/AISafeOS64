@@ -140,6 +140,13 @@
 /** @brief 用户只读页属性 */
 #define PTE_USER_RO         (PTE_VALID | PTE_AF | PTE_AP_ALL_RO | PTE_NG | PTE_PXN | PTE_XN)
 
+/** @brief 全局共享页属性（EL0+EL1 可读可执行，全局，不绑 ASID）
+ *
+ * @details 用于用户 PGD 中映射内核代码（异常向量表等），
+ *          全局映射避免 ASID 不匹配导致 TLB miss。
+ */
+#define PTE_SHARED_CODE     (PTE_VALID | PTE_AF | PTE_AP_ALL_RO)
+
 /** @brief 用户设备页属性（Device nGnRnE，读写、执行禁止、非全局）
  *
  * @details 用于用户态驱动的 MMIO 映射和 DMA 内存映射。
@@ -153,8 +160,12 @@
  * 页表项操作宏
  * ======================================================================== */
 
-/** @brief 从物理地址和属性构造 PTE */
-#define PTE_MAKE(paddr, attr)    (((paddr) & ~(PAGE_SIZE_4K - 1ULL)) | (attr))
+/** @brief 从物理地址和属性构造 L3 PTE（页描述符）
+ *
+ * @details ARM64 L3 PTE 的 bit[1] 必须为 1（表示页描述符），
+ *          否则硬件视为无效条目。PTE_MAKE 自动包含此位。
+ */
+#define PTE_MAKE(paddr, attr)    (((paddr) & ~(PAGE_SIZE_4K - 1ULL)) | (attr) | PTE_TABLE)
 
 /** @brief 从 PTE 提取物理地址
  *

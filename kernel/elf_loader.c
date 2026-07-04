@@ -209,7 +209,8 @@ elf_error_t elf_loader_get_entry(uint64_t *entry)
  */
 static page_perm_t elf_prot_to_perm(uint8_t prot)
 {
-    page_perm_t perm = PAGE_PERM_READ;
+    /* 使用 bit 7 (0x80) 作为全局映射标志，避免 nG 位导致 ASID 不匹配 */
+    page_perm_t perm = (page_perm_t)(PAGE_PERM_READ | 0x80U);  /* 全局映射 */
 
     if ((prot & ELF_PF_W) != 0U)
     {
@@ -329,16 +330,15 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
         hal_uart_puts(ELF_UART_BASE, "[ELF] PGD alloc FAIL\n");
         return -(int32_t)ENOMEM;
     }
-    user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
 
     /*
-     * 临时验证方案：不切换 TTBR0，用内核 PGD 作为用户 PGD。
-     * 这样内核和用户共享地址空间，不需要 mmu_switch_to_user。
-     * 仅用于验证用户态驱动能否执行，后续恢复独立地址空间。
+     * 共享 PGD 方案：用内核 PGD（ASID 0，全局映射）作为用户 PGD。
+     * 避免独立 PGD 的 TTBR0 切换 + TLB/ASID 问题。
+     * ELF 加载到 0x80000000（内核 PGD 未映射区域）。
      */
     {
         extern uint64_t hal_read_ttbr0(void);
-        user_pgd = hal_read_ttbr0();  /* 用内核 PGD 代替用户 PGD */
+        user_pgd = hal_read_ttbr0();
         user_pgd_ptr = (page_table_t *)(uintptr_t)user_pgd;
     }
 
@@ -411,6 +411,33 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                     }
                 }
                 copied += chunk;
+            }
+
+            /* 验证物理页第一个字节 */
+            {
+                uint8_t *phys = (uint8_t *)(uintptr_t)seg_pa[0U];
+                uint8_t src_byte = elf_data[segments[i].offset];
+                hal_uart_puts(ELF_UART_BASE, "[ELF] phys[0]=0x");
+                { char h[2]; uint8_t n;
+                  n=(uint8_t)((phys[0U]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  n=(uint8_t)(phys[0U]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
+                hal_uart_puts(ELF_UART_BASE, " src[0]=0x");
+                { char h[2]; uint8_t n;
+                  n=(uint8_t)((src_byte>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  n=(uint8_t)(src_byte&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                  hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]); }
+                /* 打印 entry 处（offset 0x80）的 4 字节 */
+                hal_uart_puts(ELF_UART_BASE, " entry=");
+                { uint32_t k; uint8_t *ep = phys + 0x80U;
+                  for (k = 0U; k < 4U; k++) {
+                      char h[2]; uint8_t n;
+                      n=(uint8_t)((ep[k]>>4)&0xFU); h[0]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                      n=(uint8_t)(ep[k]&0xFU); h[1]=(char)((n<10U)?('0'+n):('a'+n-10U));
+                      hal_uart_putc(ELF_UART_BASE,h[0]); hal_uart_putc(ELF_UART_BASE,h[1]);
+                  }
+                }
+                hal_uart_putc(ELF_UART_BASE,'\n');
             }
         }
 
@@ -532,6 +559,21 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
                                        0U,
                                        kernel_sp,
                                        user_sp);
+        /* 诊断：验证 context */
+        hal_uart_puts(ELF_UART_BASE, "[ELF] ctx ELR=0x");
+        {
+            char h[16]; uint32_t j;
+            uint64_t v = thread->context[14U];
+            for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
+            for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
+        }
+        hal_uart_puts(ELF_UART_BASE, " SPSR=0x");
+        {
+            char h[16]; uint32_t j;
+            uint64_t v = thread->context[13U];
+            for (j = 0U; j < 16U; j++) { uint8_t n=(uint8_t)((v>>((15U-j)*4U))&0xFU); h[j]=(char)((n<10U)?('0'+n):('a'+n-10U)); }
+            for (j = 0U; j < 16U; j++) hal_uart_putc(ELF_UART_BASE, h[j]);
+        }
     }
 
     hal_uart_puts(ELF_UART_BASE, "[ELF] Loaded tid=");
