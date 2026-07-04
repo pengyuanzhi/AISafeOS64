@@ -64,7 +64,13 @@ typedef struct
 /**
  * @brief IC2 共享环形缓冲区
  *
- * @details 单生产者单消费者（SPSC）无锁环形缓冲区
+ * @details 单生产者单消费者（SPSC）无锁环形缓冲区。
+ *
+ *          描述符与数据区分离：本结构体仅持有索引/容量等元信息，
+ *          data 指针指向独立的静态数据区（s_ring_storage）。
+ *          早期实现使用弹性数组 data[] 与元信息共享同一块存储，
+ *          导致 ringbuf_write 写 data 时覆盖 head/tail/capacity
+ *          （自覆盖内存损坏）。改为分离设计后彻底消除该缺陷。
  */
 typedef struct
 {
@@ -72,7 +78,7 @@ typedef struct
     volatile uint32_t tail;           /**< @brief 读取位置 */
     uint32_t          capacity;       /**< @brief 缓冲区容量 */
     uint32_t          reserved;       /**< @brief 保留对齐 */
-    uint8_t           data[];         /**< @brief 弹性数组数据区 */
+    uint8_t          *data;           /**< @brief 数据区指针（指向独立存储） */
 } ic2_ringbuf_t;
 
 /* ========================================================================

@@ -34,7 +34,15 @@ static ic2_channel_t s_channels[IC2_MAX_CHANNELS];
 /** @brief 通道使用标记 */
 static bool s_channel_used[IC2_MAX_CHANNELS];
 
-/** @brief 环形缓冲区存储 */
+/** @brief 环形缓冲区描述符存储（与数据区分离）
+ *
+ *  早期实现将描述符与数据区共享 s_ring_storage（弹性数组），
+ *  导致 ringbuf_write 写 data 时覆盖 head/tail/capacity。
+ *  现描述符独立存放于 s_ring_desc，数据区单独由 s_ring_storage 提供。 */
+static ic2_ringbuf_t s_ring_desc[IC2_MAX_CHANNELS][2U]
+    __attribute__((aligned(64U)));
+
+/** @brief 环形缓冲区数据区存储（纯数据，不含描述符字段） */
 static uint8_t s_ring_storage[IC2_MAX_CHANNELS][2U][IC2_RING_BUF_SIZE]
     __attribute__((aligned(64U)));
 
@@ -67,8 +75,11 @@ static void ic2_strcpy(char *dst, const char *src, uint32_t n)
 /**
  * @brief 初始化环形缓冲区
  *
- * @param ring  环形缓冲区指针
- * @param buf   数据区指针
+ * @details 描述符与数据区分离：ring 描述符本身位于独立的静态通道结构，
+ *          data 指针指向 s_ring_storage 中的数据区。
+ *
+ * @param ring  环形缓冲区描述符指针
+ * @param buf   独立数据区指针
  * @param size  容量
  */
 static void ringbuf_init(ic2_ringbuf_t *ring, uint8_t *buf, uint32_t size)
@@ -78,9 +89,8 @@ static void ringbuf_init(ic2_ringbuf_t *ring, uint8_t *buf, uint32_t size)
     ring->capacity = size;
     ring->reserved = 0U;
 
-    /* 数据区指向传入的缓冲区 */
-    /* 由于 ic2_ringbuf_t 使用弹性数组成员，这里需要特殊处理 */
-    (void)buf;
+    /* 数据区指针指向独立的存储区（描述符与数据分离） */
+    ring->data = buf;
 
     hal_dmb_ish();
 }
@@ -88,26 +98,32 @@ static void ringbuf_init(ic2_ringbuf_t *ring, uint8_t *buf, uint32_t size)
 /**
  * @brief 向环形缓冲区写入数据
  *
- * @param ring     环形缓冲区指针（cast 为 uint8_t* 访问数据区）
- * @param data     数据指针
+ * @details 通过描述符中的 data 指针访问独立数据区，
+ *          避免覆盖 head/tail/capacity 等元信息。
+ *
+ * @param ring     环形缓冲区描述符指针
+ * @param data     待写入数据指针
  * @param length   数据长度
- * @param capacity 容量
- * @param storage  底层存储
  *
  * @return 实际写入字节数
  */
-static uint32_t ringbuf_write(volatile uint32_t *head, volatile uint32_t *tail,
-                               const void *data, uint32_t length,
-                               uint32_t capacity, uint8_t *storage)
+static uint32_t ringbuf_write(ic2_ringbuf_t *ring,
+                               const void *data, uint32_t length)
 {
     uint32_t h;
     uint32_t t;
+    uint32_t capacity;
     uint32_t free_space;
     uint32_t to_write;
+    uint32_t first_part;
     const uint8_t *src = (const uint8_t *)data;
+    uint8_t *storage;
 
-    h = *head;
-    t = *tail;
+    capacity = ring->capacity;
+    storage = ring->data;
+
+    h = ring->head;
+    t = ring->tail;
 
     /* 计算空闲空间 */
     if (h >= t)
@@ -127,7 +143,7 @@ static uint32_t ringbuf_write(volatile uint32_t *head, volatile uint32_t *tail,
     }
 
     /* 写入数据（可能回绕） */
-    uint32_t first_part = capacity - h;
+    first_part = capacity - h;
     if (first_part > to_write)
     {
         first_part = to_write;
@@ -141,7 +157,7 @@ static uint32_t ringbuf_write(volatile uint32_t *head, volatile uint32_t *tail,
     }
 
     hal_dmb_ishst();
-    *head = (h + to_write) % capacity;
+    ring->head = (h + to_write) % capacity;
 
     return to_write;
 }
@@ -149,22 +165,33 @@ static uint32_t ringbuf_write(volatile uint32_t *head, volatile uint32_t *tail,
 /**
  * @brief 从环形缓冲区读取数据
  *
+ * @details 通过描述符中的 data 指针访问独立数据区。
+ *
+ * @param ring     环形缓冲区描述符指针
+ * @param data     接收数据缓冲区
+ * @param length   期望读取长度
+ *
  * @return 实际读取字节数
  */
-static uint32_t ringbuf_read(volatile uint32_t *head, volatile uint32_t *tail,
-                              void *data, uint32_t length,
-                              uint32_t capacity, uint8_t *storage)
+static uint32_t ringbuf_read(ic2_ringbuf_t *ring,
+                              void *data, uint32_t length)
 {
     uint32_t h;
     uint32_t t;
+    uint32_t capacity;
     uint32_t used;
     uint32_t to_read;
+    uint32_t first_part;
     uint8_t *dst = (uint8_t *)data;
+    uint8_t *storage;
 
     hal_dmb_ishld();
 
-    h = *head;
-    t = *tail;
+    capacity = ring->capacity;
+    storage = ring->data;
+
+    h = ring->head;
+    t = ring->tail;
 
     /* 计算已用空间 */
     if (h >= t)
@@ -184,7 +211,7 @@ static uint32_t ringbuf_read(volatile uint32_t *head, volatile uint32_t *tail,
     }
 
     /* 读取数据（可能回绕） */
-    uint32_t first_part = capacity - t;
+    first_part = capacity - t;
     if (first_part > to_read)
     {
         first_part = to_read;
@@ -197,7 +224,7 @@ static uint32_t ringbuf_read(volatile uint32_t *head, volatile uint32_t *tail,
         (void)memcpy(&dst[first_part], &storage[0U], to_read - first_part);
     }
 
-    *tail = (t + to_read) % capacity;
+    ring->tail = (t + to_read) % capacity;
 
     return to_read;
 }
@@ -212,6 +239,7 @@ kernel_status_t ic2_init(void)
 
     (void)memset(s_channels, 0, sizeof(s_channels));
     (void)memset(s_channel_used, 0, sizeof(s_channel_used));
+    (void)memset(s_ring_desc, 0, sizeof(s_ring_desc));
     (void)memset(s_ring_storage, 0, sizeof(s_ring_storage));
 
     for (i = 0U; i < IC2_MAX_CHANNELS; i++)
@@ -288,9 +316,9 @@ int32_t ic2_channel_create(const char *name, uint32_t owner_a,
     ch->stats_rx = 0U;
 
     /* 初始化环形缓冲区
-     * 简化实现：直接使用预分配的静态存储 */
-    ch->ring_ab = (ic2_ringbuf_t *)(void *)&s_ring_storage[i][0U];
-    ch->ring_ba = (ic2_ringbuf_t *)(void *)&s_ring_storage[i][1U];
+     * 描述符与数据区分离：描述符来自 s_ring_desc，数据区来自 s_ring_storage */
+    ch->ring_ab = &s_ring_desc[i][0U];
+    ch->ring_ba = &s_ring_desc[i][1U];
 
     ringbuf_init(ch->ring_ab, &s_ring_storage[i][0U][0], buf_size);
     ringbuf_init(ch->ring_ba, &s_ring_storage[i][1U][0], buf_size);
@@ -379,21 +407,16 @@ int32_t ic2_send(uint32_t channel_id, const void *data,
     hdr.flags = flags;
     hdr.seq = ch->stats_tx;
 
-    /* 写入包头 + 数据到 A→B 环形缓冲区 */
-    /* 简化实现：使用 ring_ab 的存储区 */
-    uint8_t *storage_ab = &s_ring_storage[channel_id][0U][0U];
-    written = ringbuf_write(&ch->ring_ab->head, &ch->ring_ab->tail,
-                            &hdr, sizeof(ic2_packet_header_t),
-                            IC2_RING_BUF_SIZE, storage_ab);
+    /* 写入包头到 A→B 环形缓冲区（描述符内含独立 data 指针） */
+    written = ringbuf_write(ch->ring_ab, &hdr, sizeof(ic2_packet_header_t));
 
     if (written < sizeof(ic2_packet_header_t))
     {
         return -(int32_t)ENOMEM;
     }
 
-    written = ringbuf_write(&ch->ring_ab->head, &ch->ring_ab->tail,
-                            data, length,
-                            IC2_RING_BUF_SIZE, storage_ab);
+    /* 写入有效载荷 */
+    written = ringbuf_write(ch->ring_ab, data, length);
 
     ch->stats_tx++;
 
@@ -438,12 +461,8 @@ int32_t ic2_recv(uint32_t channel_id, void *buf,
         return -(int32_t)EPERM;
     }
 
-    /* 从 B→A 环形缓冲区读取包头 + 数据 */
-    uint8_t *storage_ba = &s_ring_storage[channel_id][1U][0U];
-
-    read_bytes = ringbuf_read(&ch->ring_ba->head, &ch->ring_ba->tail,
-                              &hdr, sizeof(ic2_packet_header_t),
-                              IC2_RING_BUF_SIZE, storage_ba);
+    /* 从 B→A 环形缓冲区读取包头 + 数据（描述符内含独立 data 指针） */
+    read_bytes = ringbuf_read(ch->ring_ba, &hdr, sizeof(ic2_packet_header_t));
 
     if (read_bytes < sizeof(ic2_packet_header_t))
     {
@@ -463,9 +482,7 @@ int32_t ic2_recv(uint32_t channel_id, void *buf,
         to_read = buf_size;
     }
 
-    read_bytes = ringbuf_read(&ch->ring_ba->head, &ch->ring_ba->tail,
-                              buf, to_read,
-                              IC2_RING_BUF_SIZE, storage_ba);
+    read_bytes = ringbuf_read(ch->ring_ba, buf, to_read);
 
     ch->stats_rx++;
 

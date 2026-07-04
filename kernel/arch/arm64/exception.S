@@ -67,7 +67,7 @@ exception_vector_table:
     .align 7
     b       .Lexception_panic            /* [10] FIQ（暂未使用） */
     .align 7
-    b       .Lexception_panic            /* [11] SError（暂未使用） */
+    b       .Lsync_handler_lower64       /* [11] EL0 SError → 终止出错线程 */
 
     /* ================================================================
      * [12-15] 低 EL（AArch32）异常
@@ -398,11 +398,52 @@ exception_vector_table:
 /* ========================================================================
  * EL0 用户态 IRQ 异常处理
  *
- * @details EL0 的 IRQ 处理：直接跳转到 EL1h IRQ handler（共享逻辑）
+ * @details EL0 IRQ 发生时，SP_EL0 持有用户态栈指针。
+ *          若直接复用 EL1h IRQ handler（.Lirq_handler_spx），
+ *          则中断处理期间若发生 schedule() 切换线程，会破坏用户态 SP。
+ *
+ *          因此为 EL0 IRQ 提供独立入口：在进入 IRQ 处理前把 SP_EL0
+ *          压入内核栈保存，处理完成、eret 前恢复 SP_EL0。
+ *          寄存器保存集合与 EL1h IRQ handler 一致（x0-x18 caller-saved），
+ *          另外用 x18 槽位旁边的栈空间保存 SP_EL0（额外 8 字节）。
  * ======================================================================== */
 
 .Lirq_handler_lower64:
-    b       .Lirq_handler_spx
+    /* 保存 x0-x18（caller-saved 寄存器集），与 EL1h IRQ handler 一致 */
+    stp     x0, x1, [sp, #-16]!
+    stp     x2, x3, [sp, #-16]!
+    stp     x4, x5, [sp, #-16]!
+    stp     x6, x7, [sp, #-16]!
+    stp     x8, x9, [sp, #-16]!
+    stp     x10, x11, [sp, #-16]!
+    stp     x12, x13, [sp, #-16]!
+    stp     x14, x15, [sp, #-16]!
+    stp     x16, x17, [sp, #-16]!
+    str     x18, [sp, #-16]!          /* x18 单独保存，对齐到 16 字节 */
+
+    /* 保存用户态 SP_EL0 到内核栈（EL0 IRQ 专用） */
+    mrs     x18, sp_el0
+    str     x18, [sp, #-16]!          /* 额外压栈，保持 16 字节对齐 */
+
+    /* 调用 IRQ 处理函数（C 语言入口） */
+    bl      irq_handler
+
+    /* 恢复用户态 SP_EL0 */
+    ldr     x18, [sp], #16
+    msr     sp_el0, x18
+
+    /* 恢复 x0-x18（逆序） */
+    ldr     x18, [sp], #16
+    ldp     x16, x17, [sp], #16
+    ldp     x14, x15, [sp], #16
+    ldp     x12, x13, [sp], #16
+    ldp     x10, x11, [sp], #16
+    ldp     x8, x9, [sp], #16
+    ldp     x6, x7, [sp], #16
+    ldp     x4, x5, [sp], #16
+    ldp     x2, x3, [sp], #16
+    ldp     x0, x1, [sp], #16
+    eret
 
 /* ========== 异常默认处理 ========== */
 

@@ -666,6 +666,7 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
 {
     ipc_endpoint_t *ep;
     KThread_t *current;
+    KThread_t *wake_receiver;
     uint32_t irq_state;
 
     ep = get_endpoint(ep_id);
@@ -679,11 +680,25 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
         return -(int32_t)EINVAL;
     }
 
+    /* 访问控制：通过能力系统验证 WRITE 权限（回退到 owner 检查） */
+    {
+        kernel_status_t acc = endpoint_check_access(ep, CAP_RIGHT_WRITE);
+        if (acc != KERNEL_OK)
+        {
+            return acc;
+        }
+    }
+
     current = kthread_get_current();
     if (current == NULL)
     {
         return -(int32_t)ESRCH;
     }
+
+    /* 延迟唤醒：在端点锁内只标记目标线程待唤醒，释放锁后再入队，
+     * 避免"持端点锁（优先级3）→ 获取调度队列锁（优先级1）"的锁升级
+     * 与"持调度队列锁 → 访问端点"的路径形成 AB-BA 死锁。 */
+    wake_receiver = NULL;
 
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
 
@@ -737,17 +752,16 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
             }
         }
 
-        /* 唤醒接收线程 */
-        if (ep->owner_tid != THREAD_ID_INVALID)
+        /* 在锁内只标记接收线程为待唤醒，记录到局部变量；
+         * 真正的 scheduler_enqueue（获取调度队列锁）延迟到释放端点锁后执行。 */
+        if ((ep->owner_tid != THREAD_ID_INVALID) &&
+            (ep->owner_tid < CONFIG_MAX_THREADS))
         {
-            if (ep->owner_tid < CONFIG_MAX_THREADS)
+            KThread_t *receiver = &g_scheduler.thread_table[ep->owner_tid];
+            if (receiver->state == KTHREAD_STATE_BLOCKED)
             {
-                KThread_t *receiver = &g_scheduler.thread_table[ep->owner_tid];
-                if (receiver->state == KTHREAD_STATE_BLOCKED)
-                {
-                    receiver->state = KTHREAD_STATE_READY;
-                    scheduler_enqueue(receiver);
-                }
+                receiver->state = KTHREAD_STATE_READY;
+                wake_receiver = receiver;
             }
         }
 
@@ -755,6 +769,13 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
         current->state = KTHREAD_STATE_BLOCKED;
         barrier();
         ticket_lock_release_irqrestore(&ep->lock, irq_state);
+
+        /* 端点锁已释放，此时安全获取调度队列锁唤醒接收线程 */
+        if (wake_receiver != NULL)
+        {
+            scheduler_enqueue(wake_receiver);
+        }
+
         schedule();
 
         /* 被唤醒后（收到回复），继续执行 */
@@ -989,6 +1010,7 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
 {
     ipc_endpoint_t *ep;
     KThread_t *current;
+    KThread_t *wake_sender;
     uint32_t irq_state;
 
     (void)status;
@@ -1014,6 +1036,10 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
         }
     }
 
+    /* 延迟唤醒：在端点锁内只标记发送线程待唤醒，释放锁后再入队，
+     * 避免"持端点锁 → 获取调度队列锁"的锁升级死锁。 */
+    wake_sender = NULL;
+
     irq_state = ticket_lock_acquire_irqsave(&ep->lock);
 
     if (ep->state != IPC_EP_REPLYING)
@@ -1021,11 +1047,6 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
         ticket_lock_release_irqrestore(&ep->lock, irq_state);
         return -(int32_t)EINVAL;
     }
-
-    /* 在完整实现中：
-     * 1. 将回复数据拷贝到发送方的接收缓冲区
-     * 2. 唤醒阻塞在 ipc_msg_send 中的发送线程
-     */
 
     /* 恢复端点状态 */
     ep->state = IPC_EP_PENDING;
@@ -1050,14 +1071,15 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
         ep->recv_size = 0U;
     }
 
-    /* 唤醒发送方线程 */
+    /* 在锁内只标记发送线程为待唤醒，记录到局部变量；
+     * 真正的 scheduler_enqueue（获取调度队列锁）延迟到释放端点锁后执行。 */
     if ((ep->sender_tid != THREAD_ID_INVALID) && (ep->sender_tid < CONFIG_MAX_THREADS))
     {
         KThread_t *sender = &g_scheduler.thread_table[ep->sender_tid];
         if (sender->state == KTHREAD_STATE_BLOCKED)
         {
             sender->state = KTHREAD_STATE_READY;
-            scheduler_enqueue(sender);
+            wake_sender = sender;
         }
         ep->sender_tid = THREAD_ID_INVALID;
     }
@@ -1077,6 +1099,12 @@ kernel_status_t ipc_msg_reply(kobj_id_t ep_id,
 
     barrier();
     ticket_lock_release_irqrestore(&ep->lock, irq_state);
+
+    /* 端点锁已释放，此时安全获取调度队列锁唤醒发送线程 */
+    if (wake_sender != NULL)
+    {
+        scheduler_enqueue(wake_sender);
+    }
 
     return KERNEL_OK;
 }
