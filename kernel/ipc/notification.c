@@ -98,23 +98,41 @@ static void free_notify_index(uint32_t idx)
 
 /**
  * @brief 通过 ID 获取通知对象指针
+ *
+ * @details 验证 notify_id 中的 generation 与通知结构体中的 generation 匹配，
+ *          防止通知对象销毁后索引复用导致旧引用复活（use-after-free）。
+ *          ID 编码：高 16 位为 generation，低 16 位为索引（与 endpoint 一致）。
  */
 static ipc_notification_t *get_notification(kobj_id_t notify_id)
 {
     uint32_t idx;
+    uint16_t gen;
+    ipc_notification_t *ntf;
 
     if (notify_id == KOBJ_ID_INVALID)
     {
         return NULL;
     }
 
+    /* ID 的低 16 位为索引 */
     idx = (uint32_t)(notify_id & 0xFFFFU);
     if (idx >= CONFIG_IPC_MAX_NOTIFICATIONS)
     {
         return NULL;
     }
 
-    return &s_notifications[idx];
+    /* ID 的高 16 位为 generation */
+    gen = (uint16_t)((notify_id >> 16U) & 0xFFFFU);
+
+    ntf = &s_notifications[idx];
+
+    /* 验证 generation 匹配 */
+    if (ntf->generation != gen)
+    {
+        return NULL;
+    }
+
+    return ntf;
 }
 
 /* ========================================================================
@@ -137,6 +155,7 @@ kernel_status_t ipc_notification_subsys_init(void)
         s_notifications[i].waiter_tid = THREAD_ID_INVALID;
         s_notifications[i].node.next = &s_notifications[i].node;
         s_notifications[i].node.prev = &s_notifications[i].node;
+        s_notifications[i].generation = 0U;
     }
 
     ticket_lock_init(&s_notify_subsys_lock);
@@ -174,7 +193,15 @@ kernel_status_t ipc_notification_create(thread_id_t owner_tid,
 
     ntf = &s_notifications[(uint32_t)idx];
 
-    ntf->id = (kobj_id_t)((uint32_t)idx | ((uint32_t)idx << 16U));
+    /* 递增 generation（跳过 0 以避免与初始化值冲突），使旧 ID 失效 */
+    ntf->generation++;
+    if (ntf->generation == 0U)
+    {
+        ntf->generation = 1U;
+    }
+
+    /* 生成通知 ID：高 16 位为 generation，低 16 位为索引（与 endpoint 一致） */
+    ntf->id = (kobj_id_t)(((uint32_t)ntf->generation << 16U) | (uint32_t)idx);
     ntf->state = IPC_NOTIFY_IDLE;
     ntf->signals = 0ULL;
     ntf->waited_mask = 0ULL;
@@ -194,21 +221,38 @@ kernel_status_t ipc_notification_create(thread_id_t owner_tid,
 kernel_status_t ipc_notification_destroy(kobj_id_t notify_id)
 {
     ipc_notification_t *ntf;
+    KThread_t *wake_waiter = NULL;
+    uint32_t idx;
+
+    /*
+     * 销毁必须在锁保护下完成，与 signal/wait 路径串行化，避免：
+     *  - 与 signal 竞争唤醒已失效的 waiter_tid（数组越界）
+     *  - 与 wait 竞争复用 waiter_tid 字段
+     * 延迟唤醒：持锁期间仅把等待者标记为 READY，释放锁后再
+     * scheduler_enqueue（遵循 A3 延迟唤醒模式，避免持子系统锁 →
+     * 调度队列锁的锁升级）。
+     */
+    ticket_lock_acquire(&s_notify_subsys_lock);
 
     ntf = get_notification(notify_id);
     if (ntf == NULL)
     {
+        ticket_lock_release(&s_notify_subsys_lock);
         return -(int32_t)EINVAL;
     }
 
-    /* 如果有线程在等待，唤醒它 */
+    /* 如果有线程在等待，唤醒它（先做边界检查，防止 waiter_tid 越界） */
     if (ntf->state == IPC_NOTIFY_WAITING)
     {
-        KThread_t *waiter = &g_scheduler.thread_table[ntf->waiter_tid];
-        if (waiter->state == KTHREAD_STATE_BLOCKED)
+        if ((ntf->waiter_tid != THREAD_ID_INVALID) &&
+            (ntf->waiter_tid < CONFIG_MAX_THREADS))
         {
-            waiter->state = KTHREAD_STATE_READY;
-            scheduler_enqueue(waiter);
+            KThread_t *waiter = &g_scheduler.thread_table[ntf->waiter_tid];
+            if (waiter->state == KTHREAD_STATE_BLOCKED)
+            {
+                waiter->state = KTHREAD_STATE_READY;
+                wake_waiter = waiter;
+            }
         }
     }
 
@@ -219,9 +263,27 @@ kernel_status_t ipc_notification_destroy(kobj_id_t notify_id)
     ntf->waited_mask = 0ULL;
     ntf->waiter_tid = THREAD_ID_INVALID;
 
+    /* 递增 generation 使旧 ID 失效（防止索引复用导致 use-after-free） */
+    ntf->generation++;
+    if (ntf->generation == 0U)
+    {
+        ntf->generation = 1U;
+    }
+
+    idx = (uint32_t)(notify_id & 0xFFFFU);
+
     barrier();
 
-    free_notify_index((uint32_t)(notify_id & 0xFFFFU));
+    ticket_lock_release(&s_notify_subsys_lock);
+
+    /* 锁已释放，此时安全获取调度队列锁唤醒等待线程 */
+    if (wake_waiter != NULL)
+    {
+        scheduler_enqueue(wake_waiter);
+    }
+
+    /* free_notify_index 内部获取 s_notify_subsys_lock（不可重入，故在释放后调用） */
+    free_notify_index(idx);
 
     return KERNEL_OK;
 }

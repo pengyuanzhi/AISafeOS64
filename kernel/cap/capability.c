@@ -764,7 +764,13 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
     revoke_stack[stack_top] = slot;
     stack_top++;
 
-    /* 使用显式栈进行非递归深度优先遍历（全程持锁） */
+    /*
+     * 使用显式栈进行非递归深度优先遍历（全程持锁）。
+     * 撤销的每个能力都归还到 CSpace 的 free list（状态置 CAP_STATE_FREE，
+     * 挂入空闲链表头，递减 used_count），避免槽位永久泄漏。
+     * 注意：cspace_free_slot 内部会获取 cs->lock，而此处已持锁
+     * （TicketLock 非递归），故在持锁阶段内联完成归还逻辑。
+     */
     while (stack_top > 0U)
     {
         cap_slot_t cur_slot;
@@ -777,6 +783,12 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
         /* 查找当前能力 */
         cur_cap = cspace_lookup(cs, cur_slot);
         if (cur_cap == NULL)
+        {
+            continue;
+        }
+
+        /* 跳过已释放的槽位（避免重复归还、used_count 计数错误） */
+        if (cur_cap->state != CAP_STATE_VALID)
         {
             continue;
         }
@@ -808,12 +820,36 @@ kernel_status_t cap_revoke(cap_slot_t cspace_root, cap_slot_t slot)
             }
         }
 
-        /* 将当前能力状态设为已撤销 */
-        cur_cap->state = CAP_STATE_REVOKED;
-
         /* 从父能力的 children 链表移除 */
         list_del_init(&cur_cap->sibling);
         INIT_LIST_HEAD(&cur_cap->children);
+
+        /* 归还到 free list：状态置 FREE，重置字段，挂入空闲链表头 */
+        (void)memset(cur_cap, 0, sizeof(cap_t));
+        cur_cap->state = CAP_STATE_FREE;
+        cur_cap->parent_slot = CAP_SLOT_INVALID;
+        INIT_LIST_HEAD(&cur_cap->children);
+        INIT_LIST_HEAD(&cur_cap->sibling);
+
+        /* 将原空闲链表头接到当前槽的 sibling.next */
+        if (cs->free_head != CAP_SLOT_INVALID)
+        {
+            cur_cap->sibling.next =
+                (struct list_head *)&cs->cap_table[cs->free_head];
+        }
+        else
+        {
+            cur_cap->sibling.next = NULL;
+        }
+
+        /* 更新空闲链表头为当前槽 */
+        cs->free_head = cur_slot;
+
+        /* 递减使用计数 */
+        if (cs->used_count > 0U)
+        {
+            cs->used_count--;
+        }
     }
 
     /* 硬件内存屏障确保多核缓存一致性 */

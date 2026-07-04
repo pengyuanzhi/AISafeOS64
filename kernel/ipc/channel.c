@@ -144,23 +144,41 @@ static void free_connection_index(uint32_t idx)
 
 /**
  * @brief 通过 ID 获取通道指针
+ *
+ * @details 验证 ch_id 中的 generation 与通道结构体中的 generation 匹配，
+ *          防止通道销毁后索引复用导致旧引用复活（use-after-free）。
+ *          ID 编码：高 16 位为 generation，低 16 位为索引（与 endpoint 一致）。
  */
 static ipc_channel_t *get_channel(kobj_id_t ch_id)
 {
     uint32_t idx;
+    uint16_t gen;
+    ipc_channel_t *ch;
 
     if (ch_id == KOBJ_ID_INVALID)
     {
         return NULL;
     }
 
+    /* ID 的低 16 位为索引 */
     idx = (uint32_t)(ch_id & 0xFFFFU);
     if (idx >= CONFIG_IPC_MAX_CHANNELS)
     {
         return NULL;
     }
 
-    return &s_channels[idx];
+    /* ID 的高 16 位为 generation */
+    gen = (uint16_t)((ch_id >> 16U) & 0xFFFFU);
+
+    ch = &s_channels[idx];
+
+    /* 验证 generation 匹配 */
+    if (ch->generation != gen)
+    {
+        return NULL;
+    }
+
+    return ch;
 }
 
 /**
@@ -209,6 +227,7 @@ kernel_status_t ipc_channel_subsys_init(void)
         s_channels[i].node.next = &s_channels[i].node;
         s_channels[i].node.prev = &s_channels[i].node;
         ticket_lock_init(&s_channels[i].lock);
+        s_channels[i].generation = 0U;
     }
 
     /* 初始化连接表 */
@@ -263,7 +282,15 @@ kernel_status_t ipc_channel_create(thread_id_t owner_tid, kobj_id_t *ch_id)
 
     ch = &s_channels[(uint32_t)idx];
 
-    ch->id = (kobj_id_t)((uint32_t)idx | ((uint32_t)idx << 16U));
+    /* 递增 generation（跳过 0 以避免与初始化值冲突），使旧 ID 失效 */
+    ch->generation++;
+    if (ch->generation == 0U)
+    {
+        ch->generation = 1U;
+    }
+
+    /* 生成通道 ID：高 16 位为 generation，低 16 位为索引（与 endpoint 一致） */
+    ch->id = (kobj_id_t)(((uint32_t)ch->generation << 16U) | (uint32_t)idx);
     ch->state = IPC_CH_OPEN;
     ch->owner_tid = owner_tid;
     ch->conn_list.next = &ch->conn_list;
@@ -343,6 +370,16 @@ kernel_status_t ipc_channel_destroy(kobj_id_t ch_id)
     /* 标记通道为关闭 */
     ch->state = IPC_CH_CLOSED;
     ch->owner_tid = THREAD_ID_INVALID;
+
+    /* 递增 generation 使旧 ID 失效（防止索引复用导致 use-after-free） */
+    ch->generation++;
+    if (ch->generation == 0U)
+    {
+        ch->generation = 1U;
+    }
+    ch->id = KOBJ_ID_INVALID;
+
+    barrier();
 
     ticket_lock_release_irqrestore(&ch->lock, irq_state);
 

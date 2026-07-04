@@ -163,6 +163,7 @@ typedef struct CACHE_ALIGN(64)
     uint64_t            waited_mask;    /**< @brief 等待的信号掩码 */
     thread_id_t         waiter_tid;     /**< @brief 等待线程 ID */
     struct list_head    node;           /**< @brief 全局通知链表节点 */
+    uint16_t            generation;     /**< @brief 通知 ID 世代号（防 use-after-free） */
 } ipc_notification_t;
 
 /* ========================================================================
@@ -248,6 +249,7 @@ typedef struct CACHE_ALIGN(64)
     uint32_t            pulse_count;    /**< @brief Pulse 队列当前深度 */
     struct list_head    node;           /**< @brief 全局通道链表节点 */
     TicketLock_t        lock;           /**< @brief 通道自旋锁 */
+    uint16_t            generation;     /**< @brief 通道 ID 世代号（防 use-after-free） */
 } ipc_channel_t;
 
 /* ========================================================================

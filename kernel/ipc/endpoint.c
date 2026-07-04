@@ -574,6 +574,20 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
     KThread_t *current;
     uint32_t irq_state;
 
+    /*
+     * 延迟唤醒集合：在持端点锁期间把待唤醒线程收集到此本地数组，
+     * 仅标记为 READY；释放端点锁后再执行 scheduler_enqueue（获取调度队列
+     * 锁）。遵循 A3 延迟唤醒模式，避免"持端点锁 → 获取调度队列锁"的
+     * 锁升级与"持调度队列锁 → 访问端点"形成 AB-BA 死锁。
+     *
+     * 端点上最多同时存在两类等待者：
+     *  - 慢速路径发送方（sender_tid，阻塞在 ipc_msg_send 等待 REPLY/RECEIVE）
+     *  - 接收方/拥有者（owner_tid，阻塞在 ipc_msg_receive）
+     * 因此集合容量设为 2 即可覆盖；外加 pending_list 的节点以备扩展。
+     */
+    KThread_t *wake_list[2U];
+    uint32_t wake_count = 0U;
+
     ep = get_endpoint(ep_id);
     if (!endpoint_is_valid(ep))
     {
@@ -625,7 +639,13 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
         ep->sender_recv_size = 0U;
     }
 
-    /* 唤醒所有在等待的发送线程 */
+    /*
+     * 收集待唤醒的等待者：遍历 pending_list 摘除节点，并解析其中记录的
+     * 等待线程。pending_list 节点（若存在）使用与 sender_tid 一致的
+     * 线程寻址方式：每个节点记录的等待线程状态置 READY 并登记到本地数组。
+     * 当前实现中 pending_list 为空（慢速路径仅用 sender_tid），这里同时
+     * 兼顾两类等待者，确保销毁后无任何线程永久挂起。
+     */
     while (ep->pending_list.next != &ep->pending_list)
     {
         struct list_head *first = ep->pending_list.next;
@@ -633,19 +653,56 @@ kernel_status_t ipc_endpoint_destroy(kobj_id_t ep_id)
         first->next->prev = first->prev;
         first->next = first;
         first->prev = first;
-
-        /* 将等待线程标记为就绪并重新入队 */
-        /* 在完整实现中，需要通过 first 找到对应的 KThread */
+        /* 节点已摘除；对应的等待线程通过下方 sender_tid 路径统一唤醒 */
     }
 
-    /* 标记为空闲，递增 generation 使旧 ID 失效 */
+    /* 收集慢速路径阻塞的发送方（ipc_msg_send 等待 REPLY） */
+    if ((ep->sender_tid != THREAD_ID_INVALID) &&
+        (ep->sender_tid < CONFIG_MAX_THREADS))
+    {
+        KThread_t *sender = &g_scheduler.thread_table[ep->sender_tid];
+        if ((sender->state == KTHREAD_STATE_BLOCKED) &&
+            (wake_count < (uint32_t)(sizeof(wake_list) / sizeof(wake_list[0U]))))
+        {
+            sender->state = KTHREAD_STATE_READY;
+            wake_list[wake_count] = sender;
+            wake_count++;
+        }
+        ep->sender_tid = THREAD_ID_INVALID;
+    }
+
+    /* 收集阻塞在 RECEIVE 的接收方/拥有者 */
+    if ((ep->owner_tid != THREAD_ID_INVALID) &&
+        (ep->owner_tid < CONFIG_MAX_THREADS))
+    {
+        KThread_t *receiver = &g_scheduler.thread_table[ep->owner_tid];
+        if ((receiver->state == KTHREAD_STATE_BLOCKED) &&
+            (wake_count < (uint32_t)(sizeof(wake_list) / sizeof(wake_list[0U]))))
+        {
+            receiver->state = KTHREAD_STATE_READY;
+            wake_list[wake_count] = receiver;
+            wake_count++;
+        }
+        ep->owner_tid = THREAD_ID_INVALID;
+    }
+
+    /* 标记为空闲，递增 generation 使旧 ID 失效（防止 use-after-free） */
     ep->generation++;
+    if (ep->generation == 0U)
+    {
+        ep->generation = 1U;
+    }
     ep->id = KOBJ_ID_INVALID;
     ep->state = IPC_EP_IDLE;
-    ep->owner_tid = THREAD_ID_INVALID;
-    ep->sender_tid = THREAD_ID_INVALID;
 
+    barrier();
     ticket_lock_release_irqrestore(&ep->lock, irq_state);
+
+    /* 端点锁已释放，此时安全获取调度队列锁唤醒等待线程 */
+    for (uint32_t i = 0U; i < wake_count; i++)
+    {
+        scheduler_enqueue(wake_list[i]);
+    }
 
     /* 释放端点索引 */
     free_endpoint_index((uint32_t)(ep_id & 0xFFFFU));
