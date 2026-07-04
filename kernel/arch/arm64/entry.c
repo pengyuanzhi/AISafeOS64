@@ -172,12 +172,16 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     uint32_t iss;
     const char *desc;
     uint64_t elr;
+    uint32_t from_el0;
 
     elr = *elr_ptr;
 
     /* 提取 EC（异常类别）和 ISS（指令特定症状） */
     ec = (uint32_t)((esr >> 26U) & 0x3FU);
     iss = (uint32_t)(esr & 0x01FFFFFFU);
+
+    /* 判断异常来源：SPSR_EL1.M[3:0] == 0 表示来自 EL0 */
+    from_el0 = (((uint32_t)spsr) & 0xFU) == 0U ? 1U : 0U;
 
     /* 获取异常类别描述 */
     desc = get_ec_desc(ec);
@@ -188,7 +192,7 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)ec);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, desc);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, from_el0 != 0U ? ") [EL0]\n" : ") [EL1]\n");
 
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] ESR=0x");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, esr);
@@ -202,14 +206,44 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     uart_print_hex((uint64_t)QEMU_UART0_BASE, elr);
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] SPSR=0x");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, spsr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+    /*
+     * 异常分类处理：
+     * - EL0 异常（缺页/对齐/非法指令等）：终止出错用户线程
+     * - EL1 异常（内核 bug）：panic（打印后死循环）
+     *
+     * EC 分类：
+     *   0x20/0x21 = Instruction Abort (lower/higher EL)
+     *   0x24/0x25 = Data Abort (lower/higher EL)
+     *   0x22      = PC Alignment fault
+     *   0x26      = SP Alignment fault
+     *   0x0E      = Illegal Execution state
+     *   其他      = 未预期异常
+     */
+    if (from_el0 != 0U)
+    {
+        /* EL0 异常：终止用户线程 */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                       "[exception] EL0 fault → terminating user thread\n");
+        kthread_exit();
+        /* kthread_exit 不返回，但保险起见设置 elr */
+        *elr_ptr = elr + 4U;
+    }
+    else
+    {
+        /* EL1 异常：内核 panic */
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                       "[exception] EL1 fault → KERNEL PANIC\n");
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
+                       "[exception] SPSR=0x");
+        uart_print_hex((uint64_t)QEMU_UART0_BASE, spsr);
+        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
 
-    (void)spsr; /* 避免 unused 警告（实际已通过 UART 输出使用） */
-
-    /* 跳过出错指令，防止无限循环 */
-    *elr_ptr = elr + 4U;
+        /* 死循环（panic） */
+        for (;;)
+        {
+            __asm__ volatile("wfe" ::: "memory");
+        }
+    }
 }
 
 /**
