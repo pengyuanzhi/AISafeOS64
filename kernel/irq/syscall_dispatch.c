@@ -29,6 +29,7 @@
 #include <kernel/types.h>
 #include <kernel/config.h>
 #include <kernel/errno.h>
+#include <kernel/uaccess.h>
 #include <stdint.h>
 
 /* 子系统头文件 */
@@ -307,6 +308,19 @@ static void dispatch_ipc(syscall_frame_t *frame)
             uint32_t send_size = (uint32_t)frame->x2;
             void *recv_buf = (void *)(uintptr_t)frame->x3;
             uint32_t recv_size = (uint32_t)frame->x4;
+
+            /* 用户指针验证 */
+            if ((send_size > 0U) && (!access_ok(send_buf, send_size)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+            if ((recv_size > 0U) && (!access_ok(recv_buf, recv_size)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
             ret = ipc_msg_send(ep_id, tag, send_buf, send_size, recv_buf, recv_size);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
@@ -320,6 +334,14 @@ static void dispatch_ipc(syscall_frame_t *frame)
             tag.value = 0ULL;
             void *recv_buf = (void *)(uintptr_t)frame->x1;
             uint32_t recv_size = (uint32_t)frame->x2;
+
+            /* 用户指针验证 */
+            if ((recv_size > 0U) && (!access_ok(recv_buf, recv_size)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
             ret = ipc_msg_receive(ep_id, &tag, recv_buf, recv_size);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
@@ -705,6 +727,13 @@ static void dispatch_debug(syscall_frame_t *frame)
             /* x0=string_ptr, x1=length */
             const char *str = (const char *)(uintptr_t)frame->x0;
             uint64_t len = frame->x1;
+
+            /* 安全验证：用户指针必须可访问 */
+            if (!access_ok(str, len > 256U ? 256U : len))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
 
             /* 诊断标记：确认 SVC 到达内核 */
             hal_uart_putc((uint64_t)QEMU_UART0_BASE, '<');
