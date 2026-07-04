@@ -317,23 +317,23 @@ void mmu_early_init(void)
     }
 
     /* 段1: PTE[0..text_end_idx-1] = 4KB Normal RX（.text.boot + .text）
-     * 权限: AP=USER_RO (EL0+EL1 只读), PXN=0, UXN=0 → EL0+EL1 可执行
-     * EL0 用户态线程需要执行内核 .text 中的代码（trampoline + user test） */
+     * 权限: AP=PRIV_RO (仅 EL1 只读), PXN=0, UXN=0 → 仅 EL1 可执行
+     * 安全修复：EL0 不应访问内核代码段 */
     for (i = 0U; i < text_end_idx; i++)
     {
         uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
         s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
-                                         PTE_AP_USER_RO);
+                                         PTE_AP_RO);
     }
 
     /* 段2: PTE[text_end_idx..ro_end_idx-1] = 4KB Normal R--（.rodata）
-     * 权限: AP=USER_RO (EL0+EL1 只读), PXN=1, UXN=1 → 不可执行
-     * EL0 用户态线程需要读取 .rodata 中的字符串常量 */
+     * 权限: AP=PRIV_RO (仅 EL1 只读), PXN=1, UXN=1 → 不可执行
+     * 安全修复：EL0 不应访问内核只读数据 */
     for (i = text_end_idx; i < ro_end_idx; i++)
     {
         uint64_t paddr = pmd0_base + (uint64_t)i * PAGE_SIZE_4KB;
         s_pte_kernel[i] = make_pte_desc(paddr, PTE_ATTR_NORMAL,
-                                         PTE_AP_USER_RO | PTE_PXN | PTE_UXN);
+                                         PTE_AP_RO | PTE_PXN | PTE_UXN);
     }
 
     /* 段3: PTE[ro_end_idx..511] = 4KB Normal RW-（.data + .bss + percpu + stacks + heap）
@@ -381,15 +381,15 @@ void mmu_early_init(void)
     s_pgd_ttbr1[0U] = make_table_desc(pud1_paddr);
     s_pgd_ttbr1[1U] = make_table_desc(pud1_paddr);
 
-    /* TTBR1 PUD[0]: 1GB Normal RW- (物理内存 0x00000000-0x3FFFFFFF) */
+    /* TTBR1 PUD[0]: 1GB Normal RW- (物理内存 0x00000000-0x3FFFFFFF)
+     * 仅 EL1 可访问（PTE_AP_RW = PRIV_RW），EL0 不可见 */
     s_pud_ttbr1[0U] = make_block1g_desc(0x00000000ULL, PTE_ATTR_NORMAL,
                                           PTE_AP_RW | PTE_PXN | PTE_UXN);
-    /* TTBR1 PUD[1]: 使用与 TTBR0 相同的细粒度 PMD→PTE 映射
-     * 这样 EL0 用户态可以通过 TTBR1 高地址映射访问内核代码（EL0 可读） */
-    {
-        uint64_t pmd_paddr = (uint64_t)(uintptr_t)&s_pmd_kernel[0U];
-        s_pud_ttbr1[1U] = make_table_desc(pmd_paddr);
-    }
+    /* TTBR1 PUD[1]: 不再复用内核 PMD（安全修复）
+     * 原设计让 EL0 通过 TTBR1 高地址访问内核代码，是安全漏洞。
+     * 设为 1GB PRIV_RW block，仅内核态可访问。 */
+    s_pud_ttbr1[1U] = make_block1g_desc(0x40000000ULL, PTE_ATTR_NORMAL,
+                                          PTE_AP_RW | PTE_PXN | PTE_UXN);
 
     /* ---- 第7步: 设置 MAIR_EL1 ---- */
     mair_val = (MAIR_DEVICE << 8U) | MAIR_NORMAL;
