@@ -737,6 +737,134 @@ per-NUMA-node partial list（中速路径，细粒度锁）
 - ❌ **禁止频繁修改的字段与只读字段共享 cache 行**
 - ❌ **禁止本核队列操作关中断**（除非有远程迁移并发可能）
 
+## 强制开发规则：错误码与返回值规范（Error Codes）
+
+**内核 API 必须使用统一的错误码体系，禁止随意返回负数。**
+
+### 错误码使用规则
+
+1. **所有可能失败的函数返回 `kernel_status_t`（= `int32_t`）**：
+   - 成功返回 `KERNEL_OK`（= 0）
+   - 失败返回 `-(int32_t)EXXX`（负数 errno）
+
+2. **标准 errno 使用**（见 `include/kernel/errno.h`）：
+   | errno | 值 | 使用场景 |
+   |-------|-----|---------|
+   | EINVAL | 22 | 参数无效 |
+   | ENOMEM | 12 | 内存不足 |
+   | EACCES | 13 | 权限不足（能力验证失败） |
+   | EFAULT | 14 | 用户指针非法（access_ok 失败） |
+   | ENOENT | 2 | 对象不存在 |
+   | ESRCH | 3 | 线程不存在 |
+   | EBUSY | 16 | 资源忙 |
+   | ENOSYS | 38 | 功能未实现 |
+   | ETIME | 62 | 超时 |
+
+3. **系统调用返回值**：`frame->x0` 存放返回值
+   - 成功：`0`
+   - 失败：`-(int64_t)errno`（用户态看到负数）
+
+### 禁止事项
+
+- ❌ 禁止返回未定义的魔法负数（如 `return -1;` 必须用 `return -(int32_t)EINVAL;`）
+- ❌ 禁止混用 `KERNEL_OK` 和 `0`（用 `KERNEL_OK` 更明确）
+- ❌ 禁止忽略错误返回值（MISRA Rule 17.7：返回值必须使用）
+
+## 强制开发规则：命名规范（Naming Convention）
+
+**统一的命名规范确保代码可读性和一致性。**
+
+### 命名规则
+
+| 类别 | 风格 | 示例 |
+|------|------|------|
+| 函数 | `snake_case` | `scheduler_pick_next()` |
+| 局部变量 | `snake_case` | `highest_prio` |
+| 全局变量 | `snake_case` + `s_` 前缀 | `s_kmalloc_state` |
+| 宏 | `UPPER_SNAKE_CASE` | `PAGE_SIZE_4K` |
+| typedef | `PascalCase_t` | `KThread_t`, `TicketLock_t` |
+| 枚举值 | `UPPER_SNAKE_CASE` + 模块前缀 | `KTHREAD_STATE_READY` |
+| 结构体标签 | `PascalCase`（不直接用，通过 typedef） | `struct KThread` |
+
+### 前缀约定
+
+| 前缀 | 用途 | 示例 |
+|------|------|------|
+| `s_` | 文件作用域静态变量 | `s_endpoints[]` |
+| `g_` | 全局变量（非 static） | `g_scheduler` |
+| `k_` | 常量（非宏） | `k_max_threads` |
+| `hal_` | HAL 接口函数 | `hal_get_cpu_id()` |
+| `paddr` | 物理地址变量 | `paddr_t page_pa` |
+| `vaddr` | 虚拟地址变量 | `vaddr_t user_sp` |
+
+### 禁止事项
+
+- ❌ 禁止 camelCase（如 `highestPrio` → 用 `highest_prio`）
+- ❌ 禁止匈牙利记号（如 `dwCount` → 用 `count`）
+- ❌ 禁止缩写不明确（如 `sz` → 用 `size`，`ptr` 可接受）
+
+## 强制开发规则：日志与诊断规范（Logging）
+
+**内核日志必须有级别、格式统一、可配置。禁止无序的 UART 打印。**
+
+### 日志级别
+
+| 级别 | 宏（待实现） | 用途 | 示例 |
+|------|-------------|------|------|
+| ERROR | `KLOG_ERROR` | 不可恢复错误 | panic 前诊断 |
+| WARN | `KLOG_WARN` | 可恢复异常 | 栈溢出检测、资源耗尽警告 |
+| INFO | `KLOG_INFO` | 启动/状态信息 | `[k] MMU ok` |
+| DEBUG | `KLOG_DEBUG` | 开发调试 | 页表条目、调度决策 |
+
+### 当前阶段的诊断输出规范
+
+在日志系统正式实现前，遵循以下规则：
+
+1. **启动信息**前缀 `[k]`：`hal_uart_puts(QEMU_UART0_BASE, "[k] MMU ok\n")`
+2. **异常诊断**前缀 `[exception]`：
+3. **IPC/调度诊断**前缀 `[ipc]`/`[sched]`：
+4. **生产模式（CONFIG_DEBUG=0）**：只保留 ERROR + 启动 INFO
+5. **禁止在生产路径放 DEBUG 级打印**（影响实时性 + 增大 text）
+
+### 禁止事项
+
+- ❌ 禁止在实时路径（调度/中断/IPC 快路径）放 UART 打印
+- ❌ 禁止硬编码 UART 地址（用 `QEMU_UART0_BASE` 宏）
+- ❌ 禁止在循环中打印（会导致输出泛滥）
+
+## 强制开发规则：硬件资源映射管理（Hardware Resource Map）
+
+**所有硬件资源（MMIO 地址、IRQ 号）必须有单一真源（Single Source of Truth）。**
+
+### 单一真源原则
+
+所有硬件地址/IRQ 定义集中在 HAL 层头文件，禁止散布在驱动代码中：
+
+| 资源 | 定义位置 | 示例 |
+|------|---------|------|
+| UART 基址 | `hal.h` | `QEMU_UART0_BASE` |
+| GIC 基址 | `gic.c` 内部宏 | `GICD_BASE_ADDR` |
+| virtio MMIO 基址 | `hal.h`（应集中） | 待统一 |
+| 定时器 IRQ | `hal.h`（应集中） | `QEMU_TIMER_IRQ` |
+| IPC 中断 | `hal.h`（应集中） | — |
+
+### 虚拟地址映射规范（TTBR1 高地址）
+
+迁移后所有 MMIO 通过 TTBR1 高地址访问：
+
+```
+物理地址 → 虚拟地址（linear mapping，见 virt_phys.h）
+0x09000000 (UART) → 0xFFFF000000900000
+0x08000000 (GIC)  → 0xFFFF000000800000
+0x0A000000 (virtio) → 0xFFFF000000A00000
+```
+
+### 禁止事项
+
+- ❌ 禁止在驱动/服务代码中硬编码物理地址
+- ❌ 禁止重复定义同一硬件地址（如 `0x09000000` 出现在多个文件）
+- ❌ 禁止使用 `__pa(0x09000000)` 手动计算（用 HAL 宏）
+
 ## 注意事项
 
 - 操作系统开发需要特别关注安全性和稳定性
