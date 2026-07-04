@@ -318,6 +318,15 @@ kernel_status_t kthread_resume(thread_id_t tid)
     scheduler_enqueue(thread);
     barrier();
 
+    /* 主动抢占检查：如果被唤醒线程优先级高于当前运行线程，立即调度 */
+    {
+        KThread_t *current = kthread_get_current();
+        if ((current != NULL) && (thread->prio > current->prio))
+        {
+            schedule();
+        }
+    }
+
     return KERNEL_OK;
 }
 
@@ -351,6 +360,17 @@ kernel_status_t kthread_set_priority(thread_id_t tid, priority_t prio)
     }
 
     barrier();
+
+    /* 主动抢占检查：如果提高优先级后的线程优先于当前运行线程，立即调度 */
+    {
+        KThread_t *current = kthread_get_current();
+        if ((current != NULL) && (thread != current) &&
+            (thread->state == KTHREAD_STATE_READY) &&
+            (thread->prio > current->prio))
+        {
+            schedule();
+        }
+    }
 
     return KERNEL_OK;
 }
