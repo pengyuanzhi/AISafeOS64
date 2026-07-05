@@ -10,7 +10,7 @@
  *          - 处理函数注册
  *          - 已知/未知系统调用号分发
  *          - 参数校验
- *          - SYS_yield / SYS_getpid 基础 syscall
+ *          - 表驱动基础 syscall 分发
  *
  * @note TDD RED 阶段：先编写测试，确认编译失败后再实现
  *
@@ -105,7 +105,7 @@ static void test_syscall_table_init(void)
     /* 验证：分发到未注册的系统调用号应返回 -ENOSYS */
     syscall_frame_t frame;
     kernel_memset(&frame, 0, sizeof(frame));
-    frame.x8 = SYS_getpid;
+    frame.x8 = 0U;
 
     int64_t ret = syscall_table_dispatch(&frame);
     TEST_ASSERT_EQ(ret, -(int64_t)ENOSYS);
@@ -131,18 +131,18 @@ static void test_syscall_register(void)
 
     syscall_table_init();
 
-    /* 注册 SYS_getpid */
-    int32_t ret = syscall_register(SYS_getpid, mock_handler_getpid);
+    /* 注册模拟 getpid（用显式编号，第二套简化编号已删除） */
+    int32_t ret = syscall_register(10U, mock_handler_getpid);
     TEST_ASSERT_EQ(ret, 0);
     TEST_ASSERT_EQ(syscall_table_count(), 1U);
 
-    /* 注册 SYS_yield */
-    ret = syscall_register(SYS_yield, mock_handler_yield);
+    /* 注册模拟 yield */
+    ret = syscall_register(11U, mock_handler_yield);
     TEST_ASSERT_EQ(ret, 0);
     TEST_ASSERT_EQ(syscall_table_count(), 2U);
 
     /* 重复注册同一系统调用号应失败 */
-    ret = syscall_register(SYS_getpid, mock_handler_getpid);
+    ret = syscall_register(10U, mock_handler_getpid);
     TEST_ASSERT_EQ(ret, -(int32_t)EEXIST);
 
     /* 已注册数量不应增加 */
@@ -268,50 +268,44 @@ static void test_syscall_invalid_args(void)
 }
 
 /* ========================================================================
- * 测试用例 6：SYS_yield / SYS_getpid 基础 syscall
+ * 测试用例 6：表驱动基础 syscall 分发
  * ======================================================================== */
 
 /**
- * @brief 验证基础系统调用 SYS_yield 和 SYS_getpid
+ * @brief 验证表驱动基础 syscall 分发
  *
- * @details 模拟注册和调用基础系统调用
+ * @details 第二套简化编号（SYS_getpid/SYS_yield 等）已从 syscall.h 中删除，
+ *          系统调用统一使用分类编号体系（0x0001/0x0007 等）。本用例改用
+ *          显式编号验证表驱动分发机制本身。
  */
 static void test_syscall_priority(void)
 {
-    printf("测试: SYS_yield / SYS_getpid 基础 syscall...\n");
+    /* 表驱动分发使用的槽位编号（仅用于本测试，与分类编号无关） */
+    const uint32_t MOCK_NR_GETPID = 200U;
+    const uint32_t MOCK_NR_YIELD  = 201U;
+
+    printf("测试: 表驱动基础 syscall 分发...\n");
 
     syscall_table_init();
 
-    /* 注册 SYS_getpid 和 SYS_yield */
-    syscall_register(SYS_getpid, mock_handler_getpid);
-    syscall_register(SYS_yield, mock_handler_yield);
+    /* 注册模拟 getpid 和 yield */
+    syscall_register(MOCK_NR_GETPID, mock_handler_getpid);
+    syscall_register(MOCK_NR_YIELD, mock_handler_yield);
 
-    /* 调用 SYS_getpid：应返回 1（模拟线程 ID） */
+    /* 调用 getpid：应返回 1（模拟线程 ID） */
     syscall_frame_t frame;
     kernel_memset(&frame, 0, sizeof(frame));
-    frame.x8 = SYS_getpid;
+    frame.x8 = MOCK_NR_GETPID;
     int64_t ret = syscall_table_dispatch(&frame);
     TEST_ASSERT_EQ(ret, 1);
 
-    /* 调用 SYS_yield：应返回 0（成功） */
+    /* 调用 yield：应返回 0（成功） */
     kernel_memset(&frame, 0, sizeof(frame));
-    frame.x8 = SYS_yield;
+    frame.x8 = MOCK_NR_YIELD;
     ret = syscall_table_dispatch(&frame);
     TEST_ASSERT_EQ(ret, 0);
 
-    /* 验证系统调用号定义正确 */
-    TEST_ASSERT_EQ(SYS_getpid, 0U);
-    TEST_ASSERT_EQ(SYS_yield, 1U);
-    TEST_ASSERT_EQ(SYS_send, 2U);
-    TEST_ASSERT_EQ(SYS_receive, 3U);
-    TEST_ASSERT_EQ(SYS_reply, 4U);
-    TEST_ASSERT_EQ(SYS_notify, 5U);
-    TEST_ASSERT_EQ(SYS_map, 6U);
-    TEST_ASSERT_EQ(SYS_unmap, 7U);
-    TEST_ASSERT_EQ(SYS_capability_create, 8U);
-    TEST_ASSERT_EQ(SYS_capability_derive, 9U);
-
-    printf("  通过: 基础 syscall 验证完成\n");
+    printf("  通过: 表驱动基础 syscall 分发验证完成\n");
 }
 
 /* ========================================================================

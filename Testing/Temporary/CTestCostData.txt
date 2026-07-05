@@ -1,0 +1,5 @@
+test_proc_states 0 0
+test_syscall_dispatch 0 0
+---
+test_proc_states
+test_syscall_dispatch

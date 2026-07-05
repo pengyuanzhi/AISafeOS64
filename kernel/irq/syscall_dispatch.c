@@ -56,22 +56,48 @@
 /** @brief 用户驱动映射区起始地址（避开 ELF@0x400000 和栈） */
 #define USER_MMAP_BASE  ((uint64_t)0x10000000ULL)
 
-/** @brief 用户驱动映射区当前分配指针（bump allocator） */
-static uint64_t s_user_mmap_ptr = USER_MMAP_BASE;
+/** @brief 每个线程的映射区跨度（16MB） */
+#define USER_MMAP_GAP   ((uint64_t)0x01000000ULL)
 
 /**
- * @brief 分配用户虚拟地址区间
+ * @brief 每线程的映射区当前分配指针（bump allocator）
  *
+ * @details 原先使用全局计数器，多进程会互相覆盖地址区间。
+ *          现改为 per-thread 起始值，每个用户线程从
+ *          USER_MMAP_BASE + tid * USER_MMAP_GAP 开始独立分配。
+ */
+static uint64_t s_thread_mmap_ptr[CONFIG_MAX_THREADS];
+
+/**
+ * @brief 分配用户虚拟地址区间（per-thread）
+ *
+ * @param tid  当前线程 ID
  * @param size 需要的字节数（将按页对齐）
  *
- * @return 分配的起始虚拟地址
+ * @return 分配的起始虚拟地址，tid 越界返回 0
  */
-static uint64_t user_mmap_alloc(uint64_t size)
+static uint64_t user_mmap_alloc(thread_id_t tid, uint64_t size)
 {
-    uint64_t addr = s_user_mmap_ptr;
-    uint64_t aligned_size = (size + (uint64_t)PAGE_SIZE_4K - 1ULL)
-                          & ~((uint64_t)PAGE_SIZE_4K - 1ULL);
-    s_user_mmap_ptr += aligned_size;
+    uint64_t addr;
+    uint64_t aligned_size;
+
+    if ((uint32_t)tid >= CONFIG_MAX_THREADS)
+    {
+        return 0ULL;
+    }
+
+    /* 首次分配：从该线程的基址开始 */
+    if (s_thread_mmap_ptr[tid] == 0ULL)
+    {
+        s_thread_mmap_ptr[tid] = USER_MMAP_BASE
+                               + (uint64_t)tid * USER_MMAP_GAP;
+    }
+
+    addr = s_thread_mmap_ptr[tid];
+    aligned_size = (size + (uint64_t)PAGE_SIZE_4K - 1ULL)
+                 & ~((uint64_t)PAGE_SIZE_4K - 1ULL);
+    s_thread_mmap_ptr[tid] += aligned_size;
+
     return addr;
 }
 
@@ -89,6 +115,38 @@ static page_table_t *get_current_user_pgd(void)
         return NULL;
     }
     return (page_table_t *)(uintptr_t)current->user_pgd;
+}
+
+/**
+ * @brief 校验物理地址是否为合法的设备 MMIO 区域
+ *
+ * @details SYS_VM_MAP 在 paddr != 0 时做 MMIO 直接映射，原先允许映射任意
+ *          物理地址，攻击者可映射内核物理区（0x40000000+）读取内核内存。
+ *          现通过白名单仅放行已知设备的 MMIO 地址范围。
+ *
+ * @param paddr 待校验的物理地址
+ *
+ * @retval true  地址落在允许的设备 MMIO 范围内
+ * @retval false 地址不在白名单内（拒绝映射）
+ */
+static bool is_valid_mmio_addr(uint64_t paddr)
+{
+    /* UART: 0x09000000-0x09000FFF */
+    if ((paddr >= 0x09000000ULL) && (paddr < 0x09001000ULL))
+    {
+        return true;
+    }
+    /* GIC: 0x08000000-0x08010FFF */
+    if ((paddr >= 0x08000000ULL) && (paddr < 0x08011000ULL))
+    {
+        return true;
+    }
+    /* virtio-mmio: 0x0A000000-0x0A003FFF */
+    if ((paddr >= 0x0A000000ULL) && (paddr < 0x0A004000ULL))
+    {
+        return true;
+    }
+    return false;
 }
 
 /* ========================================================================
@@ -112,13 +170,14 @@ static page_table_t *get_current_user_pgd(void)
  *          双路径访问控制（与 endpoint_check_access 一致）：
  *          1. 当前线程有 CSpace 时，遍历能力表查找指向目标 tid 的线程能力，
  *             通过权限位校验 WRITE 权限。未找到或权限不足返回 -EACCES。
- *          2. 当前线程无 CSpace（内核线程/早期线程）时，直接放行，保持与
- *             内核管理路径的兼容性。
+ *          2. 当前线程无 CSpace 时：内核线程（!is_user）放行，保持与内核
+ *             管理路径的兼容性；用户态线程（is_user）必须有 CSpace，
+ *             否则返回 -EACCES 以防止绕过权限检查。
  *
  * @param target_tid 目标线程 ID
  *
- * @return KERNEL_OK 有权限（或有 CSpace 但找到匹配能力 / 无 CSpace 内核线程）
- * @return -EACCES   有 CSpace 但无匹配能力或权限不足
+ * @return KERNEL_OK 有权限（有 CSpace 且找到匹配能力 / 内核线程放行）
+ * @return -EACCES   用户态线程无 CSpace，或有 CSpace 但无匹配能力/权限不足
  */
 static kernel_status_t thread_check_cap(thread_id_t target_tid)
 {
@@ -129,9 +188,16 @@ static kernel_status_t thread_check_cap(thread_id_t target_tid)
         return -(int32_t)ESRCH;
     }
 
-    /* 无 CSpace 的线程（内核线程）放行，兼容内核管理路径 */
+    /*
+     * 无 CSpace 的线程：内核线程（!is_user）放行，兼容内核管理路径；
+     * 用户态线程（is_user）必须有能力空间，否则拒绝以避免绕过权限检查。
+     */
     if (current->cspace == NULL)
     {
+        if (current->is_user != 0U)
+        {
+            return -(int32_t)EACCES;
+        }
         return KERNEL_OK;
     }
 
@@ -560,8 +626,31 @@ static void dispatch_memory(syscall_frame_t *frame)
                 break;
             }
 
-            /* 分配用户虚拟地址 */
-            uint64_t vaddr = user_mmap_alloc(size);
+            /*
+             * MMIO 白名单校验：paddr != 0 时必须是合法的设备 MMIO 地址，
+             * 防止用户态映射内核物理内存（0x40000000+）。逐页校验，确保
+             * 整个请求区间 [paddr, paddr+size) 均落在白名单范围内。
+             */
+            if (paddr != 0ULL)
+            {
+                uint64_t mmio_off;
+                for (mmio_off = 0U; mmio_off < size;
+                     mmio_off += (uint64_t)PAGE_SIZE_4K)
+                {
+                    if (!is_valid_mmio_addr(paddr + mmio_off))
+                    {
+                        frame->x0 = (uint64_t)(-(int64_t)EPERM);
+                        break;
+                    }
+                }
+                if (mmio_off < size)
+                {
+                    break;
+                }
+            }
+
+            /* 分配用户虚拟地址（per-thread） */
+            uint64_t vaddr = user_mmap_alloc(kthread_get_current_tid(), size);
             uint64_t offset;
             kernel_status_t map_ret = KERNEL_OK;
 
@@ -581,7 +670,7 @@ static void dispatch_memory(syscall_frame_t *frame)
                 }
                 else
                 {
-                    /* MMIO 直接映射 */
+                    /* MMIO 直接映射（已通过白名单校验） */
                     cur_paddr = paddr + offset;
                 }
 
