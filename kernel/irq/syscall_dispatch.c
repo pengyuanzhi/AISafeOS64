@@ -758,6 +758,15 @@ static void dispatch_capability(syscall_frame_t *frame)
 /**
  * @brief 中断管理系统调用分发
  *
+ * @details 对接新中断管理子系统（对标 QNX ker_interrupt.c）：
+ *          - SYS_INTERRUPT_ATTACH：绑定中断到 notification 对象，返回 attach_id
+ *          - SYS_INTERRUPT_DETACH_BY_ID：按 attach_id 精确解绑
+ *          - SYS_INTERRUPT_DETACH：按 irq 号解绑所有
+ *          - SYS_INTERRUPT_MASK/UNMASK：临时屏蔽/恢复
+ *          - SYS_INTERRUPT_GET_STATS：查询统计
+ *
+ *          attach 成功返回 >0 的 attach_id（写入 x0），失败返回负错误码。
+ *
  * @param frame 系统调用栈帧
  */
 static void dispatch_interrupt(syscall_frame_t *frame)
@@ -773,27 +782,94 @@ static void dispatch_interrupt(syscall_frame_t *frame)
              *
              * 参数：x0 = irq 中断号
              *       x1 = notification_id 通知对象 ID
-             * 返回：x0 = 0 成功 或负错误码
+             *       x2 = trigger 触发模式（0=上升沿 1=下降沿 2=高电平 3=低电平）
+             *       x3 = priority 优先级
+             * 返回：x0 = attach_id(>0) 成功 或负错误码
              *
-             * 内核 irq_attach 配置 GIC 并在中断发生时
+             * 内核 irq_attach 校验 IRQ 能力后配置 GIC，并在中断发生时
              * 调用 ipc_notification_signal 通知用户态。
              */
             uint32_t irq = (uint32_t)frame->x0;
             kobj_id_t notif_id = (kobj_id_t)frame->x1;
-            kernel_status_t ret;
+            irq_trigger_t trigger = (irq_trigger_t)frame->x2;
+            uint8_t priority = (uint8_t)frame->x3;
+            int32_t attach_id;
 
-            /* IRQ_TRIGGER_EDGE_FALLING=2, 优先级 0xA0 */
-            ret = irq_attach(irq, notif_id, 2U, (uint8_t)0xA0U);
-            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            /* 默认触发模式：高电平；默认优先级 0xA0 */
+            if (trigger > IRQ_TRIGGER_LEVEL_LOW)
+            {
+                trigger = IRQ_TRIGGER_LEVEL_HIGH;
+            }
+            attach_id = irq_attach(irq, NULL, NULL, notif_id,
+                                   trigger, priority);
+            /* attach_id > 0 成功；<= 0 为负错误码 */
+            frame->x0 = (uint64_t)(int64_t)attach_id;
             break;
         }
 
         case SYS_INTERRUPT_DETACH:
         {
-            /* x0=irq */
+            /* x0=irq：解绑该中断的所有 handler */
             uint32_t irq = (uint32_t)frame->x0;
             kernel_status_t ret = irq_detach(irq);
-            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
+                                 : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_INTERRUPT_DETACH_BY_ID:
+        {
+            /* x0=attach_id：按 ID 精确解绑 */
+            uint32_t attach_id = (uint32_t)frame->x0;
+            kernel_status_t ret = irq_detach_by_id(attach_id);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
+                                 : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_INTERRUPT_MASK:
+        {
+            /* x0=irq：临时屏蔽 */
+            uint32_t irq = (uint32_t)frame->x0;
+            kernel_status_t ret = irq_mask(irq);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
+                                 : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_INTERRUPT_UNMASK:
+        {
+            /* x0=irq：恢复屏蔽 */
+            uint32_t irq = (uint32_t)frame->x0;
+            kernel_status_t ret = irq_unmask(irq);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
+                                 : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_INTERRUPT_GET_STATS:
+        {
+            /* x0=irq, x1=stats_ptr（用户缓冲） */
+            uint32_t irq = (uint32_t)frame->x0;
+            irq_stats_t *user_stats = (irq_stats_t *)(uintptr_t)frame->x1;
+            irq_stats_t stats;
+
+            if (!access_ok(user_stats, sizeof(irq_stats_t)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            kernel_status_t ret = irq_get_stats(irq, &stats);
+            if (ret == KERNEL_OK)
+            {
+                *user_stats = stats;
+                frame->x0 = 0ULL;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ret);
+            }
             break;
         }
 

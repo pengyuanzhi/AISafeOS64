@@ -92,8 +92,12 @@ typedef struct
 #define SYS_CAP_DELETE             0x0304U   /**< @brief 删除能力 */
 
 /* --- 中断管理（0x0400 - 0x04FF） --- */
-#define SYS_INTERRUPT_ATTACH       0x0400U   /**< @brief 绑定中断到通知对象 */
-#define SYS_INTERRUPT_DETACH       0x0401U   /**< @brief 解除中断绑定 */
+#define SYS_INTERRUPT_ATTACH       0x0400U   /**< @brief 绑定中断到通知对象（返回 attach_id） */
+#define SYS_INTERRUPT_DETACH       0x0401U   /**< @brief 按 IRQ 号解除所有绑定 */
+#define SYS_INTERRUPT_DETACH_BY_ID 0x0402U   /**< @brief 按 attach_id 精确解绑 */
+#define SYS_INTERRUPT_MASK         0x0403U   /**< @brief 临时屏蔽中断 */
+#define SYS_INTERRUPT_UNMASK       0x0404U   /**< @brief 恢复屏蔽的中断 */
+#define SYS_INTERRUPT_GET_STATS    0x0405U   /**< @brief 查询中断统计 */
 
 /* --- 调试/信息（0x0500 - 0x05FF） --- */
 #define SYS_DEBUG_PRINT            0x0500U   /**< @brief 调试打印 */
