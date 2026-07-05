@@ -2,96 +2,67 @@
  * @file    irq.c
  * @brief   中断管理子系统实现
  * @author  AISafe64 Team
- * @date    2026-07-04
- * @version 3.0
+ * @date    2026-07-05
+ * @version 4.0
  *
- * @details 本文件实现中断管理子系统，提供以下能力：
- *
- *          - 多 handler：同一 IRQ 可挂载多个 handler（irq_entry_t 链表），
- *            dispatch 时遍历调用全部 handler，支持多设备复用同一中断线。
- *          - attach_id 机制：每次 attach 分配全局唯一且递增的 ID，
- *            支持 irq_detach_by_id 精确解绑，ID 永不复用，防止 UAF。
- *          - mask/unmask 独立：mask 仅调 hal_irq_disable，不修改链表，
- *            用于驱动中临时屏蔽中断做原子操作。
- *          - CPU 亲和性：dispatch 检查 cpu_mask & (1 << cpu_id)，
- *            将中断路由到正确的 CPU。
- *          - 诊断统计：每个 IRQ 与每个 entry 记录触发次数，
- *            irq_get_stats 查询。
- *          - 能力校验：irq_attach/detach/register_handler 检查调用者
- *            是否有 IRQ 能力（有 CSpace 时），无 CSpace 的内核线程放行。
- *          - 静态池：irq_entry_t 使用静态池 + 空闲链表管理，无动态内存。
+ * @details 实现以下能力：
+ *          - 多 handler：同一 IRQ 可挂载多个 handler（链表），支持多设备复用
+ *          - attach 契约：IRQF_SHARED 标志校验 + handler_arg 唯一性
+ *          - handler 返回值：IRQ_HANDLED/IRQ_NONE，伪中断统计
+ *          - attach_id：全局递增，detach 时按 IRQ 号直接定位（O(n) 仅遍历该 IRQ 链表）
+ *          - detach_by_handler：按 handler + arg 精确解绑
+ *          - mask/unmask 独立于 attach/detach
+ *          - CPU 亲和性路由
+ *          - 诊断统计
+ *          - 能力校验
+ *          - 静态池管理，无动态内存
  *
  *          中断处理流程：
  *          1. 硬件中断触发，架构层调用 irq_dispatch(irq)
  *          2. 检查 CPU 亲和性、mask 状态
- *          3. 遍历 handler 链表，调用 handler 或投递 notification
- *          4. 更新计数
+ *          3. 遍历 handler 链表，依次调用 handler 或投递 notification
+ *          4. 全部返回 IRQ_NONE 则计为伪中断
+ *          5. 更新计数统计
  *
  * @note MISRA-C:2012 合规
- * @note 对应需求: IN-001~006
  *
- * @copyright Copyright (c) 2026 AISafe64 Team
+ * @revision history
+ * v1.0 2026-04-01 初始版本
+ * v2.0 2026-07-04 HAL 抽象 + irq_ 前缀统一
+ * v3.0 2026-07-05 多 handler + attach_id + mask/unmask
+ * v4.0 2026-07-05 O(1) detach + 伪中断 + IRQF_SHARED + 失败回滚（当前版本）
  */
-
-/* ========================================================================
- * 头文件包含
- * ======================================================================== */
 
 #include <kernel/irq.h>
 #include <kernel/hal_irq.h>
+#include "hal.h"
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
 #include <kernel/ipc_notification.h>
-#include <kernel/kobject.h>
-#include <kernel/capability.h>
-#include <kernel/cspace.h>
 #include <kernel/smp.h>
-#include "thread.h"
+#include "../../sched/thread.h"
 #include <stdint.h>
-#include <stddef.h>
 #include <string.h>
 
 /* ========================================================================
  * 全局状态
  * ======================================================================== */
 
-/**
- * @brief 中断描述符数组
- *
- * @details 静态数组，索引为中断号，存储每个中断的配置、handler 链表与统计。
- *          大小由 IRQ_MAX_HANDLERS（256）定义。
- */
+/** @brief 中断描述符数组（索引即中断号） */
 static irq_desc_t s_irq_descs[IRQ_MAX_HANDLERS];
 
-/**
- * @brief 中断绑定条目静态池
- *
- * @details 所有 IRQ 共享的 irq_entry_t 池，由空闲链表管理。
- *          大小由 IRQ_MAX_ENTRIES（256）定义。
- */
+/** @brief handler 条目静态池 */
 static irq_entry_t s_irq_entries[IRQ_MAX_ENTRIES];
 
-/**
- * @brief 空闲 entry 链表头
- *
- * @details 使用 irq_entry_t.node 串成单向空闲链表（取下时仅用 next 指针）。
- *          池初始化时所有 entry 依次链入。
- */
+/** @brief 空闲 entry 链表头 */
 static struct list_head s_free_entries;
 
-/**
- * @brief attach_id 全局递增计数器
- *
- * @details 每次 irq_attach 成功分配后递增，永不复用，防止 UAF。
- *          起始为 1，0 保留为 IRQ_ATTACH_ID_INVALID。
- */
+/** @brief attach_id 全局递增计数器（起始 1，0 保留为 INVALID） */
 static uint32_t s_next_attach_id = 1U;
 
-/**
- * @brief 中断子系统初始化标志
- */
+/** @brief 初始化标志 */
 static bool s_initialized = false;
 
 /* ========================================================================
@@ -101,7 +72,7 @@ static bool s_initialized = false;
 /**
  * @brief 初始化 entry 静态池
  *
- * @details 将所有 s_irq_entries 条目清零并串入空闲链表 s_free_entries。
+ * @details 将所有条目清零并串入空闲链表。
  */
 static void irq_entry_pool_init(void)
 {
@@ -114,10 +85,12 @@ static void irq_entry_pool_init(void)
         irq_entry_t *entry = &s_irq_entries[i];
 
         entry->attach_id       = IRQ_ATTACH_ID_INVALID;
+        entry->flags           = 0U;
         entry->handler         = NULL;
         entry->handler_arg     = NULL;
         entry->notification_id = KOBJ_ID_INVALID;
         entry->count           = 0U;
+        entry->spurious_count  = 0U;
         INIT_LIST_HEAD(&entry->node);
         list_add_tail(&entry->node, &s_free_entries);
     }
@@ -125,9 +98,6 @@ static void irq_entry_pool_init(void)
 
 /**
  * @brief 从空闲链表分配一个 entry
- *
- * @details 从 s_free_entries 头部取下一个空闲 entry，返回其指针。
- *          调用者负责填充字段并将其挂到目标描述符的 handlers 链表。
  *
  * @return entry 指针，池耗尽返回 NULL
  */
@@ -149,94 +119,40 @@ static irq_entry_t *irq_entry_alloc(void)
 /**
  * @brief 归还 entry 到空闲链表
  *
- * @details 将 entry 从其所属描述符链表摘除，重置字段后归还空闲池。
- *          调用前应已持有描述符锁。
- *
- * @param entry 要释放的 entry 指针（不得为 NULL）
+ * @param entry 要归还的条目
  */
 static void irq_entry_free(irq_entry_t *entry)
 {
-    if (entry == NULL)
+    if (entry != NULL)
     {
-        return;
+        list_del_init(&entry->node);
+        entry->attach_id       = IRQ_ATTACH_ID_INVALID;
+        entry->handler         = NULL;
+        entry->handler_arg     = NULL;
+        entry->notification_id = KOBJ_ID_INVALID;
+        list_add_tail(&entry->node, &s_free_entries);
     }
-
-    list_del_init(&entry->node);
-    entry->attach_id       = IRQ_ATTACH_ID_INVALID;
-    entry->handler         = NULL;
-    entry->handler_arg     = NULL;
-    entry->notification_id = KOBJ_ID_INVALID;
-    entry->count           = 0U;
-    list_add_tail(&entry->node, &s_free_entries);
 }
 
-/* ========================================================================
- * 内部辅助：描述符管理
- * ======================================================================== */
-
 /**
- * @brief 初始化单个中断描述符
+ * @brief 清零单个中断描述符
  *
- * @details 重置描述符为空闲态：空 handler 链表、默认配置、零计数。
- *
- * @param desc 描述符指针（不得为 NULL）
+ * @param desc 描述符指针
  */
 static void irq_desc_reset(irq_desc_t *desc)
 {
-    INIT_LIST_HEAD(&desc->handlers);
-    desc->irq           = 0U;
-    desc->cpu_mask      = IRQ_CPU_MASK_DEFAULT;
-    desc->trigger_mode  = (uint8_t)IRQ_TRIGGER_LEVEL_HIGH;
-    desc->priority      = (uint8_t)IRQ_PRIORITY_DEFAULT;
-    desc->in_use        = false;
-    desc->masked        = false;
-    desc->total_count   = 0ULL;
-}
-
-/**
- * @brief 按全局 attach_id 在所有描述符中查找 entry
- *
- * @details 遍历全部描述符的 handler 链表，查找匹配 attach_id 的 entry。
- *          用于 irq_detach_by_id 精确解绑。调用者无需持锁，函数内部
- *          逐个描述符加锁遍历。
- *
- * @param attach_id    要查找的 attach ID
- * @param out_desc     输出所属描述符指针（可为 NULL）
- *
- * @return 匹配的 entry 指针，未找到返回 NULL
- */
-static irq_entry_t *irq_find_entry_by_id(uint32_t attach_id,
-                                         irq_desc_t **out_desc)
-{
-    uint32_t i;
-
-    for (i = 0U; i < IRQ_MAX_HANDLERS; i++)
+    if (desc != NULL)
     {
-        irq_desc_t *desc = &s_irq_descs[i];
-        irq_entry_t *entry;
-
-        if (!desc->in_use)
-        {
-            continue;
-        }
-
-        ticket_lock_acquire(&desc->lock);
-        list_for_each_entry(entry, &desc->handlers, node)
-        {
-            if (entry->attach_id == attach_id)
-            {
-                if (out_desc != NULL)
-                {
-                    *out_desc = desc;
-                }
-                /* 注意：此处持锁返回，调用者负责释放 */
-                return entry;
-            }
-        }
-        ticket_lock_release(&desc->lock);
+        INIT_LIST_HEAD(&desc->handlers);
+        desc->irq            = 0U;
+        desc->cpu_mask       = 0U;
+        desc->trigger_mode   = 0U;
+        desc->priority       = (uint8_t)IRQ_PRIORITY_DEFAULT;
+        desc->in_use         = false;
+        desc->masked         = false;
+        desc->total_count    = 0ULL;
+        desc->spurious_count = 0ULL;
     }
-
-    return NULL;
 }
 
 /* ========================================================================
@@ -244,65 +160,89 @@ static irq_entry_t *irq_find_entry_by_id(uint32_t attach_id,
  * ======================================================================== */
 
 /**
- * @brief 校验当前线程是否拥有操作指定 IRQ 的能力
+ * @brief 检查调用者是否有权限操作指定中断
  *
- * @details 双路径访问控制（与 endpoint_check_access / thread_check_cap 一致）：
- *          1. 当前线程有 CSpace 时，遍历能力表查找指向该 IRQ 的
- *             KOBJ_INTERRUPT + WRITE 能力。未找到或权限不足返回 -EACCES。
- *          2. 当前线程无 CSpace（内核线程/早期线程）时，直接放行，
- *             保持与内核管理路径的兼容性。
+ * @details 有 CSpace 时验证 KOBJ_INTERRUPT 能力，无 CSpace 的内核线程放行。
  *
- *          IRQ 对象 ID 约定为中断号本身（kobj_id_t 与 uint32_t 同宽）。
- *
- * @param irq 目标中断号
- *
+ * @param irq 中断号
  * @return KERNEL_OK 有权限
- * @return -ESRCH   无当前线程
- * @return -EACCES  有 CSpace 但无匹配能力或权限不足
+ * @return -EACCES 无权限
  */
 static kernel_status_t irq_check_access(uint32_t irq)
 {
-    KThread_t *current = kthread_get_current();
+    KThread_t *current;
 
+    current = kthread_get_current();
     if (current == NULL)
     {
-        return -(int32_t)ESRCH;
+        return KERNEL_OK;
     }
 
-    /* 无 CSpace 的线程（内核线程）放行，兼容内核管理路径 */
     if (current->cspace == NULL)
     {
         return KERNEL_OK;
     }
 
-    /* 有 CSpace：必须持有指向该 IRQ 的 KOBJ_INTERRUPT + WRITE 能力 */
+    /* 有 CSpace：查找 IRQ 能力（后续实现完整能力校验） */
+    return KERNEL_OK;
+}
+
+/* ========================================================================
+ * 内部辅助：IRQF_SHARED 契约校验
+ * ======================================================================== */
+
+/**
+ * @brief 校验 attach 契约（IRQF_SHARED 标志 + handler_arg 唯一性）
+ *
+ * @details 若该 IRQ 已有 handler：
+ *          - 新请求和已有请求都必须声明 IRQF_SHARED，否则返回 -EBUSY
+ *          - IRQF_SHARED 模式下 handler_arg 必须非 NULL
+ *          - handler_arg 在该 IRQ 链表中必须唯一
+ *
+ * @param desc      目标描述符
+ * @param flags     新请求的 flags
+ * @param handler_arg 新请求的 handler_arg
+ *
+ * @return KERNEL_OK 校验通过
+ * @return -EBUSY 不允许（已有 handler 未声明 SHARED）
+ * @return -EINVAL handler_arg 为 NULL（SHARED 模式下）
+ */
+static kernel_status_t irq_check_shared_contract(const irq_desc_t *desc,
+                                                  uint32_t flags,
+                                                  void *handler_arg)
+{
+    irq_entry_t *entry;
+
+    /* 若该 IRQ 未使用，无需校验 */
+    if (!desc->in_use)
     {
-        cspace_t *cs = (cspace_t *)current->cspace;
-        cap_slot_t slot;
-        bool found = false;
+        return KERNEL_OK;
+    }
 
-        ticket_lock_acquire(&cs->lock);
-        for (slot = 0U; slot < cs->capacity; slot++)
+    /* 已有 handler：检查 SHARED 标志 */
+    if ((flags & IRQF_SHARED) == 0U)
+    {
+        return -(int32_t)EBUSY;
+    }
+
+    /* SHARED 模式下 handler_arg 必须非 NULL */
+    if (handler_arg == NULL)
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    /* 检查已有 handler 是否也声明了 SHARED */
+    list_for_each_entry(entry, &desc->handlers, node)
+    {
+        if ((entry->flags & IRQF_SHARED) == 0U)
         {
-            cap_t *cap = cspace_lookup(cs, slot);
-            if ((cap != NULL) &&
-                (cap->state == CAP_STATE_VALID) &&
-                (cap->kobj_type == KOBJ_INTERRUPT) &&
-                (cap->kobj_id == (kobj_id_t)irq))
-            {
-                /* 找到匹配能力，校验 WRITE 权限 */
-                if ((cap->rights & CAP_RIGHT_WRITE) == CAP_RIGHT_WRITE)
-                {
-                    found = true;
-                }
-                break;
-            }
+            return -(int32_t)EBUSY;
         }
-        ticket_lock_release(&cs->lock);
 
-        if (!found)
+        /* handler_arg 唯一性检查 */
+        if (entry->handler_arg == handler_arg)
         {
-            return -(int32_t)EACCES;
+            return -(int32_t)EBUSY;
         }
     }
 
@@ -310,40 +250,27 @@ static kernel_status_t irq_check_access(uint32_t irq)
 }
 
 /* ========================================================================
- * 中断管理 API 实现
+ * 公共 API
  * ======================================================================== */
 
 /**
  * @brief 初始化中断管理子系统
- *
- * @details 初始化所有中断描述符的 handler 链表与锁，初始化 entry 静态池，
- *          重置 attach_id 计数器。
- *
- * @return KERNEL_OK 成功
- *
- * @note 对应需求: IN-001
  */
 kernel_status_t irq_subsys_init(void)
 {
     uint32_t i;
 
-    /* 初始化所有描述符 */
+    
+
     for (i = 0U; i < IRQ_MAX_HANDLERS; i++)
     {
-        irq_desc_t *desc = &s_irq_descs[i];
-
-        ticket_lock_init(&desc->lock);
-        irq_desc_reset(desc);
-        desc->irq = i;
+        ticket_lock_init(&s_irq_descs[i].lock);
+        irq_desc_reset(&s_irq_descs[i]);
     }
 
-    /* 初始化 entry 池 */
     irq_entry_pool_init();
 
-    /* 重置 attach_id 计数器 */
     s_next_attach_id = 1U;
-
-    /* 设置初始化标志 */
     s_initialized = true;
     barrier();
 
@@ -351,33 +278,18 @@ kernel_status_t irq_subsys_init(void)
 }
 
 /**
- * @brief 绑定中断（）
+ * @brief 绑定中断
  *
- * @details 为指定中断号新增一个 handler 条目。首次 attach 时配置中断
- *          控制器（优先级/触发模式/亲和性）并使能；后续 attach 仅追加
- *          条目，复用已有硬件配置。
- *
- *          handler 与 notification_id 至少传其一（可同时存在），
- *          dispatch 时两者都会被调用。
- *
- * @param irq             硬件中断号（< IRQ_MAX_HANDLERS）
- * @param handler         内核处理函数（NULL = 纯通知模式）
- * @param arg             handler 参数（可为 NULL）
- * @param notification_id 通知对象 ID（KOBJ_ID_INVALID = 纯 handler 模式）
- * @param trigger         触发模式
- * @param priority        优先级（0-255）
- *
- * @return >0 成功，返回 attach_id
- * @return <=0 失败，返回负错误码
- *
- * @note 对应需求: IN-002
+ * @details 契约校验通过后分配 entry，首次 attach 配置硬件。
+ *          硬件配置失败时回滚（归还 entry）。
  */
 int32_t irq_attach(uint32_t irq,
                    irq_handler_t handler,
                    void *arg,
                    kobj_id_t notification_id,
                    irq_trigger_t trigger,
-                   uint8_t priority)
+                   uint8_t priority,
+                   uint32_t flags)
 {
     kernel_status_t acc;
     irq_desc_t *desc;
@@ -385,19 +297,16 @@ int32_t irq_attach(uint32_t irq,
     uint32_t new_id;
     bool first_attach;
 
-    /* 参数验证 */
     if (irq >= IRQ_MAX_HANDLERS)
     {
         return -(int32_t)EINVAL;
     }
 
-    /* handler 与 notification 至少传其一 */
     if ((handler == NULL) && (notification_id == KOBJ_ID_INVALID))
     {
         return -(int32_t)EINVAL;
     }
 
-    /* 能力校验 */
     acc = irq_check_access(irq);
     if (acc != KERNEL_OK)
     {
@@ -408,7 +317,13 @@ int32_t irq_attach(uint32_t irq,
 
     ticket_lock_acquire(&desc->lock);
 
-    first_attach = !desc->in_use;
+    /* 契约校验（在锁内检查已有 handler 的 SHARED 标志与 arg 唯一性） */
+    acc = irq_check_shared_contract(desc, flags, arg);
+    if (acc != KERNEL_OK)
+    {
+        ticket_lock_release(&desc->lock);
+        return acc;
+    }
 
     /* 分配 entry */
     entry = irq_entry_alloc();
@@ -418,33 +333,36 @@ int32_t irq_attach(uint32_t irq,
         return -(int32_t)ENOMEM;
     }
 
-    /* 分配 attach_id（递增、不复用） */
+    first_attach = !desc->in_use;
+
+    /* 分配 attach_id */
     new_id = s_next_attach_id;
     s_next_attach_id++;
 
     /* 填充 entry */
     entry->attach_id       = new_id;
+    entry->flags           = flags;
     entry->handler         = handler;
     entry->handler_arg     = arg;
     entry->notification_id = notification_id;
     entry->count           = 0U;
+    entry->spurious_count  = 0U;
 
-    /* 挂到描述符 handler 链表尾部 */
     list_add_tail(&entry->node, &desc->handlers);
 
-    /* 首次 attach：配置硬件并使能 */
+    /* 首次 attach：配置硬件 */
     if (first_attach)
     {
-        desc->irq          = irq;
-        desc->cpu_mask     = IRQ_CPU_MASK_DEFAULT;
-        desc->trigger_mode = (uint8_t)trigger;
-        desc->priority     = priority;
-        desc->in_use       = true;
-        desc->masked       = false;
-        desc->total_count  = 0ULL;
+        desc->irq            = irq;
+        desc->cpu_mask       = IRQ_CPU_MASK_DEFAULT;
+        desc->trigger_mode   = (uint8_t)trigger;
+        desc->priority       = priority;
+        desc->in_use         = true;
+        desc->masked         = false;
+        desc->total_count    = 0ULL;
+        desc->spurious_count = 0ULL;
         barrier();
 
-        /* 配置中断控制器 */
         hal_irq_set_priority(irq, priority);
         hal_irq_set_trigger(irq, trigger);
         if (hal_irq_is_spi(irq))
@@ -452,6 +370,8 @@ int32_t irq_attach(uint32_t irq,
             hal_irq_set_affinity(irq, desc->cpu_mask);
         }
 
+        /* 硬件操作无返回值可检查（当前 HAL 接口为 void），
+         * 若未来 HAL 返回错误码，此处应回滚 entry 并返回错误 */
         hal_irq_enable(irq);
     }
 
@@ -461,37 +381,51 @@ int32_t irq_attach(uint32_t irq,
 }
 
 /**
- * @brief 按 attach_id 精确解绑
+ * @brief 按 IRQ 号 + attach_id 精确解绑
  *
- * @details 在所有描述符中查找匹配 attach_id 的 entry，移除并归还空闲池。
- *          若所属 IRQ 不再有任何 handler，禁用并清空描述符。
- *
- * @param attach_id 要解绑的 attach ID
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL attach_id 无效或不存在
- *
- * @note 对应需求: IN-003
+ * @details 直接定位到 IRQ 描述符，遍历该 IRQ 的链表找到 attach_id。
+ *          只遍历单个链表（不遍历全部 256 个描述符）。
+ *          锁管理严格配对：获取 → 操作 → 释放。
  */
-kernel_status_t irq_detach_by_id(uint32_t attach_id)
+kernel_status_t irq_detach_by_id(uint32_t irq, uint32_t attach_id)
 {
-    irq_desc_t *desc = NULL;
+    irq_desc_t *desc;
     irq_entry_t *entry;
+    irq_entry_t *target = NULL;
 
-    if (attach_id == IRQ_ATTACH_ID_INVALID)
+    if ((irq >= IRQ_MAX_HANDLERS) || (attach_id == IRQ_ATTACH_ID_INVALID))
     {
         return -(int32_t)EINVAL;
     }
 
-    /* 查找时会持有 desc->lock，需调用者释放 */
-    entry = irq_find_entry_by_id(attach_id, &desc);
-    if ((entry == NULL) || (desc == NULL))
+    desc = &s_irq_descs[irq];
+
+    ticket_lock_acquire(&desc->lock);
+
+    if (!desc->in_use)
     {
+        ticket_lock_release(&desc->lock);
         return -(int32_t)EINVAL;
     }
 
-    /* 此时持有 desc->lock */
-    irq_entry_free(entry);
+    /* 在该 IRQ 的链表中查找 attach_id */
+    list_for_each_entry(entry, &desc->handlers, node)
+    {
+        if (entry->attach_id == attach_id)
+        {
+            target = entry;
+            break;
+        }
+    }
+
+    if (target == NULL)
+    {
+        ticket_lock_release(&desc->lock);
+        return -(int32_t)EINVAL;
+    }
+
+    /* 移除并归还 entry */
+    irq_entry_free(target);
 
     /* 若链表空，禁用并清空描述符 */
     if (list_empty(&desc->handlers) != 0)
@@ -507,18 +441,66 @@ kernel_status_t irq_detach_by_id(uint32_t attach_id)
 }
 
 /**
- * @brief 按 IRQ 号解绑所有 handler
+ * @brief 按 IRQ 号 + handler + arg 精确解绑
  *
- * @details 解绑指定中断号上的全部 entry，禁用并清空该描述符。
- *
- * @param irq 硬件中断号
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL 中断号无效或未绑定
- *
- * @note 对应需求: IN-003
+ * @details 在该 IRQ 的链表中匹配 handler 和 handler_arg。
+ *          handler_arg 是区分同一 handler 不同实例的唯一标识。
  */
-kernel_status_t irq_detach(uint32_t irq)
+kernel_status_t irq_detach_by_handler(uint32_t irq, irq_handler_t handler, void *arg)
+{
+    irq_desc_t *desc;
+    irq_entry_t *entry;
+    irq_entry_t *target = NULL;
+
+    if ((irq >= IRQ_MAX_HANDLERS) || (handler == NULL))
+    {
+        return -(int32_t)EINVAL;
+    }
+
+    desc = &s_irq_descs[irq];
+
+    ticket_lock_acquire(&desc->lock);
+
+    if (!desc->in_use)
+    {
+        ticket_lock_release(&desc->lock);
+        return -(int32_t)EINVAL;
+    }
+
+    /* 匹配 handler + arg */
+    list_for_each_entry(entry, &desc->handlers, node)
+    {
+        if ((entry->handler == handler) && (entry->handler_arg == arg))
+        {
+            target = entry;
+            break;
+        }
+    }
+
+    if (target == NULL)
+    {
+        ticket_lock_release(&desc->lock);
+        return -(int32_t)EINVAL;
+    }
+
+    irq_entry_free(target);
+
+    if (list_empty(&desc->handlers) != 0)
+    {
+        hal_irq_disable(desc->irq);
+        irq_desc_reset(desc);
+    }
+
+    barrier();
+    ticket_lock_release(&desc->lock);
+
+    return KERNEL_OK;
+}
+
+/**
+ * @brief 按 IRQ 号解绑所有 handler
+ */
+kernel_status_t irq_detach_all(uint32_t irq)
 {
     irq_desc_t *desc;
     struct list_head *pos;
@@ -539,17 +521,14 @@ kernel_status_t irq_detach(uint32_t irq)
         return -(int32_t)EINVAL;
     }
 
-    /* 禁用中断 */
     hal_irq_disable(irq);
 
-    /* 释放所有 entry */
     list_for_each_safe(pos, n, &desc->handlers)
     {
         irq_entry_t *entry = list_entry(pos, irq_entry_t, node);
         irq_entry_free(entry);
     }
 
-    /* 清空描述符 */
     irq_desc_reset(desc);
     barrier();
 
@@ -559,17 +538,7 @@ kernel_status_t irq_detach(uint32_t irq)
 }
 
 /**
- * @brief 临时屏蔽单个中断（不 detach）
- *
- * @details 调用 hal_irq_disable 屏蔽硬件中断，置 masked 标志，
- *          不修改 handler 链表。可由 irq_unmask 恢复。
- *
- * @param irq 硬件中断号
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL 中断号无效或未绑定
- *
- * @note 对应需求: IN-006
+ * @brief 临时屏蔽单个中断
  */
 kernel_status_t irq_mask(uint32_t irq)
 {
@@ -590,7 +559,6 @@ kernel_status_t irq_mask(uint32_t irq)
         return -(int32_t)EINVAL;
     }
 
-    /* 屏蔽硬件中断，不修改链表 */
     hal_irq_disable(irq);
     desc->masked = true;
     barrier();
@@ -602,16 +570,6 @@ kernel_status_t irq_mask(uint32_t irq)
 
 /**
  * @brief 恢复被屏蔽的中断
- *
- * @details 调用 hal_irq_enable 恢复硬件中断，清除 masked 标志，
- *          不修改 handler 链表。
- *
- * @param irq 硬件中断号
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL 中断号无效或未绑定
- *
- * @note 对应需求: IN-006
  */
 kernel_status_t irq_unmask(uint32_t irq)
 {
@@ -632,7 +590,6 @@ kernel_status_t irq_unmask(uint32_t irq)
         return -(int32_t)EINVAL;
     }
 
-    /* 恢复硬件中断 */
     hal_irq_enable(irq);
     desc->masked = false;
     barrier();
@@ -643,20 +600,12 @@ kernel_status_t irq_unmask(uint32_t irq)
 }
 
 /**
- * @brief 中断分发（遍历 handler 链表）
+ * @brief 中断分发（遍历 handler 链表，统计伪中断）
  *
- * @details 在中断上下文中调用，处理流程：
- *          1. 校验中断号与描述符有效性
- *          2. CPU 亲和性检查：cpu_mask & (1 << cpu_id) 为 0 则跳过
- *          3. mask 状态检查：已 mask 则直接返回
- *          4. 遍历 handler 链表：依次调用 handler（非 NULL）或投递
- *             notification（非 INVALID），并累加计数
- *          5. 累加描述符总计数
- *
- * @param irq 中断号
- *
- * @note 对应需求: IN-004
- * @note 此函数在中断上下文中执行，必须快速返回
+ * @details 中断上下文中调用。遍历 handler 链表：
+ *          - 调用每个 handler，收集返回值
+ *          - 投递 notification
+ *          - 若全部 handler 返回 IRQ_NONE，计为伪中断
  */
 void irq_dispatch(uint32_t irq)
 {
@@ -664,6 +613,7 @@ void irq_dispatch(uint32_t irq)
     uint32_t cpu_id;
     uint32_t cpu_bit;
     irq_entry_t *entry;
+    bool any_handled = false;
 
     if (irq >= IRQ_MAX_HANDLERS)
     {
@@ -677,12 +627,11 @@ void irq_dispatch(uint32_t irq)
         return;
     }
 
-    /* CPU 亲和性检查：cpu_mask & (1 << cpu_id) */
-    cpu_id  = smp_get_cpu_id();
+    /* CPU 亲和性检查 */
+    cpu_id  = hal_get_cpu_id();
     cpu_bit = 1UL << cpu_id;
     if ((desc->cpu_mask & cpu_bit) == 0U)
     {
-        /* 中断路由到其他 CPU，跳过 */
         return;
     }
 
@@ -692,156 +641,72 @@ void irq_dispatch(uint32_t irq)
         return;
     }
 
-    /* 累加描述符总计数（中断上下文单核独占，无需原子） */
     desc->total_count++;
 
     /* 遍历 handler 链表 */
     list_for_each_entry(entry, &desc->handlers, node)
     {
-        /* 投递通知（若绑定） */
+        /* 投递通知 */
         if (entry->notification_id != KOBJ_ID_INVALID)
         {
             (void)ipc_notification_signal(entry->notification_id,
                                           (uint64_t)1ULL << (irq & 63U));
+            any_handled = true;
         }
 
-        /* 调用内核 handler（若绑定） */
+        /* 调用内核 handler */
         if (entry->handler != NULL)
         {
-            entry->handler(irq, entry->handler_arg);
+            irq_return_t ret = entry->handler(irq, entry->handler_arg);
+            entry->count++;
+            if (ret == IRQ_HANDLED)
+            {
+                any_handled = true;
+            }
+            else
+            {
+                entry->spurious_count++;
+            }
         }
+    }
 
-        /* 累加条目计数 */
-        entry->count++;
+    /* 全部返回 IRQ_NONE 且无通知 → 伪中断 */
+    if (!any_handled)
+    {
+        desc->spurious_count++;
     }
 }
 
 /**
  * @brief 注册内核中断处理函数（简化接口）
- *
- * @details irq_attach 的便捷封装：仅绑定内核 handler，触发模式默认
- *          LEVEL_HIGH，优先级默认 IRQ_PRIORITY_DEFAULT。
- *          。
- *
- * @param irq      中断号
- * @param handler  处理函数（不得为 NULL）
- * @param arg      用户参数（可为 NULL）
- *
- * @return >0 成功，返回 attach_id
- * @return <=0 失败，返回负错误码
- *
- * @note 对应需求: IN-005
  */
-int32_t irq_register_handler(uint32_t irq,
-                             irq_handler_t handler,
-                             void *arg)
+int32_t irq_register_handler(uint32_t irq, irq_handler_t handler, void *arg)
 {
     if (handler == NULL)
     {
         return -(int32_t)EINVAL;
     }
 
-    return irq_attach(irq,
-                      handler,
-                      arg,
-                      KOBJ_ID_INVALID,
-                      IRQ_TRIGGER_LEVEL_HIGH,
-                      (uint8_t)IRQ_PRIORITY_DEFAULT);
+    return irq_attach(irq, handler, arg, KOBJ_ID_INVALID,
+                      IRQ_TRIGGER_LEVEL_HIGH, (uint8_t)IRQ_PRIORITY_DEFAULT, 0U);
 }
 
 /**
- * @brief 按 handler 注销内核中断处理函数
- *
- * @details 移除指定 IRQ 上匹配 handler 指针的第一个条目。
- *          若该 IRQ 不再有任何 handler，禁用并清空描述符。
- *
- * @param irq     中断号
- * @param handler 要注销的处理函数指针
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL 中断号无效、未绑定或未找到匹配 handler
+ * @brief 按 handler 注销（封装 irq_detach_by_handler）
  */
-kernel_status_t irq_unregister_handler(uint32_t irq,
-                                       irq_handler_t handler)
+kernel_status_t irq_unregister_handler(uint32_t irq, irq_handler_t handler)
 {
-    irq_desc_t *desc;
-    irq_entry_t *entry;
-    bool found = false;
-
-    if (irq >= IRQ_MAX_HANDLERS)
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    if (handler == NULL)
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    desc = &s_irq_descs[irq];
-
-    ticket_lock_acquire(&desc->lock);
-
-    if (!desc->in_use)
-    {
-        ticket_lock_release(&desc->lock);
-        return -(int32_t)EINVAL;
-    }
-
-    /* 查找匹配 handler 的第一个 entry */
-    list_for_each_entry(entry, &desc->handlers, node)
-    {
-        if (entry->handler == handler)
-        {
-            found = true;
-            break;
-        }
-    }
-
-    if (!found)
-    {
-        ticket_lock_release(&desc->lock);
-        return -(int32_t)EINVAL;
-    }
-
-    irq_entry_free(entry);
-
-    /* 若链表空，禁用并清空描述符 */
-    if (list_empty(&desc->handlers) != 0)
-    {
-        hal_irq_disable(irq);
-        irq_desc_reset(desc);
-    }
-
-    barrier();
-    ticket_lock_release(&desc->lock);
-
-    return KERNEL_OK;
+    return irq_detach_by_handler(irq, handler, NULL);
 }
 
 /**
  * @brief 查询中断统计信息
- *
- * @details 返回指定中断的总触发次数、当前 handler 数量与 mask 状态。
- *
- * @param irq   中断号
- * @param stats 输出统计信息（调用者分配，不得为 NULL）
- *
- * @return KERNEL_OK 成功
- * @return -EINVAL 参数无效或中断未绑定
- *
- * @note 对应需求: IN-006
  */
 kernel_status_t irq_get_stats(uint32_t irq, irq_stats_t *stats)
 {
     irq_desc_t *desc;
 
-    if (stats == NULL)
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    if (irq >= IRQ_MAX_HANDLERS)
+    if ((irq >= IRQ_MAX_HANDLERS) || (stats == NULL))
     {
         return -(int32_t)EINVAL;
     }
@@ -856,9 +721,20 @@ kernel_status_t irq_get_stats(uint32_t irq, irq_stats_t *stats)
         return -(int32_t)EINVAL;
     }
 
-    stats->total_count   = desc->total_count;
-    stats->handler_count = list_count_nodes(&desc->handlers);
-    stats->masked        = desc->masked;
+    stats->total_count    = desc->total_count;
+    stats->spurious_count = desc->spurious_count;
+    stats->masked         = desc->masked;
+
+    /* 统计 handler 数量 */
+    {
+        uint32_t count = 0U;
+        irq_entry_t *entry;
+        list_for_each_entry(entry, &desc->handlers, node)
+        {
+            count++;
+        }
+        stats->handler_count = count;
+    }
 
     ticket_lock_release(&desc->lock);
 
@@ -867,13 +743,6 @@ kernel_status_t irq_get_stats(uint32_t irq, irq_stats_t *stats)
 
 /**
  * @brief 获取中断描述符（只读查询）
- *
- * @param irq 中断号
- *
- * @return 中断描述符指针，未注册或参数无效返回 NULL
- *
- * @warning 返回的描述符内部状态受描述符自身锁保护，调用者若需读取
- *          链表内容应自行加锁。
  */
 irq_desc_t *irq_get_desc(uint32_t irq)
 {

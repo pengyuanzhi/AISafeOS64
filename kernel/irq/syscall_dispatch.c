@@ -793,15 +793,16 @@ static void dispatch_interrupt(syscall_frame_t *frame)
             kobj_id_t notif_id = (kobj_id_t)frame->x1;
             irq_trigger_t trigger = (irq_trigger_t)frame->x2;
             uint8_t priority = (uint8_t)frame->x3;
+            uint32_t flags = (uint32_t)frame->x4;
             int32_t attach_id;
 
-            /* 默认触发模式：高电平；默认优先级 0xA0 */
+            /* 默认触发模式：高电平 */
             if (trigger > IRQ_TRIGGER_LEVEL_LOW)
             {
                 trigger = IRQ_TRIGGER_LEVEL_HIGH;
             }
             attach_id = irq_attach(irq, NULL, NULL, notif_id,
-                                   trigger, priority);
+                                   trigger, priority, flags);
             /* attach_id > 0 成功；<= 0 为负错误码 */
             frame->x0 = (uint64_t)(int64_t)attach_id;
             break;
@@ -811,7 +812,7 @@ static void dispatch_interrupt(syscall_frame_t *frame)
         {
             /* x0=irq：解绑该中断的所有 handler */
             uint32_t irq = (uint32_t)frame->x0;
-            kernel_status_t ret = irq_detach(irq);
+            kernel_status_t ret = irq_detach_all(irq);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
                                  : (uint64_t)(-(int64_t)ret));
             break;
@@ -819,9 +820,10 @@ static void dispatch_interrupt(syscall_frame_t *frame)
 
         case SYS_INTERRUPT_DETACH_BY_ID:
         {
-            /* x0=attach_id：按 ID 精确解绑 */
-            uint32_t attach_id = (uint32_t)frame->x0;
-            kernel_status_t ret = irq_detach_by_id(attach_id);
+            /* x0=irq, x1=attach_id：按 IRQ+ID 精确解绑 */
+            uint32_t irq = (uint32_t)frame->x0;
+            uint32_t attach_id = (uint32_t)frame->x1;
+            kernel_status_t ret = irq_detach_by_id(irq, attach_id);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL
                                  : (uint64_t)(-(int64_t)ret));
             break;
