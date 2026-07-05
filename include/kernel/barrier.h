@@ -629,4 +629,81 @@ static inline void atomic_store_release_u64(volatile uint64_t *addr, uint64_t va
     *addr = value;
 }
 
+/**
+ * @brief 64位原子按位或（返回旧值）
+ *
+ * @details 原子地将 *addr 与 value 按位或，返回操作前的旧值。
+ *          使用 LDXR/STXR 独占访问指令循环实现，多核与中断上下文均安全。
+ *          适用于中断上下文与线程上下文并发修改的位掩码字段
+ *          （如 notification 的 signals 字段）。
+ *
+ * @param addr  目标地址指针（不得为 NULL）
+ * @param value 要按位或的值
+ *
+ * @return 操作前的旧值
+ */
+static inline uint64_t atomic_or_u64(volatile uint64_t *addr, uint64_t value)
+{
+    uint64_t old_val;
+    uint64_t new_val;
+    uint64_t result;
+
+    do
+    {
+        __asm__ volatile("ldxr %0, [%1]"
+                         : "=&r"(old_val)
+                         : "r"(addr)
+                         : "memory");
+        new_val = old_val | value;
+        __asm__ volatile("stxr %w0, %1, [%2]"
+                         : "=&r"(result)
+                         : "r"(new_val), "r"(addr)
+                         : "memory");
+        if (result != 0U)
+        {
+            cpu_relax();
+        }
+    } while (result != 0U);
+
+    return old_val;
+}
+
+/**
+ * @brief 64位原子按位与（返回旧值）
+ *
+ * @details 原子地将 *addr 与 value 按位与，返回操作前的旧值。
+ *          使用 LDXR/STXR 独占访问指令循环实现，多核与中断上下文均安全。
+ *          用于原子地清除位掩码字段（如 notification 信号消费）。
+ *
+ * @param addr  目标地址指针（不得为 NULL）
+ * @param value 要按位与的值（通常为 ~bits 形式，用于清位）
+ *
+ * @return 操作前的旧值
+ */
+static inline uint64_t atomic_and_u64(volatile uint64_t *addr, uint64_t value)
+{
+    uint64_t old_val;
+    uint64_t new_val;
+    uint64_t result;
+
+    do
+    {
+        __asm__ volatile("ldxr %0, [%1]"
+                         : "=&r"(old_val)
+                         : "r"(addr)
+                         : "memory");
+        new_val = old_val & value;
+        __asm__ volatile("stxr %w0, %1, [%2]"
+                         : "=&r"(result)
+                         : "r"(new_val), "r"(addr)
+                         : "memory");
+        if (result != 0U)
+        {
+            cpu_relax();
+        }
+    } while (result != 0U);
+
+    return old_val;
+}
+
 #endif /* KERNEL_BARRIER_H */

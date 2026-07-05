@@ -106,6 +106,76 @@ static page_table_t *get_current_user_pgd(void)
 #endif
 
 /* ========================================================================
+ * 线程能力检查（P1-13）
+ * ======================================================================== */
+
+/**
+ * @brief 检查当前线程是否拥有对目标 tid 的线程能力
+ *
+ * @details 安全模型要求：跨线程管理操作（SUSPEND/RESUME/SET_PRIORITY）
+ *          必须验证调用者持有指向目标线程的能力（KOBJ_THREAD + WRITE）。
+ *
+ *          双路径访问控制（与 endpoint_check_access 一致）：
+ *          1. 当前线程有 CSpace 时，遍历能力表查找指向目标 tid 的线程能力，
+ *             通过权限位校验 WRITE 权限。未找到或权限不足返回 -EACCES。
+ *          2. 当前线程无 CSpace（内核线程/早期线程）时，直接放行，保持与
+ *             内核管理路径的兼容性。
+ *
+ * @param target_tid 目标线程 ID
+ *
+ * @return KERNEL_OK 有权限（或有 CSpace 但找到匹配能力 / 无 CSpace 内核线程）
+ * @return -EACCES   有 CSpace 但无匹配能力或权限不足
+ */
+static kernel_status_t thread_check_cap(thread_id_t target_tid)
+{
+    KThread_t *current = kthread_get_current();
+
+    if (current == NULL)
+    {
+        return -(int32_t)ESRCH;
+    }
+
+    /* 无 CSpace 的线程（内核线程）放行，兼容内核管理路径 */
+    if (current->cspace == NULL)
+    {
+        return KERNEL_OK;
+    }
+
+    /* 有 CSpace：必须持有指向目标线程的 KOBJ_THREAD + WRITE 能力 */
+    {
+        cspace_t *cs = (cspace_t *)current->cspace;
+        cap_slot_t slot;
+        bool found = false;
+
+        ticket_lock_acquire(&cs->lock);
+        for (slot = 0U; slot < cs->capacity; slot++)
+        {
+            cap_t *cap = cspace_lookup(cs, slot);
+            if ((cap != NULL) &&
+                (cap->state == CAP_STATE_VALID) &&
+                (cap->kobj_type == KOBJ_THREAD) &&
+                (cap->kobj_id == (kobj_id_t)target_tid))
+            {
+                /* 找到匹配能力，校验 WRITE 权限 */
+                if ((cap->rights & CAP_RIGHT_WRITE) == CAP_RIGHT_WRITE)
+                {
+                    found = true;
+                }
+                break;
+            }
+        }
+        ticket_lock_release(&cs->lock);
+
+        if (!found)
+        {
+            return -(int32_t)EACCES;
+        }
+    }
+
+    return KERNEL_OK;
+}
+
+/* ========================================================================
  * 线程管理系统调用分发
  * ======================================================================== */
 
@@ -162,8 +232,15 @@ static void dispatch_thread(syscall_frame_t *frame)
 
         case SYS_THREAD_SUSPEND:
         {
-            /* 内核 API 返回负错误码，直接传递 */
+            /* P1-13：跨线程操作必须校验线程能力（KOBJ_THREAD + WRITE） */
             thread_id_t tid = (thread_id_t)frame->x0;
+            kernel_status_t acc = thread_check_cap(tid);
+            if (acc != KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)(int64_t)acc;
+                break;
+            }
+            /* 内核 API 返回负错误码，直接传递 */
             kernel_status_t ret = kthread_suspend(tid);
             frame->x0 = (uint64_t)(int64_t)ret;
             break;
@@ -171,7 +248,14 @@ static void dispatch_thread(syscall_frame_t *frame)
 
         case SYS_THREAD_RESUME:
         {
+            /* P1-13：跨线程操作必须校验线程能力（KOBJ_THREAD + WRITE） */
             thread_id_t tid = (thread_id_t)frame->x0;
+            kernel_status_t acc = thread_check_cap(tid);
+            if (acc != KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)(int64_t)acc;
+                break;
+            }
             kernel_status_t ret = kthread_resume(tid);
             frame->x0 = (uint64_t)(int64_t)ret;
             break;
@@ -179,7 +263,14 @@ static void dispatch_thread(syscall_frame_t *frame)
 
         case SYS_THREAD_SET_PRIORITY:
         {
+            /* P1-13：跨线程操作必须校验线程能力（KOBJ_THREAD + WRITE） */
             thread_id_t tid = (thread_id_t)frame->x0;
+            kernel_status_t acc = thread_check_cap(tid);
+            if (acc != KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)(int64_t)acc;
+                break;
+            }
             priority_t prio = (priority_t)frame->x1;
             kernel_status_t ret = kthread_set_priority(tid, prio);
             frame->x0 = (uint64_t)(int64_t)ret;
@@ -583,17 +674,36 @@ static void dispatch_capability(syscall_frame_t *frame)
     uint32_t nr = (uint32_t)frame->x8;
     kernel_status_t ret;
 
+    /*
+     * P1-13 安全修复：能力操作必须绑定到当前线程的 CSpace。
+     *
+     * 原先 cap_copy/move/revoke/delete 直接采用用户态传入的 src_cspace/
+     * dst_cspace 参数，未校验其是否归属当前线程，导致任何线程可操作任意
+     * CSpace（跨 CSpace 越权）。
+     *
+     * 现统一从 current->cspace 取出 root_slot 作为操作的目标 CSpace 根，
+     * 禁止用户直接指定 CSpace root。无 CSpace 的线程（早期内核线程）返回
+     * -ENOSYS，使其无法触达能力管理路径。
+     */
+    cspace_t *cs = (cspace_t *)kthread_get_current()->cspace;
+    if (cs == NULL)
+    {
+        frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+        return;
+    }
+    cap_slot_t cs_root = cs->root_slot;
+
     switch (nr)
     {
         case SYS_CSPACE_CREATE:
         {
             /* x0=capacity */
             uint32_t capacity = (uint32_t)frame->x0;
-            cspace_t *cs;
-            ret = cspace_create(capacity, &cs);
+            cspace_t *new_cs;
+            ret = cspace_create(capacity, &new_cs);
             if (ret == KERNEL_OK)
             {
-                frame->x0 = (uint64_t)cs->header.id;
+                frame->x0 = (uint64_t)new_cs->header.id;
             }
             else
             {
@@ -604,31 +714,26 @@ static void dispatch_capability(syscall_frame_t *frame)
 
         case SYS_CAP_COPY:
         {
-            /* x0=src_cspace, x1=src_slot, x2=dest_cspace */
-            cap_slot_t src_cs = (cap_slot_t)frame->x0;
+            /* x1=src_slot；源/目标 CSpace 均强制为当前线程的 CSpace */
             cap_slot_t src_slot = (cap_slot_t)frame->x1;
-            cap_slot_t dst_cs = (cap_slot_t)frame->x2;
             /* 默认分配到 slot 1，不降权 */
-            ret = cap_copy(src_cs, src_slot, dst_cs, (cap_slot_t)1U, 0U);
+            ret = cap_copy(cs_root, src_slot, cs_root, (cap_slot_t)1U, 0U);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }
 
         case SYS_CAP_MOVE:
         {
-            /* x0=src_cspace, x1=src_slot, x2=dest_cspace */
-            cap_slot_t src_cs = (cap_slot_t)frame->x0;
+            /* x1=src_slot；源/目标 CSpace 均强制为当前线程的 CSpace */
             cap_slot_t src_slot = (cap_slot_t)frame->x1;
-            cap_slot_t dst_cs = (cap_slot_t)frame->x2;
-            ret = cap_move(src_cs, src_slot, dst_cs, (cap_slot_t)1U);
+            ret = cap_move(cs_root, src_slot, cs_root, (cap_slot_t)1U);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }
 
         case SYS_CAP_REVOKE:
         {
-            /* x0=cspace, x1=slot */
-            cap_slot_t cs_root = (cap_slot_t)frame->x0;
+            /* x1=slot；CSpace 根强制为当前线程的 CSpace */
             cap_slot_t slot = (cap_slot_t)frame->x1;
             ret = cap_revoke(cs_root, slot);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
@@ -637,8 +742,7 @@ static void dispatch_capability(syscall_frame_t *frame)
 
         case SYS_CAP_DELETE:
         {
-            /* x0=cspace, x1=slot */
-            cap_slot_t cs_root = (cap_slot_t)frame->x0;
+            /* x1=slot；CSpace 根强制为当前线程的 CSpace */
             cap_slot_t slot = (cap_slot_t)frame->x1;
             ret = cap_delete(cs_root, slot);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));

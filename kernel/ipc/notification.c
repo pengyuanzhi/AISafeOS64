@@ -308,13 +308,23 @@ kernel_status_t ipc_notification_signal(kobj_id_t notify_id,
         return -(int32_t)EINVAL;
     }
 
-    /* 原子地设置信号位 */
-    ntf->signals |= signal;
-    barrier();
+    /*
+     * P1-16 安全修复：signals 字段改为原子按位或。
+     *
+     * 此函数可在中断上下文（interrupt_dispatch → ipc_notification_signal）
+     * 调用，与线程上下文的 wait/try_wait 并发消费 signals（&= ~active）。
+     * 原先 ntf->signals |= signal 为非原子读-改-写，会丢失中断中置位的
+     * 信号位或破坏线程中清位的副作用。改为 atomic_or_u64 后由
+     * LDXR/STXR 独占访问保证原子性，中断与多核均安全。
+     */
+    (void)atomic_or_u64(&ntf->signals, signal);
+
+    /* 原子读取消费前的快照，用于匹配等待掩码 */
+    uint64_t cur_signals = atomic_load_acquire_u64(&ntf->signals);
 
     /* 检查是否匹配等待掩码 */
     if ((ntf->state == IPC_NOTIFY_WAITING) &&
-        ((ntf->signals & ntf->waited_mask) != 0ULL))
+        ((cur_signals & ntf->waited_mask) != 0ULL))
     {
         /* 唤醒等待线程 */
         if (ntf->waiter_tid < CONFIG_MAX_THREADS)
@@ -368,13 +378,13 @@ kernel_status_t ipc_notification_wait(kobj_id_t notify_id,
         return -(int32_t)ESRCH;
     }
 
-    /* 检查是否已有待处理的信号 */
-    active = ntf->signals & waited_mask;
+    /* 检查是否已有待处理的信号（原子读取，避免与中断 signal 竞态） */
+    active = atomic_load_acquire_u64(&ntf->signals) & waited_mask;
     if (active != 0ULL)
     {
-        /* 有待处理信号：直接返回 */
+        /* 有待处理信号：直接返回，原子清除已消费的位 */
         *triggered = active;
-        ntf->signals &= ~active;
+        (void)atomic_and_u64(&ntf->signals, ~active);
         ntf->state = IPC_NOTIFY_IDLE;
         barrier();
         return KERNEL_OK;
@@ -389,10 +399,10 @@ kernel_status_t ipc_notification_wait(kobj_id_t notify_id,
 
     schedule();
 
-    /* 被唤醒后：提取触发的信号 */
-    active = ntf->signals & waited_mask;
+    /* 被唤醒后：提取触发的信号，原子清除已消费的位 */
+    active = atomic_load_acquire_u64(&ntf->signals) & waited_mask;
     *triggered = active;
-    ntf->signals &= ~active;
+    (void)atomic_and_u64(&ntf->signals, ~active);
     ntf->waited_mask = 0ULL;
     ntf->waiter_tid = THREAD_ID_INVALID;
     ntf->state = IPC_NOTIFY_IDLE;
@@ -423,17 +433,18 @@ kernel_status_t ipc_notification_try_wait(kobj_id_t notify_id,
         return -(int32_t)EINVAL;
     }
 
-    active = ntf->signals & waited_mask;
+    /* 原子读取待处理信号，避免与中断 signal 竞态 */
+    active = atomic_load_acquire_u64(&ntf->signals) & waited_mask;
     if (active == 0ULL)
     {
         return -(int32_t)EAGAIN;
     }
 
-    /* 有待处理信号 */
+    /* 有待处理信号：原子清除已消费的位 */
     *triggered = active;
-    ntf->signals &= ~active;
+    uint64_t remaining = atomic_and_u64(&ntf->signals, ~active) & ~active;
 
-    if (ntf->signals == 0ULL)
+    if (remaining == 0ULL)
     {
         ntf->state = IPC_NOTIFY_IDLE;
     }

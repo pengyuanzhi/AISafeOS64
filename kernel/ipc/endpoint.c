@@ -28,6 +28,7 @@
 #include <kernel/errno.h>
 #include <kernel/config.h>
 #include <kernel/compiler.h>
+#include <kernel/uaccess.h>
 #include <kernel/list.h>
 #include <kernel/mm/slab.h>
 #include <kernel/capability.h>
@@ -843,9 +844,53 @@ kernel_status_t ipc_msg_send(kobj_id_t ep_id,
     ep->state = IPC_EP_PENDING;
     ep->sender_tid = current->tid;
 
-    /* 保存发送方缓冲区信息，供后续 RECV → REPLY 使用 */
-    ep->send_buf = send_buf;
-    ep->send_size = send_size;
+    /*
+     * P1-15 安全修复：禁止跨 schedule 保存用户态指针。
+     *
+     * 原先直接把用户态 send_buf 指针存入 ep->send_buf，发送方阻塞后
+     * 接收方在另一地址空间（不同 user_pgd）以此指针 memcpy，导致跨地址
+     * 空间读写——严重安全漏洞。
+     *
+     * 修复：先将消息体拷贝到内核临时缓冲（endpoint_msg_buf_alloc），
+     * 把内核缓冲地址存入 ep->send_buf；接收方从内核缓冲拷出后再释放。
+     * 用户指针走 copy_from_user（含 access_ok 校验），内核指针（内核线程
+     * bench 等场景）走 memcpy。
+     */
+    if ((send_buf != NULL) && (send_size > 0U))
+    {
+        void *kbuf = endpoint_msg_buf_alloc(send_size);
+        if (kbuf == NULL)
+        {
+            ticket_lock_release_irqrestore(&ep->lock, irq_state);
+            return -(int32_t)ENOMEM;
+        }
+
+        if (access_ok(send_buf, send_size))
+        {
+            /* 用户态指针：安全拷贝 */
+            if (copy_from_user(kbuf, send_buf, (uint64_t)send_size) != 0)
+            {
+                endpoint_msg_buf_free(kbuf, send_size);
+                ticket_lock_release_irqrestore(&ep->lock, irq_state);
+                return -(int32_t)EFAULT;
+            }
+        }
+        else
+        {
+            /* 内核态指针（内核线程）：直接拷贝 */
+            (void)memcpy(kbuf, send_buf, (size_t)send_size);
+        }
+
+        ep->send_buf = kbuf;
+        ep->send_size = send_size;
+    }
+    else
+    {
+        ep->send_buf = NULL;
+        ep->send_size = 0U;
+    }
+
+    /* 保存发送方回复缓冲区信息，供后续 RECV → REPLY 使用 */
     ep->sender_recv_buf = recv_buf;
     ep->sender_recv_size = recv_size;
 
@@ -1008,7 +1053,12 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
      * 条件：state == PENDING 且 sender_tid 有效（排除 EP_CREATE 后的初始状态） */
     if ((ep->state == IPC_EP_PENDING) && (ep->sender_tid != THREAD_ID_INVALID))
     {
-        /* 有发送方在等待：拷贝消息载荷到接收方缓冲区 */
+        /*
+         * P1-15：ep->send_buf 现在指向内核临时缓冲（由发送方慢速路径分配），
+         * 而非跨地址空间的用户指针，故在此可安全拷贝到接收方 recv_buf。
+         * 接收方为用户线程时用 copy_to_user，内核线程用 memcpy。
+         * 拷贝完成后立即释放内核临时缓冲。
+         */
         if ((ep->send_buf != NULL) && (ep->send_size > 0U) &&
             (recv_buf != NULL) && (recv_size > 0U))
         {
@@ -1017,7 +1067,22 @@ kernel_status_t ipc_msg_receive(kobj_id_t ep_id,
             {
                 copy_size = recv_size;
             }
-            (void)memcpy(recv_buf, ep->send_buf, (size_t)copy_size);
+            if (access_ok(recv_buf, copy_size))
+            {
+                (void)copy_to_user(recv_buf, ep->send_buf, (uint64_t)copy_size);
+            }
+            else
+            {
+                (void)memcpy(recv_buf, ep->send_buf, (size_t)copy_size);
+            }
+        }
+
+        /* 释放慢速路径分配的内核消息缓冲 */
+        if (ep->send_buf != NULL)
+        {
+            endpoint_msg_buf_free((void *)ep->send_buf, ep->send_size);
+            ep->send_buf = NULL;
+            ep->send_size = 0U;
         }
 
         /* 填充 tag 输出参数 */
