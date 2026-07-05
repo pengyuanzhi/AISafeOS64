@@ -185,28 +185,19 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     /* 判断异常来源：SPSR_EL1.M[3:0] == 0 表示来自 EL0 */
     from_el0 = (((uint32_t)spsr) & 0xFU) == 0U ? 1U : 0U;
 
-    /* 获取异常类别描述 */
+    /* 异常诊断（精简版：单行输出关键信息） */
     desc = get_ec_desc(ec);
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[exception] === Sync Exception ===\n");
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] EC=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] EC=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)ec);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, from_el0 != 0U ? " EL0 " : " EL1 ");
     hal_uart_puts((uint64_t)QEMU_UART0_BASE, desc);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, from_el0 != 0U ? ") [EL0]\n" : ") [EL1]\n");
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] ESR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] ESR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, esr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ISS=0x");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)iss);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] FAR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " FAR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, far);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, elr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
     /*
      * 异常分类处理：
@@ -342,15 +333,13 @@ void irq_handler(void)
  */
 void el1_serror_handler(uint64_t esr, uint64_t far, uint64_t elr)
 {
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[exception] === SError ===\n");
-
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[exception] ESR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] SError ESR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, esr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " FAR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " FAR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, far);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=0x");
+    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=");
     uart_print_hex((uint64_t)QEMU_UART0_BASE, elr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
 
     /* SError 为严重错误，挂起系统 */
     for (;;)
