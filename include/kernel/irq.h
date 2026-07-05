@@ -1,12 +1,12 @@
 /**
  * @file    irq.h
- * @brief   中断管理子系统接口（对标商用 RTOS）
+ * @brief   中断管理子系统接口
  * @author  AISafe64 Team
  * @date    2026-07-04
  * @version 3.0
  *
  * @details 本文件定义了中断管理子系统的对外接口：
- *          - 支持同一 IRQ 多 handler 共享中断（handler 链表）
+ *          - 同一 IRQ 可挂载多个 handler（链表管理）
  *          - 每个 attach 拥有唯一 attach_id，支持精确 detach
  *          - mask/unmask 独立于 attach/detach 的临时屏蔽
  *          - CPU 亲和性（cpu_mask）路由
@@ -66,7 +66,7 @@ typedef void (*irq_handler_t)(uint32_t irq, void *arg);
  * @brief 中断绑定条目池容量
  *
  * @details 静态 irq_entry_t 池的大小，所有 IRQ 共享该池。
- *          支持 handler 总数（含共享中断）上限。
+ *          支持 handler 总数（）上限。
  */
 #define IRQ_MAX_ENTRIES         256U
 
@@ -94,14 +94,14 @@ typedef void (*irq_handler_t)(uint32_t irq, void *arg);
 #define IRQ_CPU_MASK_ALL        ((uint32_t)0xFFFFFFFFU)
 
 /* ========================================================================
- * 中断绑定条目（支持共享中断）
+ * 中断绑定条目（）
  * ======================================================================== */
 
 /**
  * @brief 中断绑定条目
  *
  * @details 每一次 irq_attach 分配一个独立条目，挂到对应 IRQ 描述符的
- *          handler 链表上。同一 IRQ 可挂载多个条目以支持共享中断线。
+ *          handler 链表上。同一 IRQ 可挂载多个条目以线。
  *          attach_id 全局递增、永不复用，用于精确 detach 与防 UAF。
  */
 typedef struct irq_entry
@@ -122,11 +122,11 @@ typedef struct irq_entry
  * @brief 中断描述符
  *
  * @details 每个硬件中断号对应一个描述符，维护该中断的配置、handler 链表
- *          与统计信息。handler 链表支持共享中断，由独立 TicketLock 保护。
+ *          与统计信息。handler 链表，由独立 TicketLock 保护。
  */
 typedef struct
 {
-    struct list_head handlers;     /**< @brief handler 链表头（支持共享中断） */
+    struct list_head handlers;     /**< @brief handler 链表头（） */
     uint32_t         irq;          /**< @brief 中断号 */
     uint32_t         cpu_mask;     /**< @brief CPU 亲和性掩码（bit i = CPU i） */
     uint8_t          trigger_mode; /**< @brief 触发模式（@ref irq_trigger_t） */
@@ -170,10 +170,10 @@ typedef struct
 kernel_status_t irq_subsys_init(void);
 
 /**
- * @brief 绑定中断（支持共享中断）
+ * @brief 绑定中断（）
  *
  * @details 为指定中断号新增一个 handler 条目。同一 IRQ 可被多次 attach，
- *          形成共享中断链表。每个 attach 返回唯一的 attach_id，用于
+ *          形成 handler 链表。每个 attach 返回唯一的 attach_id，用于
  *          精确 detach。
  *
  *          - handler 与 notification_id 至少传一个（可同时存在）
@@ -278,7 +278,7 @@ void irq_dispatch(uint32_t irq);
  *
  * @details irq_attach 的便捷封装：仅绑定内核 handler，触发模式默认
  *          LEVEL_HIGH，优先级默认 IRQ_PRIORITY_DEFAULT，CPU 亲和性默认
- *          CPU 0。支持共享中断（可对同一 IRQ 多次注册）。
+ *          CPU 0。。
  *
  * @param irq      中断号
  * @param handler  处理函数（不得为 NULL）

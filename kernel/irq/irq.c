@@ -1,14 +1,14 @@
 /**
  * @file    irq.c
- * @brief   中断管理子系统实现（对标商用 RTOS）
+ * @brief   中断管理子系统实现
  * @author  AISafe64 Team
  * @date    2026-07-04
  * @version 3.0
  *
- * @details 本文件实现中断管理子系统，对标商用 RTOS 中断管理子系统：
+ * @details 本文件实现中断管理子系统，提供以下能力：
  *
- *          - **共享中断**：同一 IRQ 可挂载多个 handler（irq_entry_t 链表），
- *            dispatch 时遍历调用全部 handler，支持 PCI MSI-X 等共享中断线场景。
+ *          - 多 handler：同一 IRQ 可挂载多个 handler（irq_entry_t 链表），
+ *            dispatch 时遍历调用全部 handler，支持多设备复用同一中断线。
  *          - **attach_id 机制**：每次 attach 分配全局唯一且递增的 ID，
  *            支持 irq_detach_by_id 精确解绑，ID 永不复用，防止 UAF。
  *          - **mask/unmask 独立**：mask 仅调 hal_irq_disable，不修改链表，
@@ -351,7 +351,7 @@ kernel_status_t irq_subsys_init(void)
 }
 
 /**
- * @brief 绑定中断（支持共享中断）
+ * @brief 绑定中断（）
  *
  * @details 为指定中断号新增一个 handler 条目。首次 attach 时配置中断
  *          控制器（优先级/触发模式/亲和性）并使能；后续 attach 仅追加
@@ -721,7 +721,7 @@ void irq_dispatch(uint32_t irq)
  *
  * @details irq_attach 的便捷封装：仅绑定内核 handler，触发模式默认
  *          LEVEL_HIGH，优先级默认 IRQ_PRIORITY_DEFAULT。
- *          支持共享中断（可对同一 IRQ 多次注册）。
+ *          。
  *
  * @param irq      中断号
  * @param handler  处理函数（不得为 NULL）
