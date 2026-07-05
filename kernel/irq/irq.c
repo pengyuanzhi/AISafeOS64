@@ -9,17 +9,17 @@
  *
  *          - 多 handler：同一 IRQ 可挂载多个 handler（irq_entry_t 链表），
  *            dispatch 时遍历调用全部 handler，支持多设备复用同一中断线。
- *          - **attach_id 机制**：每次 attach 分配全局唯一且递增的 ID，
+ *          - attach_id 机制：每次 attach 分配全局唯一且递增的 ID，
  *            支持 irq_detach_by_id 精确解绑，ID 永不复用，防止 UAF。
- *          - **mask/unmask 独立**：mask 仅调 hal_irq_disable，不修改链表，
+ *          - mask/unmask 独立：mask 仅调 hal_irq_disable，不修改链表，
  *            用于驱动中临时屏蔽中断做原子操作。
- *          - **CPU 亲和性**：dispatch 检查 cpu_mask & (1 << cpu_id)，
+ *          - CPU 亲和性：dispatch 检查 cpu_mask & (1 << cpu_id)，
  *            将中断路由到正确的 CPU。
- *          - **诊断统计**：每个 IRQ 与每个 entry 记录触发次数，
+ *          - 诊断统计：每个 IRQ 与每个 entry 记录触发次数，
  *            irq_get_stats 查询。
- *          - **能力校验**：irq_attach/detach/register_handler 检查调用者
+ *          - 能力校验：irq_attach/detach/register_handler 检查调用者
  *            是否有 IRQ 能力（有 CSpace 时），无 CSpace 的内核线程放行。
- *          - **静态池**：irq_entry_t 使用静态池 + 空闲链表管理，无动态内存。
+ *          - 静态池：irq_entry_t 使用静态池 + 空闲链表管理，无动态内存。
  *
  *          中断处理流程：
  *          1. 硬件中断触发，架构层调用 irq_dispatch(irq)
