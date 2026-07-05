@@ -14,9 +14,9 @@
  *
  *          中断处理流程：
  *          1. 硬件中断触发
- *          2. GIC 确认中断（gic_acknowledge_irq）
+ *          2. hal_intc_acknowledge 确认中断
  *          3. 调用 interrupt_dispatch 进行路由
- *          4. 通知 GIC 中断处理完成（gic_end_of_interrupt）
+ *          4. hal_intc_eoi 通知中断处理完成
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: IN-001~006
@@ -29,7 +29,7 @@
  * ======================================================================== */
 
 #include <kernel/interrupt.h>
-#include <kernel/gic.h>
+#include <kernel/hal_intc.h>
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
@@ -145,8 +145,7 @@ kernel_status_t interrupt_attach(uint32_t irq,
                                       uint8_t trigger_mode,
                                       uint8_t priority)
 {
-    kernel_status_t ret;
-    gic_trigger_mode_t gic_mode;
+    irq_trigger_t trigger;
     irq_desc_t *desc;
 
     /* 参数验证 */
@@ -172,41 +171,19 @@ kernel_status_t interrupt_attach(uint32_t irq,
         return -(int32_t)EBUSY;
     }
 
-    /* 转换触发模式 */
-    if (trigger_mode == IRQ_TRIGGER_EDGE_FALLING)
-    {
-        gic_mode = GIC_TRIGGER_EDGE;
-    }
-    else
-    {
-        gic_mode = GIC_TRIGGER_LEVEL;
-    }
+    /* 转换触发模式（API 入参为 uint8_t，转为 irq_trigger_t） */
+    trigger = (irq_trigger_t)trigger_mode;
 
-    /* 配置 GIC 优先级 */
-    ret = gic_set_priority(irq, priority);
-    if (ret != KERNEL_OK)
-    {
-        ticket_lock_release(&s_irq_lock);
-        return ret;
-    }
+    /* 配置中断控制器优先级 */
+    hal_intc_set_priority(irq, priority);
 
-    /* 配置 GIC 触发模式（仅 SPI 有效） */
-    ret = gic_set_trigger_mode(irq, gic_mode);
-    if (ret != KERNEL_OK)
-    {
-        ticket_lock_release(&s_irq_lock);
-        return ret;
-    }
+    /* 配置中断控制器触发模式（仅 SPI 有效，非 SPI 由后端忽略） */
+    hal_intc_set_trigger(irq, trigger);
 
-    /* 配置 GIC 亲和性：默认绑定到 CPU 0 */
-    if (irq >= GIC_SPI_BASE)
+    /* 配置中断控制器亲和性：默认绑定到 CPU 0（仅 SPI 有效） */
+    if (hal_intc_is_spi(irq))
     {
-        ret = gic_set_affinity(irq, 0x01U);
-        if (ret != KERNEL_OK)
-        {
-            ticket_lock_release(&s_irq_lock);
-            return ret;
-        }
+        hal_intc_set_affinity(irq, 0x01U);
     }
 
     /* 填充描述符 */
@@ -221,14 +198,7 @@ kernel_status_t interrupt_attach(uint32_t irq,
     barrier();
 
     /* 使能中断 */
-    ret = gic_enable_irq(irq);
-    if (ret != KERNEL_OK)
-    {
-        /* 使能失败，回滚描述符 */
-        irq_desc_reset(desc);
-        ticket_lock_release(&s_irq_lock);
-        return ret;
-    }
+    hal_intc_enable(irq);
 
     /* 释放锁 */
     ticket_lock_release(&s_irq_lock);
@@ -271,7 +241,7 @@ kernel_status_t interrupt_detach(uint32_t irq)
     }
 
     /* 禁用中断 */
-    (void)gic_disable_irq(irq);
+    hal_intc_disable(irq);
 
     /* 清除描述符 */
     irq_desc_reset(desc);
@@ -390,7 +360,6 @@ kernel_status_t interrupt_register(uint32_t irq,
                                       irq_handler_t handler,
                                       void *arg)
 {
-    kernel_status_t ret;
     irq_desc_t *desc;
 
     /* 参数验证 */
@@ -416,29 +385,19 @@ kernel_status_t interrupt_register(uint32_t irq,
         return -(int32_t)EBUSY;
     }
 
-    /* 配置 GIC 默认优先级 */
-    ret = gic_set_priority(irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
-    if (ret != KERNEL_OK)
-    {
-        ticket_lock_release(&s_irq_lock);
-        return ret;
-    }
+    /* 配置中断控制器默认优先级 */
+    hal_intc_set_priority(irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
 
-    /* 配置 GIC 亲和性：默认绑定到 CPU 0 */
-    if (irq >= GIC_SPI_BASE)
+    /* 配置中断控制器亲和性：默认绑定到 CPU 0（仅 SPI 有效） */
+    if (hal_intc_is_spi(irq))
     {
-        ret = gic_set_affinity(irq, 0x01U);
-        if (ret != KERNEL_OK)
-        {
-            ticket_lock_release(&s_irq_lock);
-            return ret;
-        }
+        hal_intc_set_affinity(irq, 0x01U);
     }
 
     /* 填充描述符 */
     desc->irq             = irq;
     desc->cpu_id          = 0U;
-    desc->trigger_mode    = IRQ_TRIGGER_LEVEL_HIGH;
+    desc->trigger_mode    = (uint8_t)IRQ_TRIGGER_LEVEL_HIGH;
     desc->priority        = (uint8_t)IRQ_PRIORITY_DEFAULT;
     desc->handler         = handler;
     desc->handler_arg     = arg;
@@ -447,14 +406,7 @@ kernel_status_t interrupt_register(uint32_t irq,
     barrier();
 
     /* 使能中断 */
-    ret = gic_enable_irq(irq);
-    if (ret != KERNEL_OK)
-    {
-        /* 使能失败，回滚描述符 */
-        irq_desc_reset(desc);
-        ticket_lock_release(&s_irq_lock);
-        return ret;
-    }
+    hal_intc_enable(irq);
 
     /* 释放锁 */
     ticket_lock_release(&s_irq_lock);
@@ -495,7 +447,7 @@ kernel_status_t interrupt_unregister(uint32_t irq)
     }
 
     /* 禁用中断 */
-    (void)gic_disable_irq(irq);
+    hal_intc_disable(irq);
 
     /* 清除描述符 */
     irq_desc_reset(desc);

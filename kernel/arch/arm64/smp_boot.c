@@ -22,7 +22,7 @@
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
-#include <kernel/gic.h>
+#include <kernel/hal_intc.h>
 #include <kernel/config.h>
 #include <kernel/interrupt.h>
 #include <kernel/virt_phys.h>
@@ -353,12 +353,12 @@ void smp_secondary_entry(uint32_t cpu_id)
         ::: "x0", "memory"
     );
 
-    /* 初始化 GIC CPU interface */
-    (void)gic_init_secondary();
+    /* 初始化中断控制器 CPU interface（HAL） */
+    hal_intc_init_secondary();
 
     /* 使能定时器 PPI 中断（IRQ 30） */
-    (void)gic_set_priority(30U, (uint8_t)0xA0U);
-    (void)gic_enable_irq(30U);
+    hal_intc_set_priority(30U, (uint8_t)0xA0U);
+    hal_intc_enable(30U);
 
     /* 初始化从核定时器（使用 HAL 接口） */
     {

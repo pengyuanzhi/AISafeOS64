@@ -20,7 +20,7 @@
 
 #include <kernel/driver.h>
 #include <kernel/config.h>
-#include <kernel/gic.h>
+#include <kernel/hal_intc.h>
 #include <kernel/interrupt.h>
 #include <kernel/ipc_notification.h>
 #include <kernel/klog.h>
@@ -1115,11 +1115,11 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
     status |= VIRTIO_STATUS_DRIVER_OK;
     mmio_write32(s_blk_priv.mmio_base, VIRTIO_MMIO_STATUS, status);
 
-    /* 步骤 7: 使能 VirtIO MMIO 中断（GIC SPI 配置 + 处理函数注册）
+    /* 步骤 7: 使能 VirtIO MMIO 中断（中断控制器配置 + 处理函数注册）
      * WRITE 操作在 QEMU TCG 中异步完成，需要中断唤醒 WFI 轮询 */
-    (void)gic_set_priority(s_blk_priv.irq, (uint8_t)GIC_PRIORITY_DEFAULT);
-    (void)gic_set_target(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
-    (void)gic_enable_irq(s_blk_priv.irq);
+    hal_intc_set_priority(s_blk_priv.irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
+    hal_intc_set_affinity(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
+    hal_intc_enable(s_blk_priv.irq);
     (void)interrupt_register(s_blk_priv.irq, virtio_blk_irq, NULL);
 
     /* 步骤 8: 读取设备容量 */

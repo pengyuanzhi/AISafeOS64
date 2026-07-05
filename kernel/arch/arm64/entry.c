@@ -8,7 +8,7 @@
  * @details 微内核 C 语言主入口函数与 ARM64 异常处理
  *          - 初始化 UART 早期输出
  *          - 打印启动横幅与硬件信息
- *          - 初始化 GIC 中断控制器
+ *          - 初始化中断控制器（HAL）
  *          - 初始化定时器与调度器
  *          - 初始化 SMP 多核
  *          - 异常处理函数（同步异常、IRQ、SError）
@@ -28,7 +28,7 @@
 #include <kernel/vmspace.h>
 #include <kernel/ipc_endpoint.h>
 #include <kernel/ipc_types.h>
-#include <kernel/gic.h>
+#include <kernel/hal_intc.h>
 #include <kernel/smp.h>
 #include <kernel/ipi.h>
 #include <kernel/syscall.h>
@@ -90,9 +90,6 @@ static const char g_banner[] =
 
 /** @brief ARM 通用定时器物理定时器 PPI 中断号（30 号 PPI） */
 #define QEMU_TIMER_IRQ     30U
-
-/** @brief GIC 伪中断号（无挂起中断时 IAR 返回值） */
-#define GIC_SPURIOUS_IRQ   1023U
 
 /* ========== ESR 异常类别描述 ========== */
 
@@ -270,24 +267,24 @@ void irq_handler(void)
 {
     uint32_t irq;
 
-    /* 从 GIC 获取当前最高优先级挂起中断号 */
-    irq = gic_get_irq_id();
+    /* 从中断控制器获取当前最高优先级挂起中断号 */
+    irq = hal_intc_acknowledge();
 
     /* 检查是否为伪中断 */
-    if (irq >= GIC_SPURIOUS_IRQ)
+    if (hal_intc_is_spurious(irq))
     {
         return;
     }
 
-    /* 根据中断号分发处理 */
-    if (irq <= GIC_SGI_END)
+    /* 根据中断类型分发处理 */
+    if (hal_intc_is_sgi(irq))
     {
         /* SGI（软件生成中断 0-15）：核间中断 */
         ipi_handler(irq);
     }
     else if (irq == QEMU_TIMER_IRQ)
     {
-        /* ARM 通用定时器物理定时器中断 */
+        /* ARM 通用定时器物理定时器中断（PPI 30） */
         timer_interrupt_handler();
     }
     else
@@ -296,8 +293,8 @@ void irq_handler(void)
         interrupt_dispatch(irq);
     }
 
-    /* 通知 GIC 中断处理完成 */
-    gic_end_of_interrupt(irq);
+    /* 通知中断控制器处理完成（EOI） */
+    hal_intc_eoi(irq);
 
     /* 中断返回前检查重调度标志。
      * scheduler_tick/edf_tick 在中断中仅置位 need_resched，
@@ -2516,17 +2513,9 @@ void kernel_main(void)
     (void)stack_end;
 #endif /* CONFIG_DEBUG_VERBOSE */
 
-    /* ---- 第五步：初始化 GIC 中断控制器 ---- */
-    klog_info("[k] GIC init\n");
-    ret = gic_init();
-    if (ret != KERNEL_OK)
-    {
-        klog_error("[k] FATAL: GIC fail\n");
-        for (;;)
-        {
-            __asm__ volatile("wfe" ::: "memory");
-        }
-    }
+    /* ---- 第五步：初始化中断控制器（HAL）---- */
+    klog_info("[k] INTC init\n");
+    hal_intc_init();
 
     /* 初始化中断子系统（中断描述符表清零 + 标志置位） */
     {
@@ -2539,10 +2528,10 @@ void kernel_main(void)
     timer_init();
 
     /* 配置定时器 PPI 中断（IRQ 30）的优先级和路由 */
-    (void)gic_set_priority(QEMU_TIMER_IRQ, (uint8_t)0xA0U);
+    hal_intc_set_priority(QEMU_TIMER_IRQ, (uint8_t)0xA0U);
     /* 注意：PPI 路由为当前 CPU，不需要设置 ITARGETSR */
     /* 使能定时器 PPI 中断（IRQ 30） */
-    (void)gic_enable_irq(QEMU_TIMER_IRQ);
+    hal_intc_enable(QEMU_TIMER_IRQ);
 
     /* ---- 初始化内核堆分配器（kmalloc）---- */
     klog_info("[k] kmalloc init\n");

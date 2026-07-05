@@ -63,11 +63,13 @@ typedef struct
  * 触发模式
  * ======================================================================== */
 
-/** @brief 边沿触发模式 */
-#define IRQ_TRIGGER_EDGE_FALLING    0U
-
-/** @brief 电平触发模式 */
-#define IRQ_TRIGGER_LEVEL_HIGH     1U
+/**
+ * @brief 触发模式类型
+ *
+ * @details 中断描述符中存储的触发模式，使用 hal_intc 定义的
+ *          @ref irq_trigger_t 枚举值。保留为 uint8_t 以节省描述符
+ *          存储空间。具体取值见 @ref irq_trigger_t。
+ */
 
 /* ========================================================================
  * 中断配置常量
