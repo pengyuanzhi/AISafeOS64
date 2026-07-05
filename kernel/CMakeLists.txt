@@ -53,11 +53,12 @@ set(KERNEL_ARCH_SOURCES
 # ==============================================================================
 set(KERNEL_SCHED_SOURCES
     sched/scheduler.c
+    sched/sched_class.c
+    sched/sched_rr.c
     sched/thread.c
     sched/timer.c
     sched/spinlock.c
     sched/mutex.c
-    sched/edf.c
     sched/arinc653.c
     sched/smp.c
     sched/stack_guard.c

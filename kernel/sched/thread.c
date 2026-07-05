@@ -188,6 +188,10 @@ thread_id_t kthread_create(const char *name,
     thread->edf_node.prev = &thread->edf_node;
     thread->sleep_node.next = &thread->sleep_node;
     thread->sleep_node.prev = &thread->sleep_node;
+    /* 默认所属调度类为 NULL：sched_class 框架在 enqueue/dequeue/pick_next/tick
+     * 时回退到默认调度类（sched_rr，由 scheduler_init 注册）。
+     * 实时或其他策略可显式设置此指针指向对应 sched_class。 */
+    thread->sched_class = NULL;
     thread->wakeup_tick = 0ULL;
 
     copy_thread_name(thread->name, name);

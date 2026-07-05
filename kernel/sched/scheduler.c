@@ -23,6 +23,7 @@
 
 #include "scheduler.h"
 #include "thread.h"
+#include "sched_class.h"
 
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
@@ -35,7 +36,6 @@
 #include <stdint.h>
 #include <string.h>
 #include "hal.h"
-#include "edf.h"
 
 /* 前向声明: ARM64 上下文切换接口（定义在 context.S） */
 extern void context_switch(uint64_t *prev_ctx, uint64_t *next_ctx);
@@ -491,8 +491,8 @@ kernel_status_t scheduler_init(void)
     /* 初始化栈保护子系统（金丝雀检测） */
     (void)stack_guard_subsys_init();
 
-    /* 初始化 EDF 实时调度子系统 */
-    (void)edf_init();
+    /* 初始化并注册 RR 调度类（封装现有优先级位图 + RR 逻辑） */
+    sched_rr_init();
 
     /* 初始化线程栈 Slab 缓存 */
     ret = thread_stack_slab_init();
@@ -539,6 +539,7 @@ kernel_status_t scheduler_init(void)
         INIT_LIST_HEAD(&thread->rq_list);
         INIT_LIST_HEAD(&thread->edf_node);
         INIT_LIST_HEAD(&thread->sleep_node);
+        thread->sched_class = NULL;
         thread->wakeup_tick = 0ULL;
         thread->name[0U] = '\0';
     }
@@ -644,10 +645,34 @@ void scheduler_dequeue(KThread_t *thread)
  * O(1) 选择最高优先级线程
  * ======================================================================== */
 
-KThread_t *scheduler_pick_next(void)
+KThread_t *scheduler_pick_next_locked(void)
 {
     uint32_t cpu_id;
     uint32_t highest_prio;
+    PerCPUReadyQueue_t *cpu_q;
+    KThread_t *next;
+
+    cpu_id = hal_get_cpu_id();
+    cpu_q = &g_scheduler.cpu_queues[cpu_id];
+
+    next = NULL;
+
+    /* O(1) 查找最高优先级 */
+    highest_prio = bitmap256_find_highest(&cpu_q->bitmap);
+
+    if (highest_prio < CONFIG_PRIORITY_LEVELS)
+    {
+        /* 从对应优先级链表头部取出第一个线程 */
+        next = list_first_entry(&cpu_q->queues[highest_prio],
+                                KThread_t, rq_list);
+    }
+
+    return next;
+}
+
+KThread_t *scheduler_pick_next(void)
+{
+    uint32_t cpu_id;
     PerCPUReadyQueue_t *cpu_q;
     KThread_t *next;
     uint32_t irq_state;
@@ -658,26 +683,7 @@ KThread_t *scheduler_pick_next(void)
     /* 关中断 + 获取队列锁，保证读取位图/链表期间不被并发修改 */
     irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
-    /* EDF 实时调度：优先选择截止时间最早的线程（仅 CPU0）。
-     * edf_pick_next 内部有独立锁，在持锁状态下调用是安全的。 */
-    next = NULL;
-    if (cpu_id == 0U)
-    {
-        next = edf_pick_next();
-    }
-
-    if (next == NULL)
-    {
-        /* O(1) 查找最高优先级 */
-        highest_prio = bitmap256_find_highest(&cpu_q->bitmap);
-
-        if (highest_prio < CONFIG_PRIORITY_LEVELS)
-        {
-            /* 从对应优先级链表头部取出第一个线程 */
-            next = list_first_entry(&cpu_q->queues[highest_prio],
-                                    KThread_t, rq_list);
-        }
-    }
+    next = scheduler_pick_next_locked();
 
     ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 
@@ -782,23 +788,8 @@ void schedule(void)
      * 关中断 + 自旋锁：本函数可能在定时器中断上下文中被调用。 */
     irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
-    /* ---- 内联 pick_next（不再单独调用 scheduler_pick_next，避免嵌套加锁） ---- */
-    next = NULL;
-    if (cpu_id == 0U)
-    {
-        /* EDF 实时调度（仅 CPU0），edf_pick_next 内部有独立锁，持锁调用安全 */
-        next = edf_pick_next();
-    }
-    if (next == NULL)
-    {
-        /* O(1) 位图查找最高优先级 */
-        uint32_t highest = bitmap256_find_highest(&cpu_q->bitmap);
-        if (highest < CONFIG_PRIORITY_LEVELS)
-        {
-            next = list_first_entry(&cpu_q->queues[highest],
-                                    KThread_t, rq_list);
-        }
-    }
+    /* ---- 按调度类链表选择下一个线程（已持锁，pick_next_locked 不再重复加锁） ---- */
+    next = sched_class_pick_next();
     if (next == NULL)
     {
         /* 队列为空，回退到 idle 线程 */
@@ -899,37 +890,27 @@ void scheduler_tick(void)
     KThread_t *current;
     KThread_t *next;
     uint32_t cpu_id;
+    PerCPUReadyQueue_t *cpu_q;
 
     cpu_id = hal_get_cpu_id();
-    current = g_scheduler.cpu_queues[cpu_id].current_thread;
+    cpu_q = &g_scheduler.cpu_queues[cpu_id];
+    current = cpu_q->current_thread;
 
     if (current == NULL)
     {
         return;
     }
 
-    /* EDF 实时调度：周期作业释放 + 截止时间检查（仅 CPU0） */
-    if (cpu_id == 0U)
-    {
-        edf_tick();
-    }
+    /* 委托给当前线程所属调度类的 tick 处理
+     * （sched_rr_tick 处理 RR 时间片递减，耗尽置 need_resched） */
+    sched_class_tick(current);
 
-    /* 仅对 RR 策略的线程处理时间片 */
-    if (current->policy == KTHREAD_POLICY_RR)
+    /* 若调度类 tick 已请求重调度（RR 时间片耗尽），保留标志并直接返回，
+     * 跳过优先级抢占检查与 SMP 负载均衡（与原 RR 耗尽直接 return 一致）。 */
+    barrier();
+    if (cpu_q->need_resched != 0U)
     {
-        if (current->time_slice > 0U)
-        {
-            current->time_slice--;
-            if (current->time_slice == 0U)
-            {
-                /* 时间片耗尽，重载并请求重调度。
-                 * 不在中断中直接调 schedule()，仅置位 need_resched，
-                 * 由 IRQ 出口（scheduler_irq_exit_check）或 idle 线程处理。 */
-                current->time_slice = current->time_slice_reload;
-                scheduler_set_need_resched();
-                return;
-            }
-        }
+        return;
     }
 
     /* 优先级抢占检查：如果就绪队列中有更高优先级线程，请求重调度。

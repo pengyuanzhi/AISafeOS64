@@ -82,18 +82,22 @@ typedef enum
  *
  * @details - FIFO : 先进先出，不使用时间片，一直运行直到阻塞或更高优先级就绪
  *          - RR   : 轮转调度，同优先级线程之间按时间片轮转
- *          - EDF  : 最早截止时间优先，用于实时任务（仅 CPU0）
+ *
+ * @note    实时调度策略（原 EDF）已移除，改由 sched_class 框架提供
+ *          可插拔的调度类。新增策略实现 sched_class 并注册即可。
  */
 typedef enum
 {
     KTHREAD_POLICY_FIFO = 0U, /**< @brief 先进先出策略 */
-    KTHREAD_POLICY_RR   = 1U, /**< @brief 轮转调度策略 */
-    KTHREAD_POLICY_EDF  = 2U  /**< @brief 最早截止时间优先策略（实时） */
+    KTHREAD_POLICY_RR   = 1U  /**< @brief 轮转调度策略 */
 } KThreadPolicy_t;
 
 /* ========================================================================
  * 前向声明
  * ======================================================================== */
+
+/** @brief 调度类（定义在 sched_class.h） */
+struct sched_class;
 
 /** @brief 线程入口函数类型 */
 typedef void (*kthread_entry_t)(void *arg);
@@ -128,8 +132,9 @@ typedef struct KThread
     uint32_t affinity_mask; /**< @brief CPU 亲和性位掩码（0=无约束；ARM64 上 32 位原子读写） */
     uint32_t _affinity_pad; /**< @brief 填充，保持后续字段自然对齐 */
     struct list_head rq_list;  /**< @brief 就绪队列链表节点（仅供位图调度器使用） */
-    struct list_head edf_node; /**< @brief EDF 就绪队列链表节点（独立于 rq_list） */
+    struct list_head edf_node; /**< @brief 保留字段（原 EDF 节点，保持结构体布局稳定） */
     struct list_head sleep_node; /**< @brief 睡眠队列链表节点 */
+    struct sched_class *sched_class; /**< @brief 所属调度类（NULL=使用默认 RR 调度类） */
     tick_t wakeup_tick;    /**< @brief 唤醒时刻（绝对 tick） */
     uint8_t is_user;       /**< @brief 是否为用户态线程（非0=EL0线程） */
     uint8_t _reserved[3];  /**< @brief 填充对齐 */

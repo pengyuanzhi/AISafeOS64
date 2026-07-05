@@ -182,6 +182,17 @@ void scheduler_dequeue(KThread_t *thread);
 KThread_t *scheduler_pick_next(void);
 
 /**
+ * @brief O(1) 选择最高优先级就绪线程（调用者已持锁）
+ *
+ * @details 在调用者已持有 cpu_q->lock 的情况下执行位图查找。
+ *          供 schedule() 在锁内调用，避免嵌套加锁。
+ *          不返回 idle 线程（idle 由调用者回退处理）。
+ *
+ * @return 最高优先级就绪线程指针，无就绪线程时返回 NULL
+ */
+KThread_t *scheduler_pick_next_locked(void);
+
+/**
  * @brief 时钟滴答处理
  *
  * @details 处理 RR 时间片递减，时间片耗尽时触发调度。
