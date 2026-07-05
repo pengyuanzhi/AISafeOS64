@@ -100,9 +100,6 @@
 #define TCR_ASID_8       (0ULL << 36U)
 #define TCR_IPS_4TB      (2ULL << 32U)
 
-/** @brief 16 位 ASID 计数器上限 */
-#define ASID_MAX_U16     65535U
-
 /** @brief 48 位地址空间 (256TB): T0SZ = 64 - 48 = 16 */
 #define TCR_T0SZ_48BIT   16U
 
@@ -493,74 +490,24 @@ void mmu_init_secondary(void)
 }
 
 /* ========================================================================
- * 用户态地址空间管理
+ * 用户态地址空间切换（底层硬件操作）
+ *
+ * @details 用户 PGD 的分配/释放/VMA 跟踪/ASID 统一由 vmspace.c 负责：
+ *            vmspace_create() / vmspace_destroy() / vmspace_switch()。
+ *          本文件仅保留 TTBR0 切换的底层硬件操作，由 hal.c 包装对外。
  * ======================================================================== */
-
-/** @brief 用户态 PGD 静态池（最多 16 个进程） */
-static uint64_t s_user_pgds[16U][512U] __attribute__((aligned(4096U)));
-
-/** @brief PGD 池使用位图 */
-static uint32_t s_user_pgd_bitmap;
-
-/** @brief ASID 计数器 */
-static uint32_t s_asid_counter;
-
-/**
- * @brief 分配一个用户态 PGD
- * @return PGD 物理地址，失败返回 0
- */
-uint64_t mmu_create_user_pgd(void)
-{
-    uint32_t i;
-    uint64_t pgd_paddr;
-
-    for (i = 0U; i < 16U; i++)
-    {
-        if ((s_user_pgd_bitmap & (1UL << i)) == 0U)
-        {
-            s_user_pgd_bitmap |= (1UL << i);
-            /* 用户 PGD 作为 TTBR0 使用，必须从空开始。
-             * 内核映射通过 TTBR1_EL1 独立提供，用户 PGD 不需复制内核映射。
-             */
-            clear_table(s_user_pgds[i]);
-
-            pgd_paddr = virt_to_phys(s_user_pgds[i]);
-            return pgd_paddr;
-        }
-    }
-    return 0ULL;
-}
-
-/**
- * @brief 释放用户态 PGD
- * @param pgd_paddr PGD 物理地址
- */
-void mmu_destroy_user_pgd(uint64_t pgd_paddr)
-{
-    uint32_t i;
-    for (i = 0U; i < 16U; i++)
-    {
-        if (virt_to_phys(s_user_pgds[i]) == pgd_paddr)
-        {
-            s_user_pgd_bitmap &= ~(1UL << i);
-            clear_table(s_user_pgds[i]);
-            return;
-        }
-    }
-}
 
 /**
  * @brief 切换到用户态地址空间
+ *
+ * @details 直接写 TTBR0_EL1 为用户 PGD 物理地址并失效 TLB。
+ *          不再维护假 ASID 计数器——ASID 由 vmspace.c 的 ASID 位图统一管理，
+ *          通过 TTBR0 高位与 ASID 绑定，避免与本处自增计数冲突。
+ *
  * @param user_pgd_paddr 用户态 PGD 物理地址
  */
 void mmu_switch_to_user(uint64_t user_pgd_paddr)
 {
-    s_asid_counter++;
-    if (s_asid_counter >= ASID_MAX_U16)
-    {
-        s_asid_counter = 1U;
-    }
-
     __asm__ volatile("msr ttbr0_el1, %0" :: "r"(user_pgd_paddr));
     __asm__ volatile("isb");
     /* 仅失效 TTBR0（非 Inner Shareable），避免影响 TTBR1 内核映射的 TLB */

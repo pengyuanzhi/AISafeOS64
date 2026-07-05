@@ -1106,15 +1106,18 @@ static thread_id_t create_service_thread(
     uint64_t kernel_sp;
     uint64_t user_sp;
     uint64_t user_pgd;
+    vm_space_t *user_space;
 
     kernel_sp = (uint64_t)(uintptr_t)&kern_stack[stack_words];
     user_sp = (uint64_t)(uintptr_t)&user_stack[stack_words];
 
-    user_pgd = mmu_create_user_pgd();
-    if (user_pgd == 0ULL)
+    /* 统一地址空间管理：通过 vmspace 子系统创建用户 PGD（VMA 跟踪 + ASID + PGD），
+     * 不再调用已移除的 mmu_create_user_pgd（静态池已被 vmspace 取代）。 */
+    if (vmspace_create(&user_space) != KERNEL_OK)
     {
         return THREAD_ID_INVALID;
     }
+    user_pgd = (uint64_t)virt_to_phys(user_space->pgd);
 
     tid = kthread_create(name,
                          (kthread_entry_t)entry,
