@@ -30,6 +30,7 @@
 #include <kernel/config.h>
 #include <kernel/errno.h>
 #include <kernel/uaccess.h>
+#include <kernel/klog.h>
 #include <stdint.h>
 
 /* 子系统头文件 */
@@ -43,13 +44,6 @@
 #include <kernel/phys_mem.h>
 #include <kernel/mmu.h>
 #include "thread.h"
-
-/* HAL 用于 debug print */
-extern void hal_uart_puts(uint64_t base, const char *str);
-extern void hal_uart_putc(uint64_t base, char c);
-
-
-#define QEMU_UART0_BASE  0xFFFF000009000000UL
 
 /* ========================================================================
  * 用户态驱动内存映射支持
@@ -840,7 +834,7 @@ static void dispatch_debug(syscall_frame_t *frame)
             }
 
             /* 诊断标记：确认 SVC 到达内核 */
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '<');
+            klog_putc('<');
 
             if (str != NULL)
             {
@@ -854,7 +848,7 @@ static void dispatch_debug(syscall_frame_t *frame)
                     {
                         break;
                     }
-                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, c);
+                    klog_putc(c);
                 }
                 frame->x0 = 0U;
             }

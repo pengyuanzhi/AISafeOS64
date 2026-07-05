@@ -21,6 +21,7 @@
 #include "hal.h"
 #include <kernel/types.h>
 #include <kernel/config.h>
+#include <kernel/klog.h>
 #include <kernel/barrier.h>
 #include <kernel/timer.h>
 #include <kernel/virt_phys.h>
@@ -69,18 +70,10 @@ extern char __stacks_end[];
 /* ========== 辅助函数声明 ========== */
 
 /**
- * @brief 十六进制输出辅助函数
- * @param base UART 基地址
- * @param value 要输出的无符号整数
- */
-static void uart_print_hex(uint64_t base, uint64_t value);
-
-/**
  * @brief 无符号十进制输出辅助函数
- * @param base UART 基地址
  * @param value 要输出的无符号整数
  */
-static void uart_print_uint(uint64_t base, uint64_t value);
+static void uart_print_uint(uint64_t value);
 
 /* ========== 内核启动横幅 ========== */
 
@@ -187,17 +180,17 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
 
     /* 异常诊断（精简版：单行输出关键信息） */
     desc = get_ec_desc(ec);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] EC=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)ec);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, from_el0 != 0U ? " EL0 " : " EL1 ");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, desc);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] ESR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, esr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " FAR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, far);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, elr);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_error("\n[ex] EC=");
+    klog_hex64((uint64_t)ec);
+    klog_info(from_el0 != 0U ? " EL0 " : " EL1 ");
+    klog_info(desc);
+    klog_error("\n[ex] ESR=");
+    klog_hex64(esr);
+    klog_info(" FAR=");
+    klog_hex64(far);
+    klog_info(" ELR=");
+    klog_hex64(elr);
+    klog_putc('\n');
 
     /*
      * 异常分类处理：
@@ -229,21 +222,18 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
                 if (vma != NULL)
                 {
                     /* VMA 命中但缺页：权限不符或预映射遗漏，诊断后终止 */
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                                   "[exception] EL0 page fault in mapped VMA region\n");
+                    klog_error("[exception] EL0 page fault in mapped VMA region\n");
                 }
                 else
                 {
                     /* 地址不在任何 VMA 范围：非法访问 */
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                                   "[exception] EL0 illegal address access\n");
+                    klog_error("[exception] EL0 illegal address access\n");
                 }
             }
         }
 
         /* EL0 异常：终止用户线程 */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                       "[exception] EL0 fault → terminating user thread\n");
+        klog_error("[exception] EL0 fault → terminating user thread\n");
         kthread_exit();
         /* kthread_exit 不返回，但保险起见设置 elr */
         *elr_ptr = elr + 4U;
@@ -251,12 +241,10 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     else
     {
         /* EL1 异常：内核 panic */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                       "[exception] EL1 fault → KERNEL PANIC\n");
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                       "[exception] SPSR=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, spsr);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        klog_error("[exception] EL1 fault → KERNEL PANIC\n");
+        klog_error("[exception] SPSR=0x");
+        klog_hex64(spsr);
+        klog_info("\n");
 
         /* 死循环（panic） */
         for (;;)
@@ -333,13 +321,13 @@ void irq_handler(void)
  */
 void el1_serror_handler(uint64_t esr, uint64_t far, uint64_t elr)
 {
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[ex] SError ESR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, esr);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " FAR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, far);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " ELR=");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, elr);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_error("\n[ex] SError ESR=");
+    klog_hex64(esr);
+    klog_info(" FAR=");
+    klog_hex64(far);
+    klog_info(" ELR=");
+    klog_hex64(elr);
+    klog_putc('\n');
 
     /* SError 为严重错误，挂起系统 */
     for (;;)
@@ -355,41 +343,20 @@ void el1_serror_handler(uint64_t esr, uint64_t far, uint64_t elr)
  * ======================================================================== */
 
 /**
- * @brief 十六进制输出辅助函数
- *
- * @details 逐字符输出 64 位无符号整数的十六进制表示。
- *          不使用本地数组，避免触发栈保护器。
- *
- * @param base  UART 基地址
- * @param value 要输出的 64 位无符号整数
- */
-static void uart_print_hex(uint64_t base, uint64_t value)
-{
-    static const char s_hex[] = "0123456789ABCDEF";
-    int32_t i;
-
-    for (i = 60; i >= 0; i -= 4)
-    {
-        uint8_t nibble = (uint8_t)((value >> (uint32_t)i) & 0xFU);
-        hal_uart_putc(base, s_hex[nibble]);
-    }
-}
-
-/**
  * @brief 无符号十进制输出辅助函数
  *
  * @details 使用迭代方式逐位提取并输出，避免本地数组和递归。
  *          先找到最高位的位置，然后从高到低依次输出。
+ *          通过 klog_putc 输出（内部已固定 UART 基地址）。
  *
- * @param base  UART 基地址
  * @param value 要输出的 64 位无符号整数
  */
-static void uart_print_uint(uint64_t base, uint64_t value)
+static void uart_print_uint(uint64_t value)
 {
     /* 特殊处理 0 */
     if (value == 0ULL)
     {
-        hal_uart_putc(base, '0');
+        klog_putc('0');
         return;
     }
 
@@ -404,7 +371,7 @@ static void uart_print_uint(uint64_t base, uint64_t value)
     while (divisor > 0ULL)
     {
         uint8_t digit = (uint8_t)((value / divisor) % 10ULL);
-        hal_uart_putc(base, (char)('0' + (int32_t)digit));
+        klog_putc((char)('0' + (int32_t)digit));
         divisor /= 10ULL;
     }
 }
@@ -1177,11 +1144,11 @@ static thread_id_t create_service_thread(
     /* 在 context[2]（x21）中保存 user_sp，供 trampoline 使用 */
     thread->context[2] = (uint64_t)user_sp;
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] ");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, name);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " tid=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)tid);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_info("[k] ");
+    klog_info(name);
+    klog_info(" tid=");
+    uart_print_uint((uint64_t)tid);
+    klog_putc('\n');
 
     return tid;
 }
@@ -1299,7 +1266,7 @@ static uint32_t driver_e2e_test(void)
     uint8_t test_buf[8U];
     uint32_t i;
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] Starting...\n");
+    klog_info("[DRV TEST] Starting...\n");
 
     /* 步骤 1: 注册 mock UART 驱动 */
     for (i = 0U; i < sizeof(match.compatible); i++)
@@ -1318,7 +1285,7 @@ static uint32_t driver_e2e_test(void)
     ret = driver_register_kern("mock-uart", DRIVER_TYPE_UART, &match, &s_mock_uart_ops);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 1 (register)\n");
+        klog_info("[DRV TEST] FAIL step 1 (register)\n");
         return 1U;
     }
 
@@ -1326,7 +1293,7 @@ static uint32_t driver_e2e_test(void)
     ret = driver_register_kern("mock-uart", DRIVER_TYPE_UART, &match, &s_mock_uart_ops);
     if (ret == KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 2 (dup)\n");
+        klog_info("[DRV TEST] FAIL step 2 (dup)\n");
         return 2U;
     }
 
@@ -1335,7 +1302,7 @@ static uint32_t driver_e2e_test(void)
                           (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 3 (dev reg)\n");
+        klog_info("[DRV TEST] FAIL step 3 (dev reg)\n");
         return 3U;
     }
 
@@ -1343,7 +1310,7 @@ static uint32_t driver_e2e_test(void)
     ret = device_probe_all();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 4 (probe)\n");
+        klog_info("[DRV TEST] FAIL step 4 (probe)\n");
         return 4U;
     }
 
@@ -1351,7 +1318,7 @@ static uint32_t driver_e2e_test(void)
     ret = device_open(3U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 5 (open)\n");
+        klog_info("[DRV TEST] FAIL step 5 (open)\n");
         return 5U;
     }
 
@@ -1361,7 +1328,7 @@ static uint32_t driver_e2e_test(void)
     io_ret = device_write(3U, test_buf, 5U, 0U);
     if (io_ret != 5)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 6 (write)\n");
+        klog_info("[DRV TEST] FAIL step 6 (write)\n");
         return 6U;
     }
 
@@ -1370,12 +1337,12 @@ static uint32_t driver_e2e_test(void)
     io_ret = device_read(3U, test_buf, 8U, 0U);
     if (io_ret != 5)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 7 (read len)\n");
+        klog_info("[DRV TEST] FAIL step 7 (read len)\n");
         return 7U;
     }
     if ((test_buf[0U] != 'H') || (test_buf[4U] != 'O'))
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 7 (read data)\n");
+        klog_info("[DRV TEST] FAIL step 7 (read data)\n");
         return 7U;
     }
 
@@ -1384,7 +1351,7 @@ static uint32_t driver_e2e_test(void)
     ret = device_ioctl(3U, 1U, &ioctl_val);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 8 (ioctl)\n");
+        klog_info("[DRV TEST] FAIL step 8 (ioctl)\n");
         return 8U;
     }
 
@@ -1394,31 +1361,31 @@ static uint32_t driver_e2e_test(void)
         drv = driver_find_by_name("mock-uart");
         if (drv == NULL)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 9 (find)\n");
+            klog_info("[DRV TEST] FAIL step 9 (find)\n");
             return 9U;
         }
     }
 
     /* 步骤 10: 统计 */
     driver_get_stats(&stats);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] Stats: drv=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " dev=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " probe=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_info("[DRV TEST] Stats: drv=");
+    uart_print_uint((uint64_t)stats.total_drivers);
+    klog_info(" dev=");
+    uart_print_uint((uint64_t)stats.total_devices);
+    klog_info(" probe=");
+    uart_print_uint((uint64_t)stats.probe_count);
+    klog_putc('\n');
 
     if ((stats.total_drivers != 3U) || (stats.total_devices != 3U) || (stats.probe_count < 2U))
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 10 (stats: drv=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " dev=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " probe=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, ')');
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_info("[DRV TEST] FAIL step 10 (stats: drv=");
+        uart_print_uint((uint64_t)stats.total_drivers);
+        klog_info(" dev=");
+        uart_print_uint((uint64_t)stats.total_devices);
+        klog_info(" probe=");
+        uart_print_uint((uint64_t)stats.probe_count);
+        klog_putc(')');
+        klog_putc('\n');
         return 10U;
     }
 
@@ -1426,7 +1393,7 @@ static uint32_t driver_e2e_test(void)
     ret = device_close(3U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 11 (close)\n");
+        klog_info("[DRV TEST] FAIL step 11 (close)\n");
         return 11U;
     }
 
@@ -1434,7 +1401,7 @@ static uint32_t driver_e2e_test(void)
     ret = device_unregister(3U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 12 (dev unreg)\n");
+        klog_info("[DRV TEST] FAIL step 12 (dev unreg)\n");
         return 12U;
     }
 
@@ -1442,11 +1409,11 @@ static uint32_t driver_e2e_test(void)
     ret = driver_unregister_kern("mock-uart");
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] FAIL step 13 (drv unreg)\n");
+        klog_info("[DRV TEST] FAIL step 13 (drv unreg)\n");
         return 13U;
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[DRV TEST] ALL PASSED\n");
+    klog_info("[DRV TEST] ALL PASSED\n");
     return 0U;
 }
 
@@ -1476,13 +1443,13 @@ static uint32_t cap_runtime_test(void)
     cap_integrity_result_t result;
     cap_info_t info;
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Starting...\n");
+    klog_info("[CAP TEST] Starting...\n");
 
     /* 步骤 2: 初始化 CSpace 子系统 */
     ret = cspace_subsys_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 2 (subsys_init)\n");
+        klog_info("[CAP TEST] FAIL at step 2 (subsys_init)\n");
         return 2U;
     }
 
@@ -1490,7 +1457,7 @@ static uint32_t cap_runtime_test(void)
     ret = cspace_create(32U, &cs);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 3 (cspace_create)\n");
+        klog_info("[CAP TEST] FAIL at step 3 (cspace_create)\n");
         return 3U;
     }
     root = cs->root_slot;
@@ -1501,7 +1468,7 @@ static uint32_t cap_runtime_test(void)
                    0U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 4 (mint slot 1)\n");
+        klog_info("[CAP TEST] FAIL at step 4 (mint slot 1)\n");
         return 4U;
     }
 
@@ -1511,7 +1478,7 @@ static uint32_t cap_runtime_test(void)
                    0U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 5 (mint slot 2)\n");
+        klog_info("[CAP TEST] FAIL at step 5 (mint slot 2)\n");
         return 5U;
     }
 
@@ -1520,7 +1487,7 @@ static uint32_t cap_runtime_test(void)
                    (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE));
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 6 (copy to slot 3)\n");
+        klog_info("[CAP TEST] FAIL at step 6 (copy to slot 3)\n");
         return 6U;
     }
 
@@ -1528,28 +1495,28 @@ static uint32_t cap_runtime_test(void)
     ret = cap_derive(root, 1U, root, 4U, (uint8_t)CAP_RIGHT_READ, 0x42U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 7 (derive to slot 4)\n");
+        klog_info("[CAP TEST] FAIL at step 7 (derive to slot 4)\n");
         return 7U;
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Mint+Copy+Derive OK\n");
+    klog_info("[CAP TEST] Mint+Copy+Derive OK\n");
 
     /* 步骤 9: 完整性自检 */
     ret = cap_integrity_check(root, &result);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 9 (integrity_check)\n");
+        klog_info("[CAP TEST] FAIL at step 9 (integrity_check)\n");
         return 9U;
     }
 
     /* 步骤 10: 打印完整性结果 */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Integrity: total=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.total_caps);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " passed=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.passed_checks);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " failed=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.failed_checks);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_info("[CAP TEST] Integrity: total=");
+    uart_print_uint((uint64_t)result.total_caps);
+    klog_info(" passed=");
+    uart_print_uint((uint64_t)result.passed_checks);
+    klog_info(" failed=");
+    uart_print_uint((uint64_t)result.failed_checks);
+    klog_putc('\n');
 
     /* 步骤 11: 检查是否有失败 */
     /* 注意：根能力（slot 0）由 cspace_create 创建，权限为 CAP_RIGHT_ALL
@@ -1557,7 +1524,7 @@ static uint32_t cap_runtime_test(void)
      * 因此 integrity check 会报告 1 个已知失败。 */
     if (result.failed_checks > 1U)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL (integrity errors)\n");
+        klog_info("[CAP TEST] FAIL (integrity errors)\n");
         return 11U;
     }
 
@@ -1565,7 +1532,7 @@ static uint32_t cap_runtime_test(void)
     ret = cap_revoke(root, 1U);
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 12 (revoke)\n");
+        klog_info("[CAP TEST] FAIL at step 12 (revoke)\n");
         return 12U;
     }
 
@@ -1578,7 +1545,7 @@ static uint32_t cap_runtime_test(void)
     if (ret == KERNEL_OK)
     {
         /* 不应该成功：revoke 后 cspace_lookup 应返回 NULL */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL: slot 3 still VALID after revoke\n");
+        klog_info("[CAP TEST] FAIL: slot 3 still VALID after revoke\n");
         return 13U;
     }
     /* cap_get_info 返回 ENOENT 说明能力不再是 VALID 状态 — 间接证明 revoke 成功 */
@@ -1587,18 +1554,18 @@ static uint32_t cap_runtime_test(void)
     ret = cap_get_info(root, 4U, &info);
     if (ret == KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL: slot 4 still VALID after revoke\n");
+        klog_info("[CAP TEST] FAIL: slot 4 still VALID after revoke\n");
         return 14U;
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Revoke cascade OK\n");
+    klog_info("[CAP TEST] Revoke cascade OK\n");
 
     /* 步骤 16: 验证合法权限组合 */
     ret = cap_validate_rights_for_type(KOBJ_INTERRUPT,
                                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT));
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] FAIL at step 16 (valid rights)\n");
+        klog_info("[CAP TEST] FAIL at step 16 (valid rights)\n");
         return 16U;
     }
 
@@ -1606,15 +1573,14 @@ static uint32_t cap_runtime_test(void)
     ret = cap_validate_rights_for_type(KOBJ_INTERRUPT, (uint8_t)CAP_RIGHT_WRITE);
     if (ret == KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[CAP TEST] FAIL at step 17 (invalid rights accepted)\n");
+        klog_info("[CAP TEST] FAIL at step 17 (invalid rights accepted)\n");
         return 17U;
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Rights validation OK\n");
+    klog_info("[CAP TEST] Rights validation OK\n");
 
     /* === 边界测试：使用新 CSpace（避免影响前面的测试） === */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] Boundary tests...\n");
+    klog_info("[CAP TEST] Boundary tests...\n");
 
     /* 创建边界测试专用 CSpace */
     {
@@ -1623,8 +1589,7 @@ static uint32_t cap_runtime_test(void)
         ret = cspace_create(32U, &bcs);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 20 (boundary cspace create)\n");
+            klog_info("[CAP TEST] FAIL at step 20 (boundary cspace create)\n");
             return 20U;
         }
         broot = bcs->root_slot;
@@ -1634,8 +1599,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 21 (interrupt allows write)\n");
+            klog_info("[CAP TEST] FAIL at step 21 (interrupt allows write)\n");
             return 21U;
         }
 
@@ -1644,8 +1608,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)CAP_RIGHT_WRITE, 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 22 (channel missing read)\n");
+            klog_info("[CAP TEST] FAIL at step 22 (channel missing read)\n");
             return 22U;
         }
 
@@ -1655,8 +1618,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE), 0U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 23 (channel mint ok)\n");
+            klog_info("[CAP TEST] FAIL at step 23 (channel mint ok)\n");
             return 23U;
         }
 
@@ -1665,8 +1627,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 24 (duplicate slot)\n");
+            klog_info("[CAP TEST] FAIL at step 24 (duplicate slot)\n");
             return 24U;
         }
 
@@ -1675,15 +1636,13 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 25a (endpoint mint)\n");
+            klog_info("[CAP TEST] FAIL at step 25a (endpoint mint)\n");
             return 25U;
         }
         ret = cap_copy(broot, 6U, broot, 7U, 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 25 (copy without grant)\n");
+            klog_info("[CAP TEST] FAIL at step 25 (copy without grant)\n");
             return 25U;
         }
 
@@ -1695,8 +1654,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE));
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 26 (copy downgrade)\n");
+            klog_info("[CAP TEST] FAIL at step 26 (copy downgrade)\n");
             return 26U;
         }
 
@@ -1706,8 +1664,7 @@ static uint32_t cap_runtime_test(void)
                                    CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE), 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 27 (derive equal rights)\n");
+            klog_info("[CAP TEST] FAIL at step 27 (derive equal rights)\n");
             return 27U;
         }
 
@@ -1716,8 +1673,7 @@ static uint32_t cap_runtime_test(void)
                          (uint8_t)CAP_RIGHT_READ, 0x11U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 28 (derive downgrade)\n");
+            klog_info("[CAP TEST] FAIL at step 28 (derive downgrade)\n");
             return 28U;
         }
 
@@ -1725,8 +1681,7 @@ static uint32_t cap_runtime_test(void)
         ret = cap_delete(broot, 5U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 29 (delete slot 5)\n");
+            klog_info("[CAP TEST] FAIL at step 29 (delete slot 5)\n");
             return 29U;
         }
 
@@ -1734,8 +1689,7 @@ static uint32_t cap_runtime_test(void)
         ret = cap_get_info(broot, 5U, &info);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 30 (slot 5 not free)\n");
+            klog_info("[CAP TEST] FAIL at step 30 (slot 5 not free)\n");
             return 30U;
         }
 
@@ -1743,8 +1697,7 @@ static uint32_t cap_runtime_test(void)
         ret = cap_get_info(broot, 8U, &info);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 31 (slot 8 not valid)\n");
+            klog_info("[CAP TEST] FAIL at step 31 (slot 8 not valid)\n");
             return 31U;
         }
 
@@ -1753,28 +1706,24 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 32a (mint for badge)\n");
+            klog_info("[CAP TEST] FAIL at step 32a (mint for badge)\n");
             return 32U;
         }
         ret = cap_badge_update(broot, 9U, 0xABU);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 32 (badge update)\n");
+            klog_info("[CAP TEST] FAIL at step 32 (badge update)\n");
             return 32U;
         }
         ret = cap_get_info(broot, 9U, &info);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 32b (get info after badge)\n");
+            klog_info("[CAP TEST] FAIL at step 32b (get info after badge)\n");
             return 32U;
         }
         if (info.badge != 0xABU)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 33 (badge mismatch)\n");
+            klog_info("[CAP TEST] FAIL at step 33 (badge mismatch)\n");
             return 33U;
         }
 
@@ -1782,8 +1731,7 @@ static uint32_t cap_runtime_test(void)
         ret = cap_validate(broot, 9U, (uint8_t)CAP_RIGHT_GRANT, NULL);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 34 (validate no grant)\n");
+            klog_info("[CAP TEST] FAIL at step 34 (validate no grant)\n");
             return 34U;
         }
 
@@ -1792,8 +1740,7 @@ static uint32_t cap_runtime_test(void)
                            (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), NULL);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 35 (validate rw)\n");
+            klog_info("[CAP TEST] FAIL at step 35 (validate rw)\n");
             return 35U;
         }
 
@@ -1802,37 +1749,32 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 36a (mint for move)\n");
+            klog_info("[CAP TEST] FAIL at step 36a (mint for move)\n");
             return 36U;
         }
         ret = cap_move(broot, 10U, broot, 11U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 36 (move)\n");
+            klog_info("[CAP TEST] FAIL at step 36 (move)\n");
             return 36U;
         }
         /* 源槽应该不存在 */
         ret = cap_get_info(broot, 10U, &info);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 37 (source not cleared)\n");
+            klog_info("[CAP TEST] FAIL at step 37 (source not cleared)\n");
             return 37U;
         }
         /* 目标槽应该存在且类型正确 */
         ret = cap_get_info(broot, 11U, &info);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 38 (dest not valid)\n");
+            klog_info("[CAP TEST] FAIL at step 38 (dest not valid)\n");
             return 38U;
         }
         if (info.obj_type != KOBJ_THREAD)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 39 (move type mismatch)\n");
+            klog_info("[CAP TEST] FAIL at step 39 (move type mismatch)\n");
             return 39U;
         }
 
@@ -1841,15 +1783,13 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT), 0U);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 40a (mint for revoke)\n");
+            klog_info("[CAP TEST] FAIL at step 40a (mint for revoke)\n");
             return 40U;
         }
         ret = cap_revoke(broot, 12U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 40 (revoke without perm)\n");
+            klog_info("[CAP TEST] FAIL at step 40 (revoke without perm)\n");
             return 40U;
         }
 
@@ -1858,8 +1798,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE), 0U);
         if (ret == KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 41 (invalid slot mint)\n");
+            klog_info("[CAP TEST] FAIL at step 41 (invalid slot mint)\n");
             return 41U;
         }
 
@@ -1871,8 +1810,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (thread valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (thread valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_THREAD,
@@ -1881,8 +1819,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (thread exec illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (thread exec illegal)\n");
                 return 42U;
             }
 
@@ -1891,8 +1828,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (ep valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (ep valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_ENDPOINT,
@@ -1900,8 +1836,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (ep revoke illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (ep revoke illegal)\n");
                 return 42U;
             }
 
@@ -1910,16 +1845,14 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (notif valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (notif valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_NOTIFICATION,
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (notif exec illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (notif exec illegal)\n");
                 return 42U;
             }
 
@@ -1929,8 +1862,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (cspace valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (cspace valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_CSPACE,
@@ -1939,8 +1871,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (cspace exec illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (cspace exec illegal)\n");
                 return 42U;
             }
 
@@ -1950,8 +1881,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (vm valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (vm valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_VM_SPACE,
@@ -1960,8 +1890,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_REVOKE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (vm revoke illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (vm revoke illegal)\n");
                 return 42U;
             }
 
@@ -1970,8 +1899,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_EXECUTE));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (page valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (page valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_PAGE_FRAME,
@@ -1979,8 +1907,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (page grant illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (page grant illegal)\n");
                 return 42U;
             }
 
@@ -1989,16 +1916,14 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (irq valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (irq valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_INTERRUPT,
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_GRANT | CAP_RIGHT_WRITE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (irq write illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (irq write illegal)\n");
                 return 42U;
             }
 
@@ -2008,8 +1933,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (dev valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (dev valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_DEVICE,
@@ -2018,8 +1942,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_REVOKE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (dev revoke illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (dev revoke illegal)\n");
                 return 42U;
             }
 
@@ -2029,8 +1952,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (chan valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (chan valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_CHANNEL,
@@ -2039,8 +1961,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_EXECUTE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (chan exec illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (chan exec illegal)\n");
                 return 42U;
             }
 
@@ -2049,8 +1970,7 @@ static uint32_t cap_runtime_test(void)
                        (uint8_t)(CAP_RIGHT_READ | CAP_RIGHT_WRITE | CAP_RIGHT_GRANT));
             if (ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (conn valid rights)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (conn valid rights)\n");
                 return 42U;
             }
             ret = cap_validate_rights_for_type(KOBJ_CONNECTION,
@@ -2058,8 +1978,7 @@ static uint32_t cap_runtime_test(void)
                                  CAP_RIGHT_GRANT | CAP_RIGHT_REVOKE));
             if (ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 42 (conn revoke illegal)\n");
+                klog_info("[CAP TEST] FAIL at step 42 (conn revoke illegal)\n");
                 return 42U;
             }
         }
@@ -2081,8 +2000,7 @@ static uint32_t cap_runtime_test(void)
                                            CAP_RIGHT_GRANT), 0U);
             if (depth_ret != KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 43a (depth chain root)\n");
+                klog_info("[CAP TEST] FAIL at step 43a (depth chain root)\n");
                 return 43U;
             }
 
@@ -2102,10 +2020,9 @@ static uint32_t cap_runtime_test(void)
                 depth_ret = cap_copy(broot, src_slot, broot, dst_slot, 0U);
                 if (depth_ret != KERNEL_OK)
                 {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                                  "[CAP TEST] FAIL at step 43 (copy depth=");
-                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)depth_i);
-                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    klog_info("[CAP TEST] FAIL at step 43 (copy depth=");
+                    uart_print_uint((uint64_t)depth_i);
+                    klog_putc('\n');
                     return 43U;
                 }
             }
@@ -2119,8 +2036,7 @@ static uint32_t cap_runtime_test(void)
                                  0U);
             if (depth_ret == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[CAP TEST] FAIL at step 43 (depth limit exceeded)\n");
+                klog_info("[CAP TEST] FAIL at step 43 (depth limit exceeded)\n");
                 return 43U;
             }
         }
@@ -2129,35 +2045,31 @@ static uint32_t cap_runtime_test(void)
         ret = cap_integrity_check(broot, &result);
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 44 (integrity check)\n");
+            klog_info("[CAP TEST] FAIL at step 44 (integrity check)\n");
             return 44U;
         }
 
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[CAP TEST] Boundary integrity: total=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.total_caps);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " passed=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.passed_checks);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " failed=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, result.failed_checks);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        klog_info("[CAP TEST] Boundary integrity: total=");
+        uart_print_uint(result.total_caps);
+        klog_info(" passed=");
+        uart_print_uint(result.passed_checks);
+        klog_info(" failed=");
+        uart_print_uint(result.failed_checks);
+        klog_info("\n");
 
         if (result.failed_checks > 2U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[CAP TEST] FAIL at step 44 (integrity failures: expected <=2 got ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)result.failed_checks);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, ')');
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[CAP TEST] FAIL at step 44 (integrity failures: expected <=2 got ");
+            uart_print_uint((uint64_t)result.failed_checks);
+            klog_putc(')');
+            klog_putc('\n');
             return 44U;
         }
 
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[CAP TEST] Boundary tests ALL PASSED\n");
+        klog_info("[CAP TEST] Boundary tests ALL PASSED\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[CAP TEST] ALL PASSED\n");
+    klog_info("[CAP TEST] ALL PASSED\n");
 
     return 0U;
 }
@@ -2218,11 +2130,11 @@ static void smp_test_worker(void *arg)
         barrier();
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[SMP TEST] CPU ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cpu_id);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " done (count=");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)s_smp_test_counter[cpu_id]);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, ")\n");
+    klog_info("[SMP TEST] CPU ");
+    uart_print_uint((uint64_t)cpu_id);
+    klog_info(" done (count=");
+    uart_print_uint((uint64_t)s_smp_test_counter[cpu_id]);
+    klog_info(")\n");
 
     s_smp_test_done++;
 
@@ -2266,7 +2178,7 @@ static uint32_t smp_e2e_test(void)
     uint32_t i;
 
     /* ---- 阶段 1: 创建多核工作线程 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[SMP TEST] Creating 4 workers...\n");
+    klog_info("[SMP TEST] Creating 4 workers...\n");
 
     /* 重置计数器 */
     for (i = 0U; i < 4U; i++)
@@ -2286,10 +2198,9 @@ static uint32_t smp_e2e_test(void)
                              SMP_TEST_STACK_SIZE);
         if (tid == THREAD_ID_INVALID)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[SMP TEST] WARN: create worker ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)i);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_warn("[SMP TEST] WARN: create worker ");
+            uart_print_uint((uint64_t)i);
+            klog_putc('\n');
             continue;
         }
 
@@ -2298,8 +2209,7 @@ static uint32_t smp_e2e_test(void)
     }
 
     /* ---- 阶段 2: 创建窃取测试线程 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "[SMP TEST] Creating 8 steal workers...\n");
+    klog_info("[SMP TEST] Creating 8 steal workers...\n");
 
     /* 创建 8 个低优先级线程不绑定 CPU（亲和性=0xF 全部允许） */
     for (i = 0U; i < 8U; i++)
@@ -2320,8 +2230,7 @@ static uint32_t smp_e2e_test(void)
     }
 
     /* 不在此处等待：线程会在 scheduler_start() 后执行 */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                  "[SMP TEST] Workers queued, results in runtime\n");
+    klog_info("[SMP TEST] Workers queued, results in runtime\n");
 
     return 0U;
 }
@@ -2360,7 +2269,7 @@ static void ipc_bench_server(void *arg)
 
     if (ipc_endpoint_create(THREAD_ID_INVALID, &s_ipc_bench_ep) != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] IPC EP create FAIL\n");
+        klog_info("[BENCH] IPC EP create FAIL\n");
         s_ipc_bench_ready = 2U;  /* 标记失败 */
         barrier();
         kthread_exit();
@@ -2404,10 +2313,10 @@ static void kern_bench_client(void *arg)
         freq = 62500000ULL;  /* QEMU virt 默认 62.5MHz */
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n[BENCH] === Kernel Microbenchmark ===\n");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] counter freq: ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, freq);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " Hz\n");
+    klog_info("\n[BENCH] === Kernel Microbenchmark ===\n");
+    klog_info("[BENCH] counter freq: ");
+    uart_print_uint(freq);
+    klog_info(" Hz\n");
 
     /* 测试 1：hal_timer_get_count 调用开销 */
     sink = 0U;
@@ -2418,9 +2327,9 @@ static void kern_bench_client(void *arg)
     }
     end = hal_timer_get_count();
     total = end - start;
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] timer_get_count: ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)KERN_BENCH_ITERATIONS);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+    klog_info("[BENCH] timer_get_count: ");
+    uart_print_uint(total / (uint64_t)KERN_BENCH_ITERATIONS);
+    klog_info(" cycles/op\n");
     (void)sink;
 
     /* 测试 2：TicketLock acquire/release 开销（无竞争） */
@@ -2433,9 +2342,9 @@ static void kern_bench_client(void *arg)
     }
     end = hal_timer_get_count();
     total = end - start;
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] ticket_lock (uncontended): ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)KERN_BENCH_ITERATIONS);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+    klog_info("[BENCH] ticket_lock (uncontended): ");
+    uart_print_uint(total / (uint64_t)KERN_BENCH_ITERATIONS);
+    klog_info(" cycles/op\n");
 
     /* 测试 3：kmalloc/kfree 开销 */
     start = hal_timer_get_count();
@@ -2449,9 +2358,9 @@ static void kern_bench_client(void *arg)
     }
     end = hal_timer_get_count();
     total = end - start;
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] kmalloc+kfree(64): ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, total / 1000ULL);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op\n");
+    klog_info("[BENCH] kmalloc+kfree(64): ");
+    uart_print_uint(total / 1000ULL);
+    klog_info(" cycles/op\n");
 
     /* 测试 4：IPC 端点往返延迟（如果 IPC 子系统可用） */
     if (s_ipc_bench_ready == 1U)
@@ -2469,20 +2378,18 @@ static void kern_bench_client(void *arg)
         }
         end = hal_timer_get_count();
         total = end - start;
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] IPC send+recv+reply: ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, total / (uint64_t)IPC_BENCH_ITERATIONS);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " cycles/op (");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE,
-                         (total * 1000ULL) / ((uint64_t)IPC_BENCH_ITERATIONS * freq));
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " us)\n");
+        klog_info("[BENCH] IPC send+recv+reply: ");
+        uart_print_uint(total / (uint64_t)IPC_BENCH_ITERATIONS);
+        klog_info(" cycles/op (");
+        uart_print_uint((total * 1000ULL) / ((uint64_t)IPC_BENCH_ITERATIONS * freq));
+        klog_info(" us)\n");
     }
     else
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                      "[BENCH] IPC skipped (subsys not ready)\n");
+        klog_info("[BENCH] IPC skipped (subsys not ready)\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] ===============================\n\n");
+    klog_info("[BENCH] ===============================\n\n");
 
     kthread_exit();
 }
@@ -2497,7 +2404,7 @@ static void kern_bench_start(void)
     s_ipc_bench_ready = 0U;
     barrier();
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] Starting benchmark...\n");
+    klog_info("[BENCH] Starting benchmark...\n");
 
     /* 创建 IPC server 线程（如果 IPC 子系统可用，server 会创建端点；
      * 如果不可用，server 标记 s_ipc_bench_ready=2 后退出） */
@@ -2518,7 +2425,7 @@ static void kern_bench_start(void)
                          CONFIG_STACK_SIZE_DEFAULT);
     if (tid == THREAD_ID_INVALID)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BENCH] thread create FAIL\n");
+        klog_info("[BENCH] thread create FAIL\n");
     }
 }
 
@@ -2552,57 +2459,57 @@ void kernel_main(void)
     mmu_early_init();
 
     /* ---- 第二步：初始化 UART 早期输出（MMU 已开，高地址可访问）---- */
-    hal_uart_init((uint64_t)QEMU_UART0_BASE);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, g_banner);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] MMU ok\n");
+    klog_init();
+    klog_info(g_banner);
+    klog_info("[k] MMU ok\n");
 
 #if CONFIG_DEBUG_VERBOSE
     /* ---- 详细编译信息（仅调试模式） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CC: ");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, __VERSION__);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_info("[k] CC: ");
+    klog_info(__VERSION__);
+    klog_putc('\n');
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Build: ");
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, __DATE__);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, ' ');
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, __TIME__);
-    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+    klog_info("[k] Build: ");
+    klog_info(__DATE__);
+    klog_putc(' ');
+    klog_info(__TIME__);
+    klog_putc('\n');
 
     /* ---- 硬件信息 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] CPU: ");
+    klog_info("[k] CPU: ");
     {
         uint32_t cpu_id = hal_get_cpu_id();
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cpu_id);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        uart_print_uint((uint64_t)cpu_id);
+        klog_putc('\n');
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] EL");
+    klog_info("[k] EL");
     {
         uint32_t el = hal_get_current_el();
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '0' + (char)el);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_putc('0' + (char)el);
+        klog_putc('\n');
     }
 
     /* ---- 内存布局 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] --- Memory Layout ---\n");
+    klog_info("[k] --- Memory Layout ---\n");
 
     bss_size = (uint64_t)((uintptr_t)__bss_end - (uintptr_t)__bss_start);
     stack_start = (uint64_t)(uintptr_t)__stacks_start;
     stack_end = (uint64_t)(uintptr_t)__stacks_end;
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  .bss:  ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, bss_size);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " bytes (");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, bss_size / 1024ULL);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " KB)\n");
+    klog_info("  .bss:  ");
+    uart_print_uint(bss_size);
+    klog_info(" bytes (");
+    uart_print_uint(bss_size / 1024ULL);
+    klog_info(" KB)\n");
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "  Stack: 0x");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, stack_start);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " - 0x");
-    uart_print_hex((uint64_t)QEMU_UART0_BASE, stack_end);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (8KB x ");
-    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)CONFIG_MAX_CPUS);
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " CPUs)\n");
+    klog_info("  Stack: 0x");
+    klog_hex64(stack_start);
+    klog_info(" - 0x");
+    klog_hex64(stack_end);
+    klog_info(" (8KB x ");
+    uart_print_uint((uint64_t)CONFIG_MAX_CPUS);
+    klog_info(" CPUs)\n");
 #else
     (void)bss_size;
     (void)stack_start;
@@ -2610,11 +2517,11 @@ void kernel_main(void)
 #endif /* CONFIG_DEBUG_VERBOSE */
 
     /* ---- 第五步：初始化 GIC 中断控制器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] GIC init\n");
+    klog_info("[k] GIC init\n");
     ret = gic_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] FATAL: GIC fail\n");
+        klog_error("[k] FATAL: GIC fail\n");
         for (;;)
         {
             __asm__ volatile("wfe" ::: "memory");
@@ -2628,7 +2535,7 @@ void kernel_main(void)
     }
 
     /* ---- 第六步：初始化定时器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Timer init\n");
+    klog_info("[k] Timer init\n");
     timer_init();
 
     /* 配置定时器 PPI 中断（IRQ 30）的优先级和路由 */
@@ -2638,11 +2545,11 @@ void kernel_main(void)
     (void)gic_enable_irq(QEMU_TIMER_IRQ);
 
     /* ---- 初始化内核堆分配器（kmalloc）---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] kmalloc init\n");
+    klog_info("[k] kmalloc init\n");
     ret = kmalloc_init();
     if (ret != 0)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: kmalloc init fail\n");
+        klog_warn("[k] WARN: kmalloc init fail\n");
     }
 
     /* ---- 初始化物理内存分配器（buddy system，用于用户态页分配）---- */
@@ -2652,30 +2559,30 @@ void kernel_main(void)
          * __kernel_end 是高地址 VMA 符号，需减去 KERNEL_VA_OFFSET 得到物理地址。 */
         paddr_t pmem_base = (paddr_t)(((uintptr_t)__kernel_end - KERNEL_VA_OFFSET + 0xFFFU) & ~0xFFFU);
         uint64_t pmem_size = 16U * 1024U * 1024U;  /* 16MB */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init\n");
+        klog_info("[k] phys_mem init\n");
         ret = phys_mem_init(pmem_base, pmem_size);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] phys_mem init ret=");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)ret);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " base=0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)pmem_base);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_info("[k] phys_mem init ret=");
+        uart_print_uint((uint64_t)ret);
+        klog_info(" base=0x");
+        klog_hex64((uint64_t)pmem_base);
+        klog_putc('\n');
 
         /* 测试 alloc */
         {
             extern paddr_t phys_mem_alloc_page(void);
             paddr_t test_pa = phys_mem_alloc_page();
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] alloc_page=0x");
-            uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)test_pa);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[k] alloc_page=0x");
+            klog_hex64((uint64_t)test_pa);
+            klog_putc('\n');
         }
     }
 
     /* ---- 第七步：初始化调度器 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Sched init\n");
+    klog_info("[k] Sched init\n");
     ret = scheduler_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] FATAL: sched fail\n");
+        klog_error("[k] FATAL: sched fail\n");
         for (;;)
         {
             __asm__ volatile("wfe" ::: "memory");
@@ -2683,19 +2590,19 @@ void kernel_main(void)
     }
 
     /* ---- 初始化 IPC 子系统 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] IPC init\n");
+    klog_info("[k] IPC init\n");
     ret = ipc_endpoint_subsys_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: IPC subsys fail\n");
+        klog_warn("[k] WARN: IPC subsys fail\n");
     }
 
     /* ---- 初始化能力系统（CSpace 子系统）---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Cap init\n");
+    klog_info("[k] Cap init\n");
     ret = cspace_subsys_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: cap subsys fail\n");
+        klog_warn("[k] WARN: cap subsys fail\n");
     }
 
     /* ---- 初始化虚拟地址空间子系统（VMA 管理）---- */
@@ -2704,19 +2611,19 @@ void kernel_main(void)
         ret = vmspace_subsys_init();
         if (ret != KERNEL_OK)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: vmspace subsys fail\n");
+            klog_warn("[k] WARN: vmspace subsys fail\n");
         }
     }
 
     /* ---- 第八步：初始化 SMP 多核 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] SMP init\n");
+    klog_info("[k] SMP init\n");
 
     /* ---- 驱动框架初始化 ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Driver framework init\n");
+    klog_info("[k] Driver framework init\n");
     ret = driver_subsys_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: driver subsys fail\n");
+        klog_warn("[k] WARN: driver subsys fail\n");
     }
 
     /* ---- 注册内建驱动 ---- */
@@ -2744,13 +2651,13 @@ void kernel_main(void)
         {
             driver_stats_t stats;
             driver_get_stats(&stats);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] drivers: ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_drivers);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, ", devices: ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.total_devices);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, ", probed: ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)stats.probe_count);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[k] drivers: ");
+            uart_print_uint((uint64_t)stats.total_drivers);
+            klog_info(", devices: ");
+            uart_print_uint((uint64_t)stats.total_devices);
+            klog_info(", probed: ");
+            uart_print_uint((uint64_t)stats.probe_count);
+            klog_putc('\n');
         }
         (void)ret;
     }
@@ -2776,7 +2683,7 @@ void kernel_main(void)
 
         if (blk_found > 0U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Read/Write test...\n");
+            klog_info("[BLK] Read/Write test...\n");
 
             /* 填充测试数据并写扇区 0 */
             for (ii = 0U; ii < 512U; ii++)
@@ -2791,11 +2698,11 @@ void kernel_main(void)
             if ((blk_ret == 512) && (s_blk_buf[0U] == 0U) &&
                 (s_blk_buf[1U] == 1U) && (s_blk_buf[255U] == 0xFFU))
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] VERIFY OK\n");
+                klog_info("[BLK] VERIFY OK\n");
             }
             else
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] VERIFY FAIL\n");
+                klog_info("[BLK] VERIFY FAIL\n");
             }
         }
     }
@@ -2810,7 +2717,7 @@ void kernel_main(void)
         static uint8_t s_blk_wr[512U] __attribute__((aligned(8)));
         static uint8_t s_blk_rd[512U] __attribute__((aligned(8)));
 
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Test start\n");
+        klog_info("[BLK] Test start\n");
 
         /* 扫描所有 32 个 virtio-mmio slot 找 block 设备 */
         {
@@ -2825,11 +2732,11 @@ void kernel_main(void)
                 did = base[2U];
                 if ((mg == 0x74726976U) && (did != 0U))
                 {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Found slot=");
-                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)slot);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " devid=0x");
-                    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)did);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+                    klog_info("[BLK] Found slot=");
+                    uart_print_uint((uint64_t)slot);
+                    klog_info(" devid=0x");
+                    klog_hex64((uint64_t)did);
+                    klog_info("\n");
                 }
             }
         }
@@ -2840,28 +2747,28 @@ void kernel_main(void)
             uint32_t d31;
             b31 = (volatile uint32_t *)(void *)0x0A003E00ULL;
             d31 = b31[2U];  /* device_id */
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] slot31 devid=0x");
-            uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)d31);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+            klog_info("[BLK] slot31 devid=0x");
+            klog_hex64((uint64_t)d31);
+            klog_info("\n");
         }
 
         /* 查询 virtio-blk 设备容量 (dev_id=2) */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Querying capacity...\n");
+        klog_info("[BLK] Querying capacity...\n");
         {
             uint64_t blk_cap = 0U;
             kernel_status_t ioc_r = device_ioctl(2U, 0U, &blk_cap);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] IOCTL returned ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)ioc_r);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[BLK] IOCTL returned ");
+            uart_print_uint((uint64_t)ioc_r);
+            klog_putc('\n');
             if (ioc_r == KERNEL_OK)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] cap=");
-                uart_print_uint((uint64_t)QEMU_UART0_BASE, blk_cap);
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " sectors\n");
+                klog_info("[BLK] cap=");
+                uart_print_uint(blk_cap);
+                klog_info(" sectors\n");
             }
             else
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] no device\n");
+                klog_info("[BLK] no device\n");
             }
         }
 
@@ -2875,42 +2782,42 @@ void kernel_main(void)
         }
 
         /* 先读扇区 0 验证 virtqueue 工作正常 */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] Calling device_read...\n");
+        klog_info("[BLK] Calling device_read...\n");
         blk_ret = device_read(2U, s_blk_rd, 512ULL, 0ULL);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] device_read returned ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_info("[BLK] device_read returned ");
+        uart_print_uint((uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+        klog_putc('\n');
         if (blk_ret == 512)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 OK\n");
+            klog_info("[BLK] READ0 OK\n");
         }
         else
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ0 FAIL\n");
+            klog_info("[BLK] READ0 FAIL\n");
         }
 
         blk_ret = device_write(2U, s_blk_wr, 512ULL, 0ULL);
         if (blk_ret == 512)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] WRITE OK\n");
+            klog_info("[BLK] WRITE OK\n");
         }
         else
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] WRITE FAIL ret=");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[BLK] WRITE FAIL ret=");
+            uart_print_uint((uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+            klog_putc('\n');
         }
 
         blk_ret = device_read(2U, s_blk_rd, 512ULL, 0ULL);
         if (blk_ret == 512)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ OK\n");
+            klog_info("[BLK] READ OK\n");
         }
         else
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[BLK] READ FAIL ret=");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[BLK] READ FAIL ret=");
+            uart_print_uint((uint64_t)((blk_ret < 0) ? (-blk_ret) : blk_ret));
+            klog_putc('\n');
         }
     }
 #endif /* CONFIG_DEBUG - BLK test */
@@ -2918,7 +2825,7 @@ void kernel_main(void)
     ret = smp_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: SMP fail\n");
+        klog_warn("[k] WARN: SMP fail\n");
     }
 
     ret = smp_boot_secondary();
@@ -2926,9 +2833,9 @@ void kernel_main(void)
     {
 #if CONFIG_DEBUG_VERBOSE
         uint32_t online = smp_get_online_count();
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Online CPUs: 0x");
-        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)online);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "\n");
+        klog_info("[k] Online CPUs: 0x");
+        klog_hex64((uint64_t)online);
+        klog_info("\n");
 #else
         (void)smp_get_online_count();
 #endif
@@ -2938,10 +2845,10 @@ void kernel_main(void)
     ret = smp_sched_init();
     if (ret != KERNEL_OK)
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] WARN: smp_sched fail\n");
+        klog_warn("[k] WARN: smp_sched fail\n");
     }
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] All inited\n");
+    klog_info("[k] All inited\n");
 
 #if CONFIG_DEBUG
     /* VirtIO Net 驱动在用户态实现（services/drv_virtio_net） */
@@ -3014,18 +2921,18 @@ void kernel_main(void)
 
         /* 缓冲区已初始化为零，避免未初始化数据导致问题 */
 
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] Test start\n");
+        klog_info("[ELF] Test start\n");
         elf_step = 0U;
 
         /* 步骤 1: 从块设备读取 ELF 文件 */
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] Reading ELF from disk...\n");
+        klog_info("[ELF] Reading ELF from disk...\n");
         elf_ret = device_read(2U, s_elf_buf, 4096ULL, 0ULL);
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] device_read returned ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)((elf_ret < 0) ? (-elf_ret) : elf_ret));
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_info("[ELF] device_read returned ");
+        uart_print_uint((uint64_t)((elf_ret < 0) ? (-elf_ret) : elf_ret));
+        klog_putc('\n');
         if (elf_ret <= 0)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] SKIP (no block device)\n");
+            klog_info("[ELF] SKIP (no block device)\n");
             elf_step = 1U;  /* 设置错误标志以跳过后续步骤 */
         }
 
@@ -3039,8 +2946,7 @@ void kernel_main(void)
                 (ehdr->e_ident[2U] != 'L') ||
                 (ehdr->e_ident[3U] != 'F'))
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 2 (magic)\n");
+                klog_info("[ELF] FAIL step 2 (magic)\n");
                 elf_step = 2U;
             }
         }
@@ -3050,8 +2956,7 @@ void kernel_main(void)
             /* 步骤 3: 验证 ELF 类别（64-bit） */
             if (ehdr->e_ident[4U] != 2U)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 3 (class)\n");
+                klog_info("[ELF] FAIL step 3 (class)\n");
                 elf_step = 3U;
             }
         }
@@ -3061,8 +2966,7 @@ void kernel_main(void)
             /* 步骤 4: 验证字节序（小端） */
             if (ehdr->e_ident[5U] != 1U)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 4 (endian)\n");
+                klog_info("[ELF] FAIL step 4 (endian)\n");
                 elf_step = 4U;
             }
         }
@@ -3072,8 +2976,7 @@ void kernel_main(void)
             /* 步骤 5: 验证架构（AArch64） */
             if (ehdr->e_machine != ELF_TEST_EM_AARCH64)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 5 (machine)\n");
+                klog_info("[ELF] FAIL step 5 (machine)\n");
                 elf_step = 5U;
             }
         }
@@ -3083,8 +2986,7 @@ void kernel_main(void)
             /* 步骤 6: 验证文件类型（EXEC） */
             if (ehdr->e_type != ELF_TEST_ET_EXEC)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 6 (type)\n");
+                klog_info("[ELF] FAIL step 6 (type)\n");
                 elf_step = 6U;
             }
         }
@@ -3092,9 +2994,9 @@ void kernel_main(void)
         if (elf_step == 0U)
         {
             /* 步骤 7: 打印入口点 */
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] entry=0x");
-            uart_print_hex((uint64_t)QEMU_UART0_BASE, ehdr->e_entry);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[ELF] entry=0x");
+            klog_hex64(ehdr->e_entry);
+            klog_putc('\n');
 
             /* 步骤 8: 解析程序头段 */
             seg_count = 0U;
@@ -3138,31 +3040,29 @@ void kernel_main(void)
                 /* 打印段信息 */
                 for (si = 0U; si < seg_count; si++)
                 {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                                  "[ELF] seg ");
-                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)si);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " vaddr=0x");
-                    uart_print_hex((uint64_t)QEMU_UART0_BASE, segs[si].vaddr);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=0x");
-                    uart_print_hex((uint64_t)QEMU_UART0_BASE, segs[si].length);
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, " prot=0x");
-                    uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)segs[si].prot);
-                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    klog_info("[ELF] seg ");
+                    uart_print_uint((uint64_t)si);
+                    klog_info(" vaddr=0x");
+                    klog_hex64(segs[si].vaddr);
+                    klog_info(" len=0x");
+                    klog_hex64(segs[si].length);
+                    klog_info(" prot=0x");
+                    klog_hex64((uint64_t)segs[si].prot);
+                    klog_putc('\n');
                 }
             }
 
             /* 步骤 9: 验证至少有 1 个 PT_LOAD 段 */
             if (seg_count == 0U)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                              "[ELF] FAIL step 9 (no load segments)\n");
+                klog_info("[ELF] FAIL step 9 (no load segments)\n");
                 elf_step = 9U;
             }
         }
 
         if (elf_step == 0U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] ALL PASSED\n");
+            klog_info("[ELF] ALL PASSED\n");
         }
     }
 
@@ -3171,10 +3071,9 @@ void kernel_main(void)
         uint32_t drv_ret = driver_e2e_test();
         if (drv_ret != 0U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[k] DRV TEST FAILED at step ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)drv_ret);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[k] DRV TEST FAILED at step ");
+            uart_print_uint((uint64_t)drv_ret);
+            klog_putc('\n');
         }
     }
 
@@ -3183,10 +3082,9 @@ void kernel_main(void)
         uint32_t cap_ret = cap_runtime_test();
         if (cap_ret != 0U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[k] CAP TEST FAILED at step ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)cap_ret);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[k] CAP TEST FAILED at step ");
+            uart_print_uint((uint64_t)cap_ret);
+            klog_putc('\n');
         }
     }
 
@@ -3195,10 +3093,9 @@ void kernel_main(void)
         uint32_t smp_ret = smp_e2e_test();
         if (smp_ret != 0U)
         {
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                          "[k] SMP TEST FAILED at step ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)smp_ret);
-            hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+            klog_info("[k] SMP TEST FAILED at step ");
+            uart_print_uint((uint64_t)smp_ret);
+            klog_putc('\n');
         }
     }
 
@@ -3243,7 +3140,7 @@ void kernel_main(void)
             elf_ret = device_read(2U, s_elf_buf, ELF_BUF_SIZE, 0ULL);
             if (elf_ret <= 0)
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] SKIP (no block device)\n");
+                klog_info("[ELF] SKIP (no block device)\n");
             }
             else
             {
@@ -3255,32 +3152,32 @@ void kernel_main(void)
 
                 if (elf_err != ELF_OK)
                 {
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] FAIL init ");
-                    uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)elf_err);
-                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    klog_info("[ELF] FAIL init ");
+                    uart_print_uint((uint64_t)elf_err);
+                    klog_putc('\n');
                 }
                 else
                 {
                     /* 打印 ELF 头信息 */
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] entry=0x");
-                    uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_header.e_entry);
-                    hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                    klog_info("[ELF] entry=0x");
+                    klog_hex64(s_elf_header.e_entry);
+                    klog_putc('\n');
 
                     /* 打印段信息 */
                     for (i = 0U; i < s_elf_segment_count; i++)
                     {
-                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] seg ");
-                        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)i);
-                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " vaddr=0x");
-                        uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_segments[i].vaddr);
-                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " len=0x");
-                        uart_print_hex((uint64_t)QEMU_UART0_BASE, s_elf_segments[i].length);
-                        hal_uart_puts((uint64_t)QEMU_UART0_BASE, " prot=0x");
-                        uart_print_hex((uint64_t)QEMU_UART0_BASE, (uint64_t)s_elf_segments[i].prot);
-                        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                        klog_info("[ELF] seg ");
+                        uart_print_uint((uint64_t)i);
+                        klog_info(" vaddr=0x");
+                        klog_hex64(s_elf_segments[i].vaddr);
+                        klog_info(" len=0x");
+                        klog_hex64(s_elf_segments[i].length);
+                        klog_info(" prot=0x");
+                        klog_hex64((uint64_t)s_elf_segments[i].prot);
+                        klog_putc('\n');
                     }
 
-                    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[ELF] OK\n");
+                    klog_info("[ELF] OK\n");
                 }
             }
         }
@@ -3316,7 +3213,7 @@ void kernel_main(void)
     hal_irq_enable();
 
     /* ---- 第十步：启动调度器（永不返回） ---- */
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
+    klog_info("[k] Start sched\n");
 #else
     /* 生产模式：直接启动调度器 */
 #endif /* CONFIG_DEBUG */
@@ -3336,16 +3233,16 @@ void kernel_main(void)
         int32_t boot_ret;
 
         boot_ret = boot_blk_init();
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_blk_init = ");
-        uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)boot_ret);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_info("[k] boot_blk_init = ");
+        uart_print_uint((uint64_t)boot_ret);
+        klog_putc('\n');
 
         if (boot_ret == 0)
         {
             /* 从磁盘扇区 0 读取 ELF 文件（144 扇区 = 72KB） */
             int32_t rd_ret = boot_blk_read(0ULL, s_elf_buf, 73728U);
-            hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] boot_read ELF = ");
-            uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)rd_ret);
+            klog_info("[k] boot_read ELF = ");
+            uart_print_uint((uint64_t)rd_ret);
 
             /* 验证 ELF 魔数 */
             if ((rd_ret == 0) &&
@@ -3355,17 +3252,17 @@ void kernel_main(void)
                 (s_elf_buf[3U] == (uint8_t)'F'))
             {
                 kernel_status_t load_ret;
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (ELF OK)\n");
+                klog_info(" (ELF OK)\n");
 
                 /* 加载 ELF 到用户空间并创建线程 */
                 load_ret = elf_load_and_run(s_elf_buf, 73728U, "drv_blk");
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] elf_load_and_run = ");
-                uart_print_uint((uint64_t)QEMU_UART0_BASE, (uint64_t)load_ret);
-                hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+                klog_info("[k] elf_load_and_run = ");
+                uart_print_uint((uint64_t)load_ret);
+                klog_putc('\n');
             }
             else
             {
-                hal_uart_puts((uint64_t)QEMU_UART0_BASE, " (not ELF)\n");
+                klog_info(" (not ELF)\n");
             }
         }
     }

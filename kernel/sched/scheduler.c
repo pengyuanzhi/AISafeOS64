@@ -28,6 +28,7 @@
 #include <kernel/compiler.h>
 #include <kernel/errno.h>
 #include <kernel/config.h>
+#include <kernel/klog.h>
 #include <kernel/smp.h>
 #include <kernel/mmu.h>
 #include <kernel/mm/slab.h>
@@ -52,9 +53,6 @@ extern char __heap_end[];
 
 /* 前向声明: 栈分配函数 */
 static vaddr_t stack_alloc(uint32_t size);
-
-/* HAL 接口 */
-extern void hal_uart_puts(uint64_t base, const char *str);
 
 /* ========================================================================
  * 线程栈 Slab 分配器实现
@@ -801,10 +799,9 @@ void schedule(void)
     if ((prev != NULL) && (prev->guard.enabled) &&
         (!stack_guard_check(&prev->guard)))
     {
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE,
-                       "[GUARD] Stack overflow detected in thread ");
-        hal_uart_puts((uint64_t)QEMU_UART0_BASE, prev->name);
-        hal_uart_putc((uint64_t)QEMU_UART0_BASE, '\n');
+        klog_error("[GUARD] Stack overflow detected in thread ");
+        klog_error(prev->name);
+        klog_putc('\n');
         /* 栈溢出：终止线程 */
         kthread_exit();
     }
@@ -912,7 +909,7 @@ void NORETURN scheduler_start(void)
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
 
-    hal_uart_puts((uint64_t)QEMU_UART0_BASE, "[k] Start sched\n");
+    klog_info("[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */
     cpu_switch_to_first_task(first_thread->context);
