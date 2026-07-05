@@ -95,7 +95,7 @@ static struct list_head s_global_object_list;
  * @details 每次分配新对象时递增，保证全局唯一。
  *          使用 volatile 确保编译器不缓存其值。
  */
-static volatile uint32_t s_next_id;
+static uint32_t s_next_id;
 
 /**
  * @brief 子系统自旋锁

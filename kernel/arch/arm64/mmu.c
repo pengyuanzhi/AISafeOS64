@@ -100,6 +100,9 @@
 #define TCR_ASID_8       (0ULL << 36U)
 #define TCR_IPS_4TB      (2ULL << 32U)
 
+/** @brief 16 位 ASID 计数器上限 */
+#define ASID_MAX_U16     65535U
+
 /** @brief 48 位地址空间 (256TB): T0SZ = 64 - 48 = 16 */
 #define TCR_T0SZ_48BIT   16U
 
@@ -553,7 +556,7 @@ void mmu_destroy_user_pgd(uint64_t pgd_paddr)
 void mmu_switch_to_user(uint64_t user_pgd_paddr)
 {
     s_asid_counter++;
-    if (s_asid_counter >= 65535U)
+    if (s_asid_counter >= ASID_MAX_U16)
     {
         s_asid_counter = 1U;
     }

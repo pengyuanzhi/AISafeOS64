@@ -1042,7 +1042,7 @@ void smp_grace_period_ack(smp_grace_period_t *gp)
         return;
     }
 
-    cpu_id = smp_get_cpu_id();
+    cpu_id = hal_get_cpu_id();
     if (cpu_id < CONFIG_MAX_CPUS)
     {
         gp->cpu_ack[cpu_id] = gp->gp_seq;

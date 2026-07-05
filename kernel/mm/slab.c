@@ -74,7 +74,7 @@ int32_t slab_create(slab_cache_t *cache, size_t pool_size)
 
     if (cache == NULL || pool_size == 0)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     /* 初始化 TicketLock */
@@ -84,7 +84,7 @@ int32_t slab_create(slab_cache_t *cache, size_t pool_size)
     cache->pool = kmalloc(pool_size);
     if (cache->pool == NULL)
     {
-        return -ENOMEM;
+        return -(int32_t)ENOMEM;
     }
 
     (void)memset(cache->pool, 0, pool_size);
@@ -103,7 +103,7 @@ int32_t slab_destroy(slab_cache_t *cache)
 {
     if (cache == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     /* 销毁所有 Slab 节点 */
@@ -234,7 +234,7 @@ int32_t slab_free(slab_cache_t *cache, void *ptr)
 
     if (cache == NULL || ptr == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     /* irqsave 版本：与 slab_alloc 保持一致，允许在中断路径调用 */
