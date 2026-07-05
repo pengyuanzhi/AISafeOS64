@@ -108,7 +108,7 @@ set(KERNEL_MM_SOURCES
 # 中断路由源文件 (irq/)
 # ==============================================================================
 set(KERNEL_IRQ_SOURCES
-    irq/interrupt.c
+    irq/irq.c
     irq/syscall_dispatch.c
 )
 

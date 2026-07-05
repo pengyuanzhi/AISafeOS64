@@ -311,7 +311,7 @@ kernel_status_t ipc_notification_signal(kobj_id_t notify_id,
     /*
      * P1-16 安全修复：signals 字段改为原子按位或。
      *
-     * 此函数可在中断上下文（interrupt_dispatch → ipc_notification_signal）
+     * 此函数可在中断上下文（irq_dispatch → ipc_notification_signal）
      * 调用，与线程上下文的 wait/try_wait 并发消费 signals（&= ~active）。
      * 原先 ntf->signals |= signal 为非原子读-改-写，会丢失中断中置位的
      * 信号位或破坏线程中清位的副作用。改为 atomic_or_u64 后由

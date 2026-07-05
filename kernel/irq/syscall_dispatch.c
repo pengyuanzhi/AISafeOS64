@@ -40,7 +40,7 @@
 #include <kernel/capability.h>
 #include <kernel/cspace.h>
 #include <kernel/page_table.h>
-#include <kernel/interrupt.h>
+#include <kernel/irq.h>
 #include <kernel/phys_mem.h>
 #include <kernel/mmu.h>
 #include "thread.h"
@@ -775,7 +775,7 @@ static void dispatch_interrupt(syscall_frame_t *frame)
              *       x1 = notification_id 通知对象 ID
              * 返回：x0 = 0 成功 或负错误码
              *
-             * 内核 interrupt_attach 配置 GIC 并在中断发生时
+             * 内核 irq_attach 配置 GIC 并在中断发生时
              * 调用 ipc_notification_signal 通知用户态。
              */
             uint32_t irq = (uint32_t)frame->x0;
@@ -783,7 +783,7 @@ static void dispatch_interrupt(syscall_frame_t *frame)
             kernel_status_t ret;
 
             /* IRQ_TRIGGER_EDGE_FALLING=2, 优先级 0xA0 */
-            ret = interrupt_attach(irq, notif_id, 2U, (uint8_t)0xA0U);
+            ret = irq_attach(irq, notif_id, 2U, (uint8_t)0xA0U);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }
@@ -792,7 +792,7 @@ static void dispatch_interrupt(syscall_frame_t *frame)
         {
             /* x0=irq */
             uint32_t irq = (uint32_t)frame->x0;
-            kernel_status_t ret = interrupt_detach(irq);
+            kernel_status_t ret = irq_detach(irq);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
         }

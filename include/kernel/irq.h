@@ -66,7 +66,7 @@ typedef struct
 /**
  * @brief 触发模式类型
  *
- * @details 中断描述符中存储的触发模式，使用 hal_intc 定义的
+ * @details 中断描述符中存储的触发模式，使用 hal_irq 定义的
  *          @ref irq_trigger_t 枚举值。保留为 uint8_t 以节省描述符
  *          存储空间。具体取值见 @ref irq_trigger_t。
  */
@@ -98,7 +98,7 @@ typedef struct
  *
  * @note 对应需求: IN-001
  */
-kernel_status_t interrupt_subsys_init(void);
+kernel_status_t irq_subsys_init(void);
 
 /**
  * @brief 绑定中断到通知对象
@@ -117,7 +117,7 @@ kernel_status_t interrupt_subsys_init(void);
  *
  * @note 对应需求: IN-002, IN-003
  */
-kernel_status_t interrupt_attach(uint32_t irq,
+kernel_status_t irq_attach(uint32_t irq,
                                       kobj_id_t notification_id,
                                       uint8_t trigger_mode,
                                       uint8_t priority);
@@ -131,7 +131,7 @@ kernel_status_t interrupt_attach(uint32_t irq,
  *
  * @note 对应需求: IN-003
  */
-kernel_status_t interrupt_detach(uint32_t irq);
+kernel_status_t irq_detach(uint32_t irq);
 
 /**
  * @brief 知道中断路由分发
@@ -143,7 +143,7 @@ kernel_status_t interrupt_detach(uint32_t irq);
  *
  * @note 对应需求: IN-004
  */
-void interrupt_dispatch(uint32_t irq);
+void irq_dispatch(uint32_t irq);
 
 /**
  * @brief 获取中断描述符
@@ -152,7 +152,7 @@ void interrupt_dispatch(uint32_t irq);
  *
  * @return 中断描述符指针，未注册返回 NULL
  */
-irq_desc_t *interrupt_get_desc(uint32_t irq);
+irq_desc_t *irq_get_desc(uint32_t irq);
 
 /**
  * @brief 注册内核中断处理函数
@@ -165,7 +165,7 @@ irq_desc_t *interrupt_get_desc(uint32_t irq);
  *
  * @note 对应需求: IN-005
  */
-kernel_status_t interrupt_register(uint32_t irq,
+kernel_status_t irq_register_handler(uint32_t irq,
                                       irq_handler_t handler,
                                       void *arg);
 
@@ -176,6 +176,6 @@ kernel_status_t interrupt_register(uint32_t irq,
  *
  * @return KERNEL_OK 成功
  */
-kernel_status_t interrupt_unregister(uint32_t irq);
+kernel_status_t irq_unregister_handler(uint32_t irq);
 
 #endif /* KERNEL_INTERRUPT_H */

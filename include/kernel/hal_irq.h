@@ -1,15 +1,15 @@
 /**
- * @file    hal_intc.h
+ * @file    hal_irq.h
  * @brief   中断控制器硬件抽象层（HAL）接口
  * @author  AISafe64 Team
  * @date    2026-07-04
  * @version 1.0
  *
- * @details 本文件定义了架构无关的中断控制器抽象接口（hal_intc）。
+ * @details 本文件定义了架构无关的中断控制器抽象接口（hal_irq）。
  *          内核核心（kernel/irq/、kernel/driver/ 等）通过本接口访问
  *          中断控制器，不直接依赖具体硬件（如 ARM GIC）。
  *
- *          具体硬件实现作为 hal_intc 的后端：
+ *          具体硬件实现作为 hal_irq 的后端：
  *          - ARM64：kernel/arch/arm64/gic.c（GICv2 后端）
  *
  *          该抽象使内核核心与中断控制器硬件解耦，便于移植到
@@ -57,14 +57,14 @@ typedef enum
  * @details 初始化中断控制器的 Distributor 和当前 CPU 的 CPU Interface。
  *          使能所有 SGI/PPI，禁用所有 SPI。
  */
-void hal_intc_init(void);
+void hal_irq_init(void);
 
 /**
  * @brief 初始化中断控制器（从核）
  *
  * @details 从核启动后调用，仅初始化当前 CPU 的 CPU Interface。
  */
-void hal_intc_init_secondary(void);
+void hal_irq_init_secondary(void);
 
 /* ========================================================================
  * 单线控制
@@ -75,14 +75,14 @@ void hal_intc_init_secondary(void);
  *
  * @param irq 中断号
  */
-void hal_intc_enable(uint32_t irq);
+void hal_irq_enable(uint32_t irq);
 
 /**
  * @brief 禁用指定中断
  *
  * @param irq 中断号
  */
-void hal_intc_disable(uint32_t irq);
+void hal_irq_disable(uint32_t irq);
 
 /* ========================================================================
  * 配置
@@ -94,7 +94,7 @@ void hal_intc_disable(uint32_t irq);
  * @param irq  中断号
  * @param prio 优先级（0 = 最高，255 = 最低）
  */
-void hal_intc_set_priority(uint32_t irq, uint8_t prio);
+void hal_irq_set_priority(uint32_t irq, uint8_t prio);
 
 /**
  * @brief 设置中断亲和性（目标 CPU）
@@ -102,7 +102,7 @@ void hal_intc_set_priority(uint32_t irq, uint8_t prio);
  * @param irq      中断号
  * @param cpu_mask CPU 位掩码（bit 0 = CPU0，bit 1 = CPU1，...）
  */
-void hal_intc_set_affinity(uint32_t irq, uint32_t cpu_mask);
+void hal_irq_set_affinity(uint32_t irq, uint32_t cpu_mask);
 
 /**
  * @brief 设置中断触发类型
@@ -110,7 +110,7 @@ void hal_intc_set_affinity(uint32_t irq, uint32_t cpu_mask);
  * @param irq     中断号
  * @param trigger 触发类型
  */
-void hal_intc_set_trigger(uint32_t irq, irq_trigger_t trigger);
+void hal_irq_set_trigger(uint32_t irq, irq_trigger_t trigger);
 
 /* ========================================================================
  * 中断处理
@@ -124,14 +124,14 @@ void hal_intc_set_trigger(uint32_t irq, irq_trigger_t trigger);
  *
  * @return 中断号，无挂起中断返回伪中断号
  */
-uint32_t hal_intc_acknowledge(void);
+uint32_t hal_irq_acknowledge(void);
 
 /**
  * @brief 通知中断处理完成（End Of Interrupt）
  *
  * @param irq 中断号
  */
-void hal_intc_eoi(uint32_t irq);
+void hal_irq_eoi(uint32_t irq);
 
 /**
  * @brief 判断是否为伪中断
@@ -139,7 +139,7 @@ void hal_intc_eoi(uint32_t irq);
  * @param irq 中断号
  * @return true 表示伪中断（无有效挂起中断）
  */
-bool hal_intc_is_spurious(uint32_t irq);
+bool hal_irq_is_spurious(uint32_t irq);
 
 /* ========================================================================
  * 中断类型判定
@@ -151,7 +151,7 @@ bool hal_intc_is_spurious(uint32_t irq);
  * @param irq 中断号
  * @return true 表示是 SGI（ARM GIC: 0-15）
  */
-bool hal_intc_is_sgi(uint32_t irq);
+bool hal_irq_is_sgi(uint32_t irq);
 
 /**
  * @brief 判断是否为 PPI（私有外设中断）
@@ -159,7 +159,7 @@ bool hal_intc_is_sgi(uint32_t irq);
  * @param irq 中断号
  * @return true 表示是 PPI（ARM GIC: 16-31）
  */
-bool hal_intc_is_ppi(uint32_t irq);
+bool hal_irq_is_ppi(uint32_t irq);
 
 /**
  * @brief 判断是否为 SPI（共享外设中断）
@@ -167,7 +167,7 @@ bool hal_intc_is_ppi(uint32_t irq);
  * @param irq 中断号
  * @return true 表示是 SPI（ARM GIC: >= 32）
  */
-bool hal_intc_is_spi(uint32_t irq);
+bool hal_irq_is_spi(uint32_t irq);
 
 /* ========================================================================
  * IPI（核间中断）
@@ -179,6 +179,6 @@ bool hal_intc_is_spi(uint32_t irq);
  * @param cpu_mask 目标 CPU 位掩码
  * @param ipi_type IPI 类型编号
  */
-void hal_intc_send_ipi(uint32_t cpu_mask, uint32_t ipi_type);
+void hal_irq_send_ipi(uint32_t cpu_mask, uint32_t ipi_type);
 
 #endif /* KERNEL_HAL_INTC_H */

@@ -14,9 +14,9 @@
  *
  *          中断处理流程：
  *          1. 硬件中断触发
- *          2. hal_intc_acknowledge 确认中断
- *          3. 调用 interrupt_dispatch 进行路由
- *          4. hal_intc_eoi 通知中断处理完成
+ *          2. hal_irq_acknowledge 确认中断
+ *          3. 调用 irq_dispatch 进行路由
+ *          4. hal_irq_eoi 通知中断处理完成
  *
  * @note MISRA-C:2012 合规
  * @note 对应需求: IN-001~006
@@ -28,8 +28,8 @@
  * 头文件包含
  * ======================================================================== */
 
-#include <kernel/interrupt.h>
-#include <kernel/hal_intc.h>
+#include <kernel/irq.h>
+#include <kernel/hal_irq.h>
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
@@ -102,7 +102,7 @@ static void irq_desc_reset(irq_desc_t *desc)
  *
  * @note 对应需求: IN-001
  */
-kernel_status_t interrupt_subsys_init(void)
+kernel_status_t irq_subsys_init(void)
 {
     uint32_t i;
 
@@ -140,7 +140,7 @@ kernel_status_t interrupt_subsys_init(void)
  *
  * @note 对应需求: IN-002, IN-003
  */
-kernel_status_t interrupt_attach(uint32_t irq,
+kernel_status_t irq_attach(uint32_t irq,
                                       kobj_id_t notification_id,
                                       uint8_t trigger_mode,
                                       uint8_t priority)
@@ -175,15 +175,15 @@ kernel_status_t interrupt_attach(uint32_t irq,
     trigger = (irq_trigger_t)trigger_mode;
 
     /* 配置中断控制器优先级 */
-    hal_intc_set_priority(irq, priority);
+    hal_irq_set_priority(irq, priority);
 
     /* 配置中断控制器触发模式（仅 SPI 有效，非 SPI 由后端忽略） */
-    hal_intc_set_trigger(irq, trigger);
+    hal_irq_set_trigger(irq, trigger);
 
     /* 配置中断控制器亲和性：默认绑定到 CPU 0（仅 SPI 有效） */
-    if (hal_intc_is_spi(irq))
+    if (hal_irq_is_spi(irq))
     {
-        hal_intc_set_affinity(irq, 0x01U);
+        hal_irq_set_affinity(irq, 0x01U);
     }
 
     /* 填充描述符 */
@@ -198,7 +198,7 @@ kernel_status_t interrupt_attach(uint32_t irq,
     barrier();
 
     /* 使能中断 */
-    hal_intc_enable(irq);
+    hal_irq_enable(irq);
 
     /* 释放锁 */
     ticket_lock_release(&s_irq_lock);
@@ -218,7 +218,7 @@ kernel_status_t interrupt_attach(uint32_t irq,
  *
  * @note 对应需求: IN-003
  */
-kernel_status_t interrupt_detach(uint32_t irq)
+kernel_status_t irq_detach(uint32_t irq)
 {
     irq_desc_t *desc;
 
@@ -241,7 +241,7 @@ kernel_status_t interrupt_detach(uint32_t irq)
     }
 
     /* 禁用中断 */
-    hal_intc_disable(irq);
+    hal_irq_disable(irq);
 
     /* 清除描述符 */
     irq_desc_reset(desc);
@@ -267,7 +267,7 @@ kernel_status_t interrupt_detach(uint32_t irq)
  * @note 对应需求: IN-004
  * @note 此函数在中断上下文中执行，必须快速返回
  */
-void interrupt_dispatch(uint32_t irq)
+void irq_dispatch(uint32_t irq)
 {
     irq_desc_t *desc;
     uint32_t cpu_id;
@@ -318,7 +318,7 @@ void interrupt_dispatch(uint32_t irq)
  *
  * @return 中断描述符指针，未注册或参数无效返回 NULL
  */
-irq_desc_t *interrupt_get_desc(uint32_t irq)
+irq_desc_t *irq_get_desc(uint32_t irq)
 {
     irq_desc_t *desc;
 
@@ -356,7 +356,7 @@ irq_desc_t *interrupt_get_desc(uint32_t irq)
  *
  * @note 对应需求: IN-005
  */
-kernel_status_t interrupt_register(uint32_t irq,
+kernel_status_t irq_register_handler(uint32_t irq,
                                       irq_handler_t handler,
                                       void *arg)
 {
@@ -386,12 +386,12 @@ kernel_status_t interrupt_register(uint32_t irq,
     }
 
     /* 配置中断控制器默认优先级 */
-    hal_intc_set_priority(irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
+    hal_irq_set_priority(irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
 
     /* 配置中断控制器亲和性：默认绑定到 CPU 0（仅 SPI 有效） */
-    if (hal_intc_is_spi(irq))
+    if (hal_irq_is_spi(irq))
     {
-        hal_intc_set_affinity(irq, 0x01U);
+        hal_irq_set_affinity(irq, 0x01U);
     }
 
     /* 填充描述符 */
@@ -406,7 +406,7 @@ kernel_status_t interrupt_register(uint32_t irq,
     barrier();
 
     /* 使能中断 */
-    hal_intc_enable(irq);
+    hal_irq_enable(irq);
 
     /* 释放锁 */
     ticket_lock_release(&s_irq_lock);
@@ -424,7 +424,7 @@ kernel_status_t interrupt_register(uint32_t irq,
  * @return KERNEL_OK 成功
  * @return -EINVAL 中断号无效或未注册
  */
-kernel_status_t interrupt_unregister(uint32_t irq)
+kernel_status_t irq_unregister_handler(uint32_t irq)
 {
     irq_desc_t *desc;
 
@@ -447,7 +447,7 @@ kernel_status_t interrupt_unregister(uint32_t irq)
     }
 
     /* 禁用中断 */
-    hal_intc_disable(irq);
+    hal_irq_disable(irq);
 
     /* 清除描述符 */
     irq_desc_reset(desc);

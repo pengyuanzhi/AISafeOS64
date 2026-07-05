@@ -22,9 +22,9 @@
 #include <kernel/barrier.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
-#include <kernel/hal_intc.h>
+#include <kernel/hal_irq.h>
 #include <kernel/config.h>
-#include <kernel/interrupt.h>
+#include <kernel/irq.h>
 #include <kernel/virt_phys.h>
 #include <hal.h>
 #include <stdint.h>
@@ -354,11 +354,11 @@ void smp_secondary_entry(uint32_t cpu_id)
     );
 
     /* 初始化中断控制器 CPU interface（HAL） */
-    hal_intc_init_secondary();
+    hal_irq_init_secondary();
 
     /* 使能定时器 PPI 中断（IRQ 30） */
-    hal_intc_set_priority(30U, (uint8_t)0xA0U);
-    hal_intc_enable(30U);
+    hal_irq_set_priority(30U, (uint8_t)0xA0U);
+    hal_irq_enable(30U);
 
     /* 初始化从核定时器（使用 HAL 接口） */
     {
@@ -387,7 +387,7 @@ void smp_secondary_entry(uint32_t cpu_id)
     }
 
     /* 初始化中断路由子系统（从核也需要） */
-    (void)interrupt_subsys_init();
+    (void)irq_subsys_init();
 
     /* 初始化 percpu 数据 */
     percpu = &s_percpu_data[cpu_id];

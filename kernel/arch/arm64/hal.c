@@ -159,6 +159,23 @@ void hal_uart_puts(uint64_t base, const char *str)
     }
 }
 
+/* ========== 控制台接口实现（HAL 内部绑定具体 UART） ========== */
+
+void hal_console_init(void)
+{
+    hal_uart_init(QEMU_UART0_BASE);
+}
+
+void hal_console_putc(char ch)
+{
+    hal_uart_putc(QEMU_UART0_BASE, ch);
+}
+
+void hal_console_puts(const char *str)
+{
+    hal_uart_puts(QEMU_UART0_BASE, str);
+}
+
 /* ========== 缓存维护操作实现 ========== */
 
 /** @brief ARM64 缓存行大小（64字节） */

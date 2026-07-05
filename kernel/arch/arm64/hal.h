@@ -82,7 +82,7 @@ static inline uint32_t hal_get_cpu_id(void)
 /**
  * @brief 禁用所有中断（IRQ/FIQ/SError/Debug）
  */
-static inline void hal_irq_disable_all(void)
+static inline void hal_local_irq_disable_all(void)
 {
     __asm__ volatile("msr daifset, #0xF" ::: "memory");
 }
@@ -90,7 +90,7 @@ static inline void hal_irq_disable_all(void)
 /**
  * @brief 启用 IRQ 中断
  */
-static inline void hal_irq_enable(void)
+static inline void hal_local_irq_enable(void)
 {
     __asm__ volatile("msr daifclr, #2" ::: "memory");
 }
@@ -98,7 +98,7 @@ static inline void hal_irq_enable(void)
 /**
  * @brief 禁用 IRQ 中断
  */
-static inline void hal_irq_disable(void)
+static inline void hal_local_irq_disable(void)
 {
     __asm__ volatile("msr daifset, #2" ::: "memory");
 }
@@ -109,7 +109,7 @@ static inline void hal_irq_disable(void)
  */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
-static inline uint32_t hal_irq_saved_state(void)
+static inline uint32_t hal_local_irq_saved_state(void)
 {
     uint64_t daif = sysreg_read(DAIF);
     return (uint32_t)((daif >> 9U) & 0xFU);
@@ -122,7 +122,7 @@ static inline uint32_t hal_irq_saved_state(void)
  */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
-static inline void hal_irq_restore(uint32_t state)
+static inline void hal_local_irq_restore(uint32_t state)
 {
     uint64_t daif = sysreg_read(DAIF);
     daif &= ~(0xFULL << 9U);
@@ -146,27 +146,50 @@ static inline void hal_enable_stack_alignment_check(void)
 }
 #pragma GCC diagnostic pop
 
-/* ========== UART 早期输出接口 ========== */
+/* ========== UART 底层接口（供 HAL 内部使用，不暴露 base 给内核核心） ========== */
 
 /**
- * @brief 初始化 UART（QEMU PL011）
- * @param base UART 基地址
+ * @brief 初始化指定 UART 端口
+ * @param base UART 基地址（由 HAL 层传入，内核核心不接触）
  */
 void hal_uart_init(uint64_t base);
 
 /**
- * @brief UART 发送单个字符
+ * @brief 向指定 UART 端口发送单个字符
  * @param base UART 基地址
- * @param ch 要发送的字符
+ * @param ch  要发送的字符
  */
 void hal_uart_putc(uint64_t base, char ch);
 
 /**
- * @brief UART 发送字符串
+ * @brief 向指定 UART 端口发送字符串
  * @param base UART 基地址
- * @param str 要发送的字符串（以 NULL 结尾）
+ * @param str  要发送的字符串
  */
 void hal_uart_puts(uint64_t base, const char *str);
+
+/* ========== 控制台接口（内核核心使用，不感知硬件细节） ========== */
+
+/**
+ * @brief 初始化系统控制台
+ *
+ * @details HAL 层内部绑定具体的 UART 端口（base 地址、寄存器布局），
+ *          内核核心代码不感知控制台硬件细节。
+ *          更换目标板只需修改 hal.c 中的实现。
+ */
+void hal_console_init(void);
+
+/**
+ * @brief 向控制台输出单个字符
+ * @param ch 要输出的字符
+ */
+void hal_console_putc(char ch);
+
+/**
+ * @brief 向控制台输出字符串
+ * @param str 以 NULL 结尾的字符串
+ */
+void hal_console_puts(const char *str);
 
 /**
  * @brief 使能 UART 接收中断

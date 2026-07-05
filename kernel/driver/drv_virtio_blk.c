@@ -20,8 +20,8 @@
 
 #include <kernel/driver.h>
 #include <kernel/config.h>
-#include <kernel/hal_intc.h>
-#include <kernel/interrupt.h>
+#include <kernel/hal_irq.h>
+#include <kernel/irq.h>
 #include <kernel/ipc_notification.h>
 #include <kernel/klog.h>
 #include <sched/thread.h>
@@ -883,8 +883,8 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     /*
      * 保存 IRQ 状态并临时使能 IRQ（清除 PSTATE.I）
      */
-    saved_irq_state = hal_irq_saved_state();
-    hal_irq_enable();
+    saved_irq_state = hal_local_irq_saved_state();
+    hal_local_irq_enable();
 
     while (timeout < VIRTQ_POLL_TIMEOUT)
     {
@@ -918,7 +918,7 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
             virtio_dsb();
 
             /* 恢复 IRQ 状态 */
-            hal_irq_restore(saved_irq_state);
+            hal_local_irq_restore(saved_irq_state);
 
             /* 检查响应状态 */
             if (priv->req_buf.resp.status == VIRTIO_BLK_S_OK)
@@ -958,7 +958,7 @@ static kernel_status_t virtq_poll_completion(virtio_blk_priv_t *priv)
     }
 
     /* 恢复 IRQ 状态 */
-    hal_irq_restore(saved_irq_state);
+    hal_local_irq_restore(saved_irq_state);
 
     return -110; /* ETIMEDOUT */
 }
@@ -1117,10 +1117,10 @@ static kernel_status_t virtio_blk_probe(void *dev_data)
 
     /* 步骤 7: 使能 VirtIO MMIO 中断（中断控制器配置 + 处理函数注册）
      * WRITE 操作在 QEMU TCG 中异步完成，需要中断唤醒 WFI 轮询 */
-    hal_intc_set_priority(s_blk_priv.irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
-    hal_intc_set_affinity(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
-    hal_intc_enable(s_blk_priv.irq);
-    (void)interrupt_register(s_blk_priv.irq, virtio_blk_irq, NULL);
+    hal_irq_set_priority(s_blk_priv.irq, (uint8_t)IRQ_PRIORITY_DEFAULT);
+    hal_irq_set_affinity(s_blk_priv.irq, 0x01U);   /* 路由到 CPU 0 */
+    hal_irq_enable(s_blk_priv.irq);
+    (void)irq_register_handler(s_blk_priv.irq, virtio_blk_irq, NULL);
 
     /* 步骤 8: 读取设备容量 */
     s_blk_priv.capacity = (uint64_t)mmio_read32(

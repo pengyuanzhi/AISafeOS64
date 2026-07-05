@@ -30,7 +30,7 @@
  * ======================================================================== */
 
 #include <kernel/gic.h>
-#include <kernel/hal_intc.h>
+#include <kernel/hal_irq.h>
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
@@ -726,46 +726,46 @@ kernel_status_t gic_set_trigger_mode(uint32_t irq, gic_trigger_mode_t mode)
 }
 
 /* ========================================================================
- * hal_intc 实现（GICv2 后端）
+ * hal_irq 实现（GICv2 后端）
  *
- * @details 以下函数将架构无关的 hal_intc 接口包装为对具体 GICv2
- *          驱动函数的调用。内核核心通过 hal_intc 接口访问中断控制器，
+ * @details 以下函数将架构无关的 hal_irq 接口包装为对具体 GICv2
+ *          驱动函数的调用。内核核心通过 hal_irq 接口访问中断控制器，
  *          不直接调用 gic_* 函数，从而实现内核核心与中断控制器硬件
  *          的解耦。
  * ======================================================================== */
 
-void hal_intc_init(void)
+void hal_irq_init(void)
 {
     (void)gic_init();
 }
 
-void hal_intc_init_secondary(void)
+void hal_irq_init_secondary(void)
 {
     (void)gic_init_secondary();
 }
 
-void hal_intc_enable(uint32_t irq)
+void hal_irq_enable(uint32_t irq)
 {
     (void)gic_enable_irq(irq);
 }
 
-void hal_intc_disable(uint32_t irq)
+void hal_irq_disable(uint32_t irq)
 {
     (void)gic_disable_irq(irq);
 }
 
-void hal_intc_set_priority(uint32_t irq, uint8_t prio)
+void hal_irq_set_priority(uint32_t irq, uint8_t prio)
 {
     (void)gic_set_priority(irq, prio);
 }
 
-void hal_intc_set_affinity(uint32_t irq, uint32_t cpu_mask)
+void hal_irq_set_affinity(uint32_t irq, uint32_t cpu_mask)
 {
     /* GICv2 ITARGETSR 为 8 位 CPU 掩码 */
     (void)gic_set_affinity(irq, (uint8_t)cpu_mask);
 }
 
-void hal_intc_set_trigger(uint32_t irq, irq_trigger_t trigger)
+void hal_irq_set_trigger(uint32_t irq, irq_trigger_t trigger)
 {
     /* 将架构无关的 irq_trigger_t 映射到 GIC 触发模式：
      * - 边沿类（上升/下降）→ GIC_TRIGGER_EDGE
@@ -782,41 +782,41 @@ void hal_intc_set_trigger(uint32_t irq, irq_trigger_t trigger)
     }
 }
 
-uint32_t hal_intc_acknowledge(void)
+uint32_t hal_irq_acknowledge(void)
 {
     return gic_get_irq_id();
 }
 
-void hal_intc_eoi(uint32_t irq)
+void hal_irq_eoi(uint32_t irq)
 {
     gic_end_of_interrupt(irq);
 }
 
-bool hal_intc_is_spurious(uint32_t irq)
+bool hal_irq_is_spurious(uint32_t irq)
 {
     /* GICv2: 中断号 >= 1020 为伪中断/特殊用途 */
     return (irq >= 1020U);
 }
 
-bool hal_intc_is_sgi(uint32_t irq)
+bool hal_irq_is_sgi(uint32_t irq)
 {
     /* SGI: 0-15 */
     return (irq < 16U);
 }
 
-bool hal_intc_is_ppi(uint32_t irq)
+bool hal_irq_is_ppi(uint32_t irq)
 {
     /* PPI: 16-31 */
     return ((irq >= 16U) && (irq < 32U));
 }
 
-bool hal_intc_is_spi(uint32_t irq)
+bool hal_irq_is_spi(uint32_t irq)
 {
     /* SPI: >= 32 */
     return (irq >= 32U);
 }
 
-void hal_intc_send_ipi(uint32_t cpu_mask, uint32_t ipi_type)
+void hal_irq_send_ipi(uint32_t cpu_mask, uint32_t ipi_type)
 {
     /* GICv2 通过 SGI 发送核间中断 */
     (void)gic_send_sgi(ipi_type, (uint8_t)cpu_mask);

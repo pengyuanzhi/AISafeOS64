@@ -394,9 +394,12 @@ static void idle_task_entry(void *arg)
             continue;
         }
 
-        /* P1-3：在 idle 上下文执行负载均衡与工作窃取。
+        /* 在 idle 上下文执行负载均衡与工作窃取。
          * 定时器中断仅置标志，实际迁移在此处完成（开中断、可抢占）。 */
         smp_idle_balance(cpu_id);
+
+        /* 异步刷新内核日志缓冲到控制台（非实时上下文，允许 UART 阻塞） */
+        klog_flush();
 
         hal_wfe();
     }
@@ -811,7 +814,7 @@ void schedule(void)
      * context_switch 返回意味着本线程（作为 next）被重新调度。
      * 此时中断仍关闭（切走时关掉的），恢复进入 schedule() 前的中断状态。
      * 注意：irq_state 是本线程上次进入 schedule() 时保存的 DAIF。 */
-    hal_irq_restore(irq_state);
+    hal_local_irq_restore(irq_state);
 }
 
 /* ========================================================================

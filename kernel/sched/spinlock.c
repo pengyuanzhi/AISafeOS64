@@ -202,13 +202,13 @@ uint32_t ticket_lock_acquire_irqsave(TicketLock_t *lock)
 {
     uint32_t irq_state;
 
-    irq_state = hal_irq_saved_state();
+    irq_state = hal_local_irq_saved_state();
     if (lock == NULL)
     {
         return irq_state;
     }
 
-    hal_irq_disable();
+    hal_local_irq_disable();
     ticket_lock_acquire(lock);
 
     return irq_state;
@@ -221,5 +221,5 @@ void ticket_lock_release_irqrestore(TicketLock_t *lock, uint32_t irq_state)
         ticket_lock_release(lock);
     }
 
-    hal_irq_restore(irq_state);
+    hal_local_irq_restore(irq_state);
 }

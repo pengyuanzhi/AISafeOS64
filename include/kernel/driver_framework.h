@@ -224,7 +224,7 @@ driver_result_t driver_dma_free(dma_buffer_t *buffer);
  *
  * @note 对应需求: DR-002
  */
-driver_result_t driver_interrupt_attach(uint32_t irq);
+driver_result_t driver_irq_attach(uint32_t irq);
 
 /**
  * @brief 解除中断绑定
@@ -233,6 +233,6 @@ driver_result_t driver_interrupt_attach(uint32_t irq);
  *
  * @return DRIVER_OK 成功
  */
-driver_result_t driver_interrupt_detach(uint32_t irq);
+driver_result_t driver_irq_detach(uint32_t irq);
 
 #endif /* KERNEL_DRIVER_FRAMEWORK_H */
