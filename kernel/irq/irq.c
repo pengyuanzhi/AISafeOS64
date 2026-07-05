@@ -1,11 +1,11 @@
 /**
  * @file    irq.c
- * @brief   中断管理子系统实现（对标 QNX ker_interrupt.c）
+ * @brief   中断管理子系统实现（对标商用 RTOS）
  * @author  AISafe64 Team
  * @date    2026-07-04
  * @version 3.0
  *
- * @details 本文件实现中断管理子系统，全面对标 QNX ker_interrupt.c：
+ * @details 本文件实现中断管理子系统，对标商用 RTOS 中断管理子系统：
  *
  *          - **共享中断**：同一 IRQ 可挂载多个 handler（irq_entry_t 链表），
  *            dispatch 时遍历调用全部 handler，支持 PCI MSI-X 等共享中断线场景。

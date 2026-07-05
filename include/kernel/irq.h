@@ -1,12 +1,11 @@
 /**
  * @file    irq.h
- * @brief   中断管理子系统接口（对标 QNX ker_interrupt.c）
+ * @brief   中断管理子系统接口（对标商用 RTOS）
  * @author  AISafe64 Team
  * @date    2026-07-04
  * @version 3.0
  *
- * @details 本文件定义了中断管理子系统的对外接口，全面对标 QNX
- *          ker_interrupt.c 的能力模型：
+ * @details 本文件定义了中断管理子系统的对外接口：
  *          - 支持同一 IRQ 多 handler 共享中断（handler 链表）
  *          - 每个 attach 拥有唯一 attach_id，支持精确 detach
  *          - mask/unmask 独立于 attach/detach 的临时屏蔽

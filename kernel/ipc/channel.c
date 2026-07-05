@@ -5,7 +5,7 @@
  * @date    2026-04-01
  * @version 2.0
  *
- * @details 本文件实现了 QNX 风格的通道-连接模型和 Pulse 消息机制：
+ * @details 本文件实现了 通道-连接模型的和 Pulse 消息机制：
  *          - ipc_channel_subsys_init:         通道子系统初始化
  *          - ipc_channel_create:              创建通道
  *          - ipc_channel_destroy:             销毁通道

@@ -758,7 +758,7 @@ static void dispatch_capability(syscall_frame_t *frame)
 /**
  * @brief 中断管理系统调用分发
  *
- * @details 对接新中断管理子系统（对标 QNX ker_interrupt.c）：
+ * @details 对接新中断管理子系统（对标商用 RTOS）：
  *          - SYS_INTERRUPT_ATTACH：绑定中断到 notification 对象，返回 attach_id
  *          - SYS_INTERRUPT_DETACH_BY_ID：按 attach_id 精确解绑
  *          - SYS_INTERRUPT_DETACH：按 irq 号解绑所有

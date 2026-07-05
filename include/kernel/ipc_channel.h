@@ -5,7 +5,7 @@
  * @date    2026-04-01
  * @version 2.0
  *
- * @details 本文件定义了 QNX 风格的通道-连接模型内核接口：
+ * @details 本文件定义了 通道-连接模型的内核接口：
  *          - 通道创建/销毁（ChannelCreate/ChannelDestroy）
  *          - 连接附加/分离（ConnectAttach/ConnectDetach）
  *          - Pulse 发送（MsgSendPulse）

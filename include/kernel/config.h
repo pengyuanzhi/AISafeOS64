@@ -252,7 +252,7 @@
  * @def CONFIG_IPC_MAX_CHANNELS
  * @brief 系统支持的最大 IPC 通道数量
  *
- * @details 通道是 QNX 风格消息传递的服务端入口点。
+ * @details 通道是 消息传递的服务端入口点。
  *          客户端通过连接（Connection）附加到通道。
  *
  * @note 有效范围：[1, 65535]

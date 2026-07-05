@@ -233,7 +233,7 @@ typedef enum
 /**
  * @brief IPC 通道（Channel）
  *
- * @details 通道是 QNX 风格消息传递的服务端入口点。
+ * @details 通道是 消息传递的服务端入口点。
  *          服务端线程创建通道后，客户端通过 ConnectAttach 连接到通道。
  *          通道包含同步消息队列和 Pulse 队列。
  *
