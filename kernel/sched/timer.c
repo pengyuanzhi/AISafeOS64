@@ -131,7 +131,7 @@ static void timer_queue_insert_ordered(struct list_head *queue,
     struct list_head *pos;
 
     /* 遍历队列找到第一个 expire_tick > 新定时器的位置 */
-    for (pos = queue->next; pos != queue; pos = pos->next)
+    list_for_each(pos, queue)
     {
         SoftwareTimer_t *cur = container_of(pos, SoftwareTimer_t, node);
         if (cur->expire_tick > expire_tick)
@@ -140,28 +140,16 @@ static void timer_queue_insert_ordered(struct list_head *queue,
         }
     }
 
-    /* 插入到 pos 之前 */
-    timer->node.next = pos;
-    timer->node.prev = pos->prev;
-    pos->prev->next = &timer->node;
-    pos->prev = &timer->node;
+    /* 插入到 pos 之前（pos 充当子链表头，list_add_tail 即在其前插入） */
+    list_add_tail(&timer->node, pos);
 }
 
 /**
  * @brief 从双向链表中安全移除节点
  *
  * @details 将节点从链表中摘除并自指（next/prev 指向自身），
- *          表示不在任何队列中。
- *
- * @param node 待移除的节点
+ *          表示不在任何队列中。直接复用 list.h 中的 list_del_init。
  */
-static void list_remove_self(struct list_head *node)
-{
-    node->prev->next = node->next;
-    node->next->prev = node->prev;
-    node->next = node;
-    node->prev = node;
-}
 
 /**
  * @brief 按 wakeup_tick 升序将睡眠线程插入队列
@@ -179,7 +167,7 @@ static void sleep_queue_insert_ordered(struct list_head *queue,
 {
     struct list_head *pos;
 
-    for (pos = queue->next; pos != queue; pos = pos->next)
+    list_for_each(pos, queue)
     {
         struct KThread *cur = container_of(pos, struct KThread, sleep_node);
         if (cur->wakeup_tick > wakeup_tick)
@@ -188,10 +176,7 @@ static void sleep_queue_insert_ordered(struct list_head *queue,
         }
     }
 
-    thread->sleep_node.next = pos;
-    thread->sleep_node.prev = pos->prev;
-    pos->prev->next = &thread->sleep_node;
-    pos->prev = &thread->sleep_node;
+    list_add_tail(&thread->sleep_node, pos);
 }
 
 /**
@@ -243,11 +228,8 @@ void timer_init(void)
     /* 初始化每 CPU 软件定时器队列和睡眠队列 */
     for (i = 0U; i < (uint32_t)CONFIG_MAX_CPUS; i++)
     {
-        s_timer_queues[i].next = &s_timer_queues[i];
-        s_timer_queues[i].prev = &s_timer_queues[i];
-
-        s_sleep_queues[i].next = &s_sleep_queues[i];
-        s_sleep_queues[i].prev = &s_sleep_queues[i];
+        INIT_LIST_HEAD(&s_timer_queues[i]);
+        INIT_LIST_HEAD(&s_sleep_queues[i]);
 
         ticket_lock_init(&s_timer_locks[i]);
         ticket_lock_init(&s_sleep_locks[i]);
@@ -376,11 +358,11 @@ void timer_interrupt_handler(void)
         /* 处理软件定时器（irqsave 锁保护 + 数量上限） */
         irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
         timer_count = 0U;
-        while ((timer_queue->next != timer_queue) &&
+        while ((list_empty(timer_queue) == 0) &&
                (timer_count < TIMER_IRQ_MAX_CALLBACKS))
         {
-            SoftwareTimer_t *timer = container_of(timer_queue->next,
-                                                   SoftwareTimer_t, node);
+            SoftwareTimer_t *timer = list_first_entry(timer_queue,
+                                                      SoftwareTimer_t, node);
 
             /* 队列按 expire_tick 升序，队首未到期则无需继续 */
             if (timer->expire_tick > current_ticks)
@@ -389,7 +371,7 @@ void timer_interrupt_handler(void)
             }
 
             /* 从队列中移除 */
-            list_remove_self(&timer->node);
+            list_del_init(&timer->node);
             timer->state = TIMER_STATE_CALLBACK;
 
             /* 执行回调（仍持有锁以保护队列一致性） */
@@ -418,11 +400,12 @@ void timer_interrupt_handler(void)
         /* 处理睡眠线程唤醒（irqsave 锁保护 + 数量上限） */
         irq_state = ticket_lock_acquire_irqsave(&s_sleep_locks[cpu_id]);
         wakeup_count = 0U;
-        while ((sleep_queue->next != sleep_queue) &&
+        while ((list_empty(sleep_queue) == 0) &&
                (wakeup_count < TIMER_IRQ_MAX_WAKEUPS))
         {
-            struct KThread *thread = container_of(sleep_queue->next,
-                                                   struct KThread, sleep_node);
+            struct KThread *thread = list_first_entry(sleep_queue,
+                                                      struct KThread,
+                                                      sleep_node);
 
             /* 睡眠队列按 wakeup_tick 升序，队首未到期则无需继续 */
             if (thread->wakeup_tick > current_ticks)
@@ -431,7 +414,7 @@ void timer_interrupt_handler(void)
             }
 
             /* 从睡眠队列移除 */
-            list_remove_self(&thread->sleep_node);
+            list_del_init(&thread->sleep_node);
 
             /* 唤醒线程（恢复就绪状态并入调度队列） */
             thread->state = KTHREAD_STATE_READY;
@@ -521,7 +504,7 @@ void timer_wakeup_thread(struct KThread *thread)
     irq_state = ticket_lock_acquire_irqsave(&s_sleep_locks[cpu_id]);
     if (thread->sleep_node.next != &thread->sleep_node)
     {
-        list_remove_self(&thread->sleep_node);
+        list_del_init(&thread->sleep_node);
     }
     ticket_lock_release_irqrestore(&s_sleep_locks[cpu_id], irq_state);
 
@@ -547,8 +530,7 @@ void timer_init_soft(SoftwareTimer_t *timer, TimerCallback_t callback, void *arg
     timer->callback = callback;
     timer->callback_arg = arg;
     timer->state = TIMER_STATE_IDLE;
-    timer->node.next = &timer->node;
-    timer->node.prev = &timer->node;
+    INIT_LIST_HEAD(&timer->node);
 }
 
 void timer_start_oneshot(SoftwareTimer_t *timer, uint32_t ms)
@@ -571,7 +553,7 @@ void timer_start_oneshot(SoftwareTimer_t *timer, uint32_t ms)
     irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
     if (timer->node.next != &timer->node)
     {
-        list_remove_self(&timer->node);
+        list_del_init(&timer->node);
     }
     timer_queue_insert_ordered(&s_timer_queues[cpu_id], timer,
                                 timer->expire_tick);
@@ -600,7 +582,7 @@ void timer_start_periodic(SoftwareTimer_t *timer, uint32_t ms)
     irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
     if (timer->node.next != &timer->node)
     {
-        list_remove_self(&timer->node);
+        list_del_init(&timer->node);
     }
     timer_queue_insert_ordered(&s_timer_queues[cpu_id], timer,
                                 timer->expire_tick);
@@ -625,7 +607,7 @@ void timer_stop(SoftwareTimer_t *timer)
     irq_state = ticket_lock_acquire_irqsave(&s_timer_locks[cpu_id]);
     if (timer->node.next != &timer->node)
     {
-        list_remove_self(&timer->node);
+        list_del_init(&timer->node);
     }
     ticket_lock_release_irqrestore(&s_timer_locks[cpu_id], irq_state);
 

@@ -278,7 +278,6 @@ static KThread_t *remote_pick_highest(uint32_t cpu_id)
 {
     PerCPUReadyQueue_t *cpu_q;
     uint32_t highest_prio;
-    struct list_head *first;
 
     if (cpu_id >= CONFIG_MAX_CPUS)
     {
@@ -293,13 +292,12 @@ static KThread_t *remote_pick_highest(uint32_t cpu_id)
         return NULL;
     }
 
-    first = cpu_q->queues[highest_prio].next;
-    if (first == &cpu_q->queues[highest_prio])
+    if (list_empty(&cpu_q->queues[highest_prio]) != 0)
     {
         return NULL;
     }
 
-    return container_of(first, KThread_t, rq_list);
+    return list_first_entry(&cpu_q->queues[highest_prio], KThread_t, rq_list);
 }
 
 /**
@@ -307,12 +305,9 @@ static KThread_t *remote_pick_highest(uint32_t cpu_id)
  */
 static void remote_remove_thread(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
 {
-    thread->rq_list.prev->next = thread->rq_list.next;
-    thread->rq_list.next->prev = thread->rq_list.prev;
-    thread->rq_list.next = &thread->rq_list;
-    thread->rq_list.prev = &thread->rq_list;
+    list_del_init(&thread->rq_list);
 
-    if (cpu_q->queues[thread->prio].next == &cpu_q->queues[thread->prio])
+    if (list_empty(&cpu_q->queues[thread->prio]) != 0)
     {
         bitmap256_clear(&cpu_q->bitmap, (uint32_t)thread->prio);
     }
@@ -329,12 +324,7 @@ static void remote_remove_thread(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
 static void remote_add_thread(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
 {
     bitmap256_set(&cpu_q->bitmap, (uint32_t)thread->prio);
-
-    thread->rq_list.next = &cpu_q->queues[thread->prio];
-    thread->rq_list.prev = cpu_q->queues[thread->prio].prev;
-    cpu_q->queues[thread->prio].prev->next = &thread->rq_list;
-    cpu_q->queues[thread->prio].prev = &thread->rq_list;
-
+    list_add_tail(&thread->rq_list, &cpu_q->queues[thread->prio]);
     cpu_q->nr_running++;
 }
 
@@ -793,13 +783,14 @@ kernel_status_t smp_work_steal(uint32_t current_cpu)
         return KERNEL_OK;
     }
 
-    if (src_q->queues[hp].prev == &src_q->queues[hp])
+    if (list_empty(&src_q->queues[hp]) != 0)
     {
         sched_unlock_dual(src_q, dst_q, irq_state);
         return KERNEL_OK;
     }
 
-    thread = container_of(src_q->queues[hp].prev, KThread_t, rq_list);
+    /* 取最高优先级链表尾部线程（缓存冷） */
+    thread = list_last_entry(&src_q->queues[hp], KThread_t, rq_list);
     tid = (uint32_t)thread->tid;
 
     if ((tid < CONFIG_MAX_THREADS) &&

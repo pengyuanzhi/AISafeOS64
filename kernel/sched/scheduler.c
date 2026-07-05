@@ -55,6 +55,53 @@ extern char __heap_end[];
 static vaddr_t stack_alloc(uint32_t size);
 
 /* ========================================================================
+ * 内部就绪队列操作（调用者必须已持有 cpu_q->lock）
+ *
+ * @details scheduler_enqueue/scheduler_dequeue 与 schedule() 共享同一套
+ *          入队/出队逻辑，避免重复实现导致的逻辑漂移。这些函数不获取
+ *          队列锁，锁由调用者负责。
+ * ======================================================================== */
+
+/**
+ * @brief 将线程从就绪队列移除（需已持锁）
+ *
+ * @details 摘除线程节点、清空优先级位图（若链表空）、递减运行计数。
+ *          节点被重新初始化为自指（list_del_init 语义）。
+ *
+ * @param cpu_q 当前 CPU 的就绪队列
+ * @param thread 待移除的线程
+ */
+static void __sched_dequeue_locked(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
+{
+    list_del_init(&thread->rq_list);
+
+    if (list_empty(&cpu_q->queues[thread->prio]) != 0)
+    {
+        bitmap256_clear(&cpu_q->bitmap, (uint32_t)thread->prio);
+    }
+
+    if (cpu_q->nr_running > 0U)
+    {
+        cpu_q->nr_running--;
+    }
+}
+
+/**
+ * @brief 将线程加入就绪队列尾部（需已持锁）
+ *
+ * @details 置位优先级位图、追加到对应优先级链表尾部、递增运行计数。
+ *
+ * @param cpu_q 当前 CPU 的就绪队列
+ * @param thread 待加入的线程
+ */
+static void __sched_enqueue_locked(PerCPUReadyQueue_t *cpu_q, KThread_t *thread)
+{
+    bitmap256_set(&cpu_q->bitmap, (uint32_t)thread->prio);
+    list_add_tail(&thread->rq_list, &cpu_q->queues[thread->prio]);
+    cpu_q->nr_running++;
+}
+
+/* ========================================================================
  * 线程栈 Slab 分配器实现
  * ======================================================================== */
 
@@ -395,8 +442,7 @@ kernel_status_t scheduler_init(void)
         /* 初始化每优先级就绪链表 */
         for (j = 0U; j < CONFIG_PRIORITY_LEVELS; j++)
         {
-            cpu_q->queues[j].next = &cpu_q->queues[j];
-            cpu_q->queues[j].prev = &cpu_q->queues[j];
+            INIT_LIST_HEAD(&cpu_q->queues[j]);
         }
 
         ticket_lock_init(&cpu_q->lock);
@@ -420,12 +466,9 @@ kernel_status_t scheduler_init(void)
         thread->policy = KTHREAD_POLICY_FIFO;
         thread->time_slice = 0U;
         thread->time_slice_reload = 0U;
-        thread->rq_list.next = &thread->rq_list;
-        thread->rq_list.prev = &thread->rq_list;
-        thread->edf_node.next = &thread->edf_node;
-        thread->edf_node.prev = &thread->edf_node;
-        thread->sleep_node.next = &thread->sleep_node;
-        thread->sleep_node.prev = &thread->sleep_node;
+        INIT_LIST_HEAD(&thread->rq_list);
+        INIT_LIST_HEAD(&thread->edf_node);
+        INIT_LIST_HEAD(&thread->sleep_node);
         thread->wakeup_tick = 0ULL;
         thread->name[0U] = '\0';
     }
@@ -459,10 +502,7 @@ kernel_status_t scheduler_init(void)
             PerCPUReadyQueue_t *cpu0_q = &g_scheduler.cpu_queues[0U];
 
             /* 无锁操作（此时只有 CPU0 在运行，初始化阶段） */
-            idle_thread->rq_list.prev->next = idle_thread->rq_list.next;
-            idle_thread->rq_list.next->prev = idle_thread->rq_list.prev;
-            idle_thread->rq_list.next = &idle_thread->rq_list;
-            idle_thread->rq_list.prev = &idle_thread->rq_list;
+            list_del_init(&idle_thread->rq_list);
             if (cpu0_q->nr_running > 0U)
             {
                 cpu0_q->nr_running--;
@@ -499,17 +539,7 @@ void scheduler_enqueue(KThread_t *thread)
     /* 关中断 + 获取队列锁，保护位图与链表操作 */
     irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
-    /* 设置位图对应位 */
-    bitmap256_set(&cpu_q->bitmap, (uint32_t)thread->prio);
-
-    /* 加入对应优先级链表尾部 */
-    thread->rq_list.next = &cpu_q->queues[thread->prio];
-    thread->rq_list.prev = cpu_q->queues[thread->prio].prev;
-    cpu_q->queues[thread->prio].prev->next = &thread->rq_list;
-    cpu_q->queues[thread->prio].prev = &thread->rq_list;
-
-    /* 递增运行计数 */
-    cpu_q->nr_running++;
+    __sched_enqueue_locked(cpu_q, thread);
 
     ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 }
@@ -535,23 +565,7 @@ void scheduler_dequeue(KThread_t *thread)
     /* 关中断 + 获取队列锁，保护链表与位图操作 */
     irq_state = ticket_lock_acquire_irqsave(&cpu_q->lock);
 
-    /* 从链表中移除 */
-    thread->rq_list.prev->next = thread->rq_list.next;
-    thread->rq_list.next->prev = thread->rq_list.prev;
-    thread->rq_list.next = &thread->rq_list;
-    thread->rq_list.prev = &thread->rq_list;
-
-    /* 如果该优先级链表为空，清除位图对应位 */
-    if (cpu_q->queues[thread->prio].next == &cpu_q->queues[thread->prio])
-    {
-        bitmap256_clear(&cpu_q->bitmap, (uint32_t)thread->prio);
-    }
-
-    /* 递减运行计数 */
-    if (cpu_q->nr_running > 0U)
-    {
-        cpu_q->nr_running--;
-    }
+    __sched_dequeue_locked(cpu_q, thread);
 
     ticket_lock_release_irqrestore(&cpu_q->lock, irq_state);
 }
@@ -565,7 +579,6 @@ KThread_t *scheduler_pick_next(void)
     uint32_t cpu_id;
     uint32_t highest_prio;
     PerCPUReadyQueue_t *cpu_q;
-    struct list_head *first;
     KThread_t *next;
     uint32_t irq_state;
 
@@ -591,8 +604,8 @@ KThread_t *scheduler_pick_next(void)
         if (highest_prio < CONFIG_PRIORITY_LEVELS)
         {
             /* 从对应优先级链表头部取出第一个线程 */
-            first = cpu_q->queues[highest_prio].next;
-            next = container_of(first, KThread_t, rq_list);
+            next = list_first_entry(&cpu_q->queues[highest_prio],
+                                    KThread_t, rq_list);
         }
     }
 
@@ -706,7 +719,8 @@ void schedule(void)
         uint32_t highest = bitmap256_find_highest(&cpu_q->bitmap);
         if (highest < CONFIG_PRIORITY_LEVELS)
         {
-            next = container_of(cpu_q->queues[highest].next, KThread_t, rq_list);
+            next = list_first_entry(&cpu_q->queues[highest],
+                                    KThread_t, rq_list);
         }
     }
     if (next == NULL)
@@ -722,21 +736,10 @@ void schedule(void)
         return;
     }
 
-    /* ---- 内联 dequeue next（已在锁内） ---- */
+    /* ---- dequeue next（已在锁内，复用统一实现） ---- */
     if (next->state == KTHREAD_STATE_READY)
     {
-        next->rq_list.prev->next = next->rq_list.next;
-        next->rq_list.next->prev = next->rq_list.prev;
-        next->rq_list.next = &next->rq_list;
-        next->rq_list.prev = &next->rq_list;
-        if (cpu_q->queues[next->prio].next == &cpu_q->queues[next->prio])
-        {
-            bitmap256_clear(&cpu_q->bitmap, (uint32_t)next->prio);
-        }
-        if (cpu_q->nr_running > 0U)
-        {
-            cpu_q->nr_running--;
-        }
+        __sched_dequeue_locked(cpu_q, next);
     }
 
     /* 如果下一个线程与当前线程相同，无需切换 */
@@ -746,16 +749,11 @@ void schedule(void)
         return;
     }
 
-    /* ---- 内联 enqueue prev（已在锁内） ---- */
+    /* ---- enqueue prev（已在锁内，复用统一实现） ---- */
     if ((prev != NULL) && (prev->state == KTHREAD_STATE_RUNNING))
     {
         prev->state = KTHREAD_STATE_READY;
-        bitmap256_set(&cpu_q->bitmap, (uint32_t)prev->prio);
-        prev->rq_list.next = &cpu_q->queues[prev->prio];
-        prev->rq_list.prev = cpu_q->queues[prev->prio].prev;
-        cpu_q->queues[prev->prio].prev->next = &prev->rq_list;
-        cpu_q->queues[prev->prio].prev = &prev->rq_list;
-        cpu_q->nr_running++;
+        __sched_enqueue_locked(cpu_q, prev);
     }
 
     /* ---- 设置 current_thread（内联 scheduler_load_current） ---- */

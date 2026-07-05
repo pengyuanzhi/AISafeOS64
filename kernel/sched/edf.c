@@ -272,8 +272,7 @@ void edf_enqueue(KThread_t *thread)
     irq_state = ticket_lock_acquire_irqsave(&queue->lock);
 
     /* 按绝对截止时间升序插入 */
-    pos = queue->tasks.next;
-    while (pos != &queue->tasks)
+    list_for_each(pos, &queue->tasks)
     {
         entry = container_of(pos, KThread_t, edf_node);
         entry_params = edf_get_thread_params(entry->tid);
@@ -285,11 +284,9 @@ void edf_enqueue(KThread_t *thread)
                 break;
             }
         }
-
-        pos = pos->next;
     }
 
-    /* 在 pos 之前插入（使用独立的 edf_node，不复用 rq_list） */
+    /* 在 pos 之前插入（pos 充当子链表头，使用独立的 edf_node，不复用 rq_list） */
     list_add_tail(&thread->edf_node, pos);
     queue->count++;
 
