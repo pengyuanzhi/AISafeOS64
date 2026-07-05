@@ -6,7 +6,7 @@
  * @version 2.0
  *
  * @details 本文件定义了微内核的统一内核对象类型系统：
- *          - 内核对象公共头部（KObjHeader_t）
+ *          - 内核对象公共头部（kobj_header_t）
  *          - 14 种内核对象类型标识（新增 FD/INODE/MEMORY_REGION）
  *          - 原子引用计数
  *          - 对象生命周期管理 API
@@ -73,7 +73,7 @@ typedef enum
  * @code
  * typedef struct
  * {
- *     KObjHeader_t header;   // 必须为首成员
+ *     kobj_header_t header;   // 必须为首成员
  *     // ... 特定类型字段
  * } MyObject_t;
  * @endcode
@@ -87,7 +87,7 @@ typedef struct
     struct list_head children;       /**< @brief 子对象链表 */
     struct list_head sibling;        /**< @brief 兄弟链表节点 */
     struct list_head global_node;    /**< @brief 全局对象链表节点 */
-} KObjHeader_t;
+} kobj_header_t;
 
 /* ========================================================================
  * 引用计数操作
@@ -103,7 +103,7 @@ typedef struct
  * @note 原子操作，多核安全
  * @note 对应需求: KR-018
  */
-int32_t kobj_ref_inc(KObjHeader_t *obj);
+int32_t kobj_ref_inc(kobj_header_t *obj);
 
 /**
  * @brief 减少对象引用计数
@@ -118,7 +118,7 @@ int32_t kobj_ref_inc(KObjHeader_t *obj);
  * @note 原子操作，多核安全
  * @note 对应需求: KR-018, KR-019
  */
-int32_t kobj_ref_dec(KObjHeader_t *obj);
+int32_t kobj_ref_dec(kobj_header_t *obj);
 
 /**
  * @brief 获取对象引用计数
@@ -127,7 +127,7 @@ int32_t kobj_ref_dec(KObjHeader_t *obj);
  *
  * @return 当前引用计数
  */
-int32_t kobj_ref_count(const KObjHeader_t *obj);
+int32_t kobj_ref_count(const kobj_header_t *obj);
 
 /* ========================================================================
  * 内核对象生命周期管理 API
@@ -154,7 +154,7 @@ kernel_status_t kobject_subsys_init(void);
  *
  * @note 对应需求: KR-017, KR-018
  */
-void kobj_header_init(KObjHeader_t *obj,
+void kobj_header_init(kobj_header_t *obj,
                        kobj_type_t type,
                        kobj_id_t id,
                        kobj_id_t parent_id);
@@ -169,7 +169,7 @@ void kobj_header_init(KObjHeader_t *obj,
  *
  * @note 对应需求: KR-019
  */
-void kobj_add_child(KObjHeader_t *parent, KObjHeader_t *child);
+void kobj_add_child(kobj_header_t *parent, kobj_header_t *child);
 
 /**
  * @brief 移除子对象
@@ -177,7 +177,7 @@ void kobj_add_child(KObjHeader_t *parent, KObjHeader_t *child);
  * @param parent 父对象
  * @param child  子对象
  */
-void kobj_remove_child(KObjHeader_t *parent, KObjHeader_t *child);
+void kobj_remove_child(kobj_header_t *parent, kobj_header_t *child);
 
 /**
  * @brief 销毁对象（内部调用）
@@ -189,7 +189,7 @@ void kobj_remove_child(KObjHeader_t *parent, KObjHeader_t *child);
  *
  * @note 对应需求: KR-019
  */
-void kobj_destroy(KObjHeader_t *obj);
+void kobj_destroy(kobj_header_t *obj);
 
 /**
  * @brief 根据类型和 ID 查找内核对象
@@ -199,7 +199,7 @@ void kobj_destroy(KObjHeader_t *obj);
  *
  * @return 对象头部指针，未找到返回 NULL
  */
-KObjHeader_t *kobj_find(kobj_type_t type, kobj_id_t id);
+kobj_header_t *kobj_find(kobj_type_t type, kobj_id_t id);
 
 /**
  * @brief 检查对象类型是否匹配
@@ -209,7 +209,7 @@ KObjHeader_t *kobj_find(kobj_type_t type, kobj_id_t id);
  *
  * @return true 类型匹配
  */
-bool kobj_check_type(const KObjHeader_t *obj, kobj_type_t type);
+bool kobj_check_type(const kobj_header_t *obj, kobj_type_t type);
 
 /* ========================================================================
  * 泄漏检测（KR-022）

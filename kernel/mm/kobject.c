@@ -47,10 +47,10 @@
  * @brief 对象池中单个对象的大小（字节）
  *
  * @details 由于没有 thread_t 等具体结构体定义，
- *          统一使用 sizeof(KObjHeader_t) + 64 字节预留空间。
+ *          统一使用 sizeof(kobj_header_t) + 64 字节预留空间。
  *          实际对象头部放在起始位置，剩余空间供具体类型使用。
  */
-#define KOBJ_POOL_OBJ_SIZE  (sizeof(KObjHeader_t) + 64U)
+#define KOBJ_POOL_OBJ_SIZE  (sizeof(kobj_header_t) + 64U)
 
 /**
  * @def KOBJ_POOL_CAPACITY
@@ -61,9 +61,9 @@
  */
 #define KOBJ_POOL_CAPACITY  32U
 
-/* 静态断言：对象大小必须能容纳 KObjHeader_t */
-static_assert(KOBJ_POOL_OBJ_SIZE >= sizeof(KObjHeader_t),
-              "KOBJ_POOL_OBJ_SIZE must be at least sizeof(KObjHeader_t)");
+/* 静态断言：对象大小必须能容纳 kobj_header_t */
+static_assert(KOBJ_POOL_OBJ_SIZE >= sizeof(kobj_header_t),
+              "KOBJ_POOL_OBJ_SIZE must be at least sizeof(kobj_header_t)");
 
 /* 静态断言：容量必须大于 0 */
 static_assert(KOBJ_POOL_CAPACITY > 0U,
@@ -216,7 +216,7 @@ kernel_status_t kobject_subsys_init(void)
  *
  * @note 对应需求: KR-017, KR-018
  */
-void kobj_header_init(KObjHeader_t *obj,
+void kobj_header_init(kobj_header_t *obj,
                        kobj_type_t type,
                        kobj_id_t id,
                        kobj_id_t parent_id)
@@ -227,7 +227,7 @@ void kobj_header_init(KObjHeader_t *obj,
     }
 
     /* 清零整个对象区域 */
-    (void)memset(obj, 0, sizeof(KObjHeader_t));
+    (void)memset(obj, 0, sizeof(kobj_header_t));
 
     /* 设置基本属性 */
     obj->type       = type;
@@ -257,7 +257,7 @@ void kobj_header_init(KObjHeader_t *obj,
  * @note 原子操作，多核安全
  * @note 对应需求: KR-018
  */
-int32_t kobj_ref_inc(KObjHeader_t *obj)
+int32_t kobj_ref_inc(kobj_header_t *obj)
 {
     int32_t new_count;
 
@@ -290,7 +290,7 @@ int32_t kobj_ref_inc(KObjHeader_t *obj)
  * @note 原子操作，多核安全
  * @note 对应需求: KR-018, KR-019
  */
-int32_t kobj_ref_dec(KObjHeader_t *obj)
+int32_t kobj_ref_dec(kobj_header_t *obj)
 {
     int32_t new_count;
 
@@ -320,7 +320,7 @@ int32_t kobj_ref_dec(KObjHeader_t *obj)
  *
  * @return 当前引用计数，obj 为 NULL 时返回 0
  */
-int32_t kobj_ref_count(const KObjHeader_t *obj)
+int32_t kobj_ref_count(const kobj_header_t *obj)
 {
     int32_t count;
 
@@ -347,7 +347,7 @@ int32_t kobj_ref_count(const KObjHeader_t *obj)
  *
  * @note 对应需求: KR-019
  */
-void kobj_add_child(KObjHeader_t *parent, KObjHeader_t *child)
+void kobj_add_child(kobj_header_t *parent, kobj_header_t *child)
 {
     if ((parent == NULL) || (child == NULL))
     {
@@ -374,7 +374,7 @@ void kobj_add_child(KObjHeader_t *parent, KObjHeader_t *child)
  * @param parent 父对象（不得为 NULL）
  * @param child  子对象（不得为 NULL）
  */
-void kobj_remove_child(KObjHeader_t *parent, KObjHeader_t *child)
+void kobj_remove_child(kobj_header_t *parent, kobj_header_t *child)
 {
     if ((parent == NULL) || (child == NULL))
     {
@@ -413,7 +413,7 @@ void kobj_remove_child(KObjHeader_t *parent, KObjHeader_t *child)
  *   不再调用 kobj_ref_dec。对每个子对象直接做引用计数原子递减，
  *   归零则压栈继续销毁其孙对象。
  */
-void kobj_destroy(KObjHeader_t *obj)
+void kobj_destroy(kobj_header_t *obj)
 {
     /*
      * 显式工作栈（迭代式级联销毁，避免递归）。
@@ -422,9 +422,9 @@ void kobj_destroy(KObjHeader_t *obj)
      */
     #define KOBJ_DESTROY_STACK_SIZE  (KOBJ_POOL_CAPACITY * (uint32_t)KOBJ_TYPE_COUNT + 1U)
 
-    KObjHeader_t *destroy_stack[KOBJ_DESTROY_STACK_SIZE];
+    kobj_header_t *destroy_stack[KOBJ_DESTROY_STACK_SIZE];
     uint32_t stack_top;
-    KObjHeader_t *current_obj;
+    kobj_header_t *current_obj;
     kobj_type_t obj_type;
 
     if (obj == NULL)
@@ -469,11 +469,11 @@ void kobj_destroy(KObjHeader_t *obj)
         while (!list_empty(&current_obj->children))
         {
             struct list_head *pos;
-            KObjHeader_t *child;
+            kobj_header_t *child;
             int32_t child_new_count;
 
             pos = current_obj->children.next;
-            child = list_entry(pos, KObjHeader_t, sibling);
+            child = list_entry(pos, kobj_header_t, sibling);
 
             /* 从兄弟链表摘除并重置父 ID */
             list_del_init(&child->sibling);
@@ -522,11 +522,11 @@ void kobj_destroy(KObjHeader_t *obj)
  *
  * @return 匹配的对象头部指针，未找到返回 NULL
  */
-KObjHeader_t *kobj_find(kobj_type_t type, kobj_id_t id)
+kobj_header_t *kobj_find(kobj_type_t type, kobj_id_t id)
 {
     struct list_head *pos;
-    KObjHeader_t *obj;
-    KObjHeader_t *result;
+    kobj_header_t *obj;
+    kobj_header_t *result;
 
     result = NULL;
 
@@ -534,7 +534,7 @@ KObjHeader_t *kobj_find(kobj_type_t type, kobj_id_t id)
 
     list_for_each(pos, &s_global_object_list)
     {
-        obj = list_entry(pos, KObjHeader_t, global_node);
+        obj = list_entry(pos, kobj_header_t, global_node);
 
         if ((obj->type == type) && (obj->id == id))
         {
@@ -556,7 +556,7 @@ KObjHeader_t *kobj_find(kobj_type_t type, kobj_id_t id)
  *
  * @return true 类型匹配，false 不匹配或 obj 为 NULL
  */
-bool kobj_check_type(const KObjHeader_t *obj, kobj_type_t type)
+bool kobj_check_type(const kobj_header_t *obj, kobj_type_t type)
 {
     if (obj == NULL)
     {
@@ -580,7 +580,7 @@ bool kobj_check_type(const KObjHeader_t *obj, kobj_type_t type)
 void kobj_enum_active(kobj_type_t type, uint32_t *count)
 {
     struct list_head *pos;
-    KObjHeader_t *obj;
+    kobj_header_t *obj;
 
     if (count == NULL)
     {
@@ -593,7 +593,7 @@ void kobj_enum_active(kobj_type_t type, uint32_t *count)
 
     list_for_each(pos, &s_global_object_list)
     {
-        obj = list_entry(pos, KObjHeader_t, global_node);
+        obj = list_entry(pos, kobj_header_t, global_node);
 
         if ((type == KOBJ_TYPE_COUNT) || (obj->type == type))
         {
@@ -620,7 +620,7 @@ void kobj_enum_active(kobj_type_t type, uint32_t *count)
 void kobj_detect_orphans(uint32_t *count)
 {
     struct list_head *pos;
-    KObjHeader_t *obj;
+    kobj_header_t *obj;
     int32_t ref;
 
     if (count == NULL)
@@ -634,7 +634,7 @@ void kobj_detect_orphans(uint32_t *count)
 
     list_for_each(pos, &s_global_object_list)
     {
-        obj = list_entry(pos, KObjHeader_t, global_node);
+        obj = list_entry(pos, kobj_header_t, global_node);
 
         /* 读取原子引用计数 */
         ref = __atomic_load_n(&obj->ref_count, __ATOMIC_ACQUIRE);

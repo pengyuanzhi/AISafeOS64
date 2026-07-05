@@ -47,7 +47,7 @@
  */
 typedef struct
 {
-    KObjHeader_t header;          /**< @brief 内核对象头部 */
+    kobj_header_t header;          /**< @brief 内核对象头部 */
     uint64_t     size;            /**< @brief 共享内存大小（字节） */
     uint64_t     phys_addr;       /**< @brief 物理基地址 */
     uint32_t     ref_count;       /**< @brief 映射引用计数 */

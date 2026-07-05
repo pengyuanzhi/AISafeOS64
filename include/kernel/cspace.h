@@ -56,7 +56,7 @@
  */
 typedef struct
 {
-    KObjHeader_t    header;         /**< @brief 内核对象公共头部 */
+    kobj_header_t    header;         /**< @brief 内核对象公共头部 */
     cap_t          *cap_table;      /**< @brief 能力表（能力描述符数组） */
     uint32_t        capacity;       /**< @brief 能力表容量 */
     uint32_t        used_count;     /**< @brief 已使用能力槽数量 */

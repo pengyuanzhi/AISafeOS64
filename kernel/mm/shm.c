@@ -248,7 +248,7 @@ kernel_status_t shm_create(uint64_t size, kobj_id_t *id)
     }
 
     /* 注册到内核对象系统 */
-    ret = kobject_register((KObjHeader_t *)shm, id);
+    ret = kobject_register((kobj_header_t *)shm, id);
     if (ret != KERNEL_OK)
     {
         /* 释放物理内存 */
@@ -312,7 +312,7 @@ kernel_status_t shm_destroy(kobj_id_t id)
  */
 shm_t *shm_get(kobj_id_t id)
 {
-    KObjHeader_t *header;
+    kobj_header_t *header;
 
     header = kobject_get(id);
     if (header == NULL)

@@ -60,17 +60,11 @@ static uint32_t s_cspace_free_stack[CONFIG_MAX_CSPACES];
 static uint32_t s_cspace_free_count;
 
 /**
- * @brief 能力表静态存储
- *
- * @details 每个 CSpace 分配一个 cap_t 数组，
- *          用于存储该 CSpace 的所有能力描述符。
- *          cap_t 包含 list_head 成员（children/sibling），
- *          可直接用于链表操作。
- */
-static cap_t s_cap_table_pool[CONFIG_MAX_CSPACES][CSPACE_MAX_CAPACITY];
-
-/**
  * @brief 能力表 Slab 缓存集合
+ *
+ * @details 能力表（cap_t 数组）按容量分级（每 64 槽一档），
+ *          由 slab 分配器按需分配，避免大块静态预分配。
+ *          该结构取代了早期未使用的 s_cap_table_pool 静态二维数组。
  */
 static struct
 {

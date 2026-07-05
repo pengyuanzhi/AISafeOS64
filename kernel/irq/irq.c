@@ -260,8 +260,6 @@ kernel_status_t irq_subsys_init(void)
 {
     uint32_t i;
 
-    
-
     for (i = 0U; i < IRQ_MAX_HANDLERS; i++)
     {
         ticket_lock_init(&s_irq_descs[i].lock);

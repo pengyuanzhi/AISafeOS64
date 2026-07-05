@@ -2594,6 +2594,29 @@ void kernel_main(void)
         klog_warn("[k] WARN: cap subsys fail\n");
     }
 
+    /* ---- 初始化 IPC 池化子系统（notification 池 + channel 池）----
+     * 注意：必须在 cspace_subsys_init() 之后调用，因为 channel/notification
+     * 对象注册依赖已就绪的内核对象表（kobject 全局表由 cspace 子系统初始化时连带建立）。
+     * 这里仅完成池预分配，不依赖调度器。 */
+    {
+        extern kernel_status_t ipc_notification_subsys_init(void);
+        extern kernel_status_t ipc_channel_subsys_init(void);
+
+        klog_info("[k] IPC notification pool init\n");
+        ret = ipc_notification_subsys_init();
+        if (ret != KERNEL_OK)
+        {
+            klog_warn("[k] WARN: IPC notification subsys fail\n");
+        }
+
+        klog_info("[k] IPC channel pool init\n");
+        ret = ipc_channel_subsys_init();
+        if (ret != KERNEL_OK)
+        {
+            klog_warn("[k] WARN: IPC channel subsys fail\n");
+        }
+    }
+
     /* ---- 初始化虚拟地址空间子系统（VMA 管理）---- */
     {
         extern kernel_status_t vmspace_subsys_init(void);
