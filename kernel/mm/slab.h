@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <kernel/types.h>
 #include <kernel/spinlock.h>
 
 /* ========================================================================
@@ -32,6 +33,19 @@
  *   头文件原将 lock 字段声明为 void*（8 字节），而 slab.c 把它当作
  *   TicketLock_t（12 字节）使用，导致 ticket_lock_acquire/release
  *   越界写入相邻字段，造成内存踩踏。现已统一为 TicketLock_t 类型。
+ *
+ * 内存管理层次（自底向上）：
+ *   phys_mem (buddy page allocator)
+ *       ↓ phys_mem_alloc_pages 取页
+ *   slab (对象缓存，本文件，从 buddy 取页存放对象)
+ *       ↓ slab_alloc 取对象
+ *   kmalloc (通用分配，独立空闲链表堆，用于无法预知大小的杂项分配)
+ *
+ * 层级修正说明：
+ *   原 slab_create / slab_alloc 调用 kmalloc 获取页，导致层级倒置
+ *   （slab 依赖 kmalloc，而 kmalloc 与 phys_mem 无关）。现改为直接从
+ *   phys_mem 取页，避免循环依赖，恢复标准三层结构。
+ *   kmalloc 仍保留独立的 __heap_start 堆，服务杂项小对象分配。
  */
 
 #ifndef SLAB_OBJECT_SIZE
@@ -60,8 +74,10 @@ typedef struct slab_cache slab_cache_t;
  */
 struct slab_cache
 {
-    void        *pool;        /**< @brief 内存池指针 */
-    size_t      pool_size;    /**< @brief 内存池大小 */
+    void        *pool;        /**< @brief 内存池指针（phys_mem 页的线性映射虚拟地址） */
+    size_t      pool_size;    /**< @brief 内存池大小（字节，请求值） */
+    paddr_t     pool_paddr;   /**< @brief 内存池物理地址（释放时回传给 phys_mem） */
+    uint32_t    pool_order;   /**< @brief 内存池 buddy 阶数（释放时回传给 phys_mem） */
     void        *slabs;       /**< @brief Slab 链表 */
     size_t      num_slabs;    /**< @brief Slab 节点数量 */
     size_t      alloc_count;  /**< @brief 已分配对象数量 */

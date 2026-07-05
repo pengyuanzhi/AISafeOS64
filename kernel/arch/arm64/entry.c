@@ -2547,10 +2547,15 @@ void kernel_main(void)
     /* ---- 初始化物理内存分配器（buddy system，用于用户态页分配）---- */
     {
         extern char __kernel_end[];
-        /* 管理内核镜像之后的 16MB 物理内存（够用户态驱动和进程用）。
-         * __kernel_end 是高地址 VMA 符号，需减去 KERNEL_VA_OFFSET 得到物理地址。 */
+        /* 管理内核镜像之后的 32MB 物理内存。
+         * 该区域由 phys_mem（buddy）统一管理，既服务用户态页分配，
+         * 也作为 slab（对象缓存）的底层页源；kmalloc 仍使用独立的
+         * __heap_start 堆服务杂项小对象分配。
+         *   层级：phys_mem(buddy) → slab → kmalloc
+         * __kernel_end 是高地址 VMA 符号，需减去 KERNEL_VA_OFFSET 得到物理地址。
+         * 32MB = 8192 页，与 phys_mem.c 的 MAX_PHYS_PAGES 上限一致。 */
         paddr_t pmem_base = (paddr_t)(((uintptr_t)__kernel_end - KERNEL_VA_OFFSET + 0xFFFU) & ~0xFFFU);
-        uint64_t pmem_size = 16U * 1024U * 1024U;  /* 16MB */
+        uint64_t pmem_size = 32U * 1024U * 1024U;  /* 32MB */
         klog_info("[k] phys_mem init\n");
         ret = phys_mem_init(pmem_base, pmem_size);
         klog_info("[k] phys_mem init ret=");

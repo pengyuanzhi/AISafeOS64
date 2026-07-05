@@ -18,7 +18,9 @@
  */
 
 #include <kernel/mm/slab.h>
-#include <kernel/mm/kmalloc.h>
+#include <kernel/phys_mem.h>
+#include <kernel/virt_phys.h>
+#include <kernel/config.h>
 #include <kernel/mutex.h>
 #include <kernel/spinlock.h>
 #include <kernel/errno.h>
@@ -39,10 +41,16 @@
 
 /**
  * @brief Slab 节点
+ *
+ * @note node_paddr / node_order 记录该节点页的物理地址与 buddy 阶数，
+ *       供 slab_destroy 通过 phys_mem_free_pages 归还给物理内存分配器。
+ *       层级：本节点页由 phys_mem（buddy）分配，不再经由 kmalloc。
  */
 typedef struct slab_node
 {
     struct slab_node *next;  /**< @brief 下一个 Slab 节点 */
+    paddr_t node_paddr;      /**< @brief 本节点页物理地址（释放用） */
+    uint32_t node_order;     /**< @brief 本节点页 buddy 阶数（释放用） */
     uint8_t used[SLAB_MAX_OBJ];  /**< @brief 对象使用标记 */
     uint8_t objects[SLAB_MAX_OBJ][SLAB_OBJECT_SIZE];  /**< @brief 对象数据 */
 } slab_node_t;
@@ -66,11 +74,76 @@ static uint32_t s_cache_count = 0U;
  * ======================================================================== */
 
 /**
+ * @brief 计算容纳 size 字节所需的最小 buddy 阶数
+ *
+ * @details 阶数 order 满足 CONFIG_PAGE_SIZE << order >= size。
+ *          size 为 0 时返回 0；超出 MAX_ORDER 范围返回 MAX_ORDER+1
+ *          （调用方据此判断分配不可行）。
+ *
+ * @param size 需要的字节数
+ *
+ * @return buddy 阶数
+ */
+static uint32_t slab_size_to_order(size_t size)
+{
+    uint32_t order = 0U;
+    size_t capacity = (size_t)CONFIG_PAGE_SIZE;
+
+    while (capacity < size)
+    {
+        capacity <<= 1U;
+        order++;
+    }
+
+    return order;
+}
+
+/**
+ * @brief 从物理内存分配器取页并返回线性映射虚拟地址
+ *
+ * @details 层级辅助：slab 直接向 phys_mem（buddy）申请页，不经过 kmalloc，
+ *          避免层级倒置与循环依赖。
+ *
+ * @param size   需要的字节数
+ * @param order  输出：实际分配的 buddy 阶数
+ * @param paddr  输出：实际分配的物理地址（释放时回传）
+ *
+ * @return 可访问的内核虚拟地址指针，失败返回 NULL
+ */
+static void *slab_alloc_phys(size_t size, uint32_t *order, paddr_t *paddr)
+{
+    paddr_t pa;
+    uint32_t ord;
+
+    ord = slab_size_to_order(size);
+    if (ord > MAX_ORDER)
+    {
+        return NULL;
+    }
+
+    pa = phys_mem_alloc_pages(ord);
+    if (pa == (paddr_t)0U)
+    {
+        return NULL;
+    }
+
+    *order = ord;
+    *paddr = pa;
+
+    return phys_to_virt(pa);
+}
+
+/**
  * @brief 创建 Slab 分配器
+ *
+ * @details 内存池直接从物理内存分配器（buddy）按页获取，不再经由 kmalloc，
+ *          恢复 phys_mem → slab → kmalloc 的标准三层结构。
  */
 int32_t slab_create(slab_cache_t *cache, size_t pool_size)
 {
-    int32_t ret;
+    void *pool;
+    uint32_t order;
+    paddr_t paddr;
 
     if (cache == NULL || pool_size == 0)
     {
@@ -80,15 +153,18 @@ int32_t slab_create(slab_cache_t *cache, size_t pool_size)
     /* 初始化 TicketLock */
     ticket_lock_init(&cache->lock);
 
-    /* 分配内存池 */
-    cache->pool = kmalloc(pool_size);
-    if (cache->pool == NULL)
+    /* 从物理内存分配器直接分配页（不经过 kmalloc，避免层级倒置） */
+    pool = slab_alloc_phys(pool_size, &order, &paddr);
+    if (pool == NULL)
     {
         return -(int32_t)ENOMEM;
     }
 
-    (void)memset(cache->pool, 0, pool_size);
+    (void)memset(pool, 0, pool_size);
+    cache->pool = pool;
     cache->pool_size = pool_size;
+    cache->pool_paddr = paddr;
+    cache->pool_order = order;
     cache->slabs = NULL;
     cache->num_slabs = 0;
     cache->alloc_count = 0;
@@ -98,28 +174,32 @@ int32_t slab_create(slab_cache_t *cache, size_t pool_size)
 
 /**
  * @brief 销毁 Slab 分配器
+ *
+ * @details 将 slab_create 取得的内存池页和 slab_alloc 取得的节点页
+ *          归还给物理内存分配器（buddy），与分配路径对称。
  */
 int32_t slab_destroy(slab_cache_t *cache)
 {
+    slab_node_t *current;
+
     if (cache == NULL)
     {
         return -(int32_t)EINVAL;
     }
 
-    /* 销毁所有 Slab 节点 */
-    slab_node_t *current = cache->slabs;
+    /* 销毁所有 Slab 节点（每节点页归还 phys_mem） */
+    current = (slab_node_t *)cache->slabs;
     while (current != NULL)
     {
         slab_node_t *next = current->next;
-        kfree(current);
+        phys_mem_free_pages(current->node_paddr, current->node_order);
         current = next;
     }
 
-    /* 释放内存池 */
-    if (cache->pool != NULL)
+    /* 释放内存池（归还 phys_mem） */
+    if ((cache->pool != NULL) && (cache->pool_paddr != (paddr_t)0U))
     {
-        kfree(cache->pool);
-        cache->pool = NULL;
+        phys_mem_free_pages(cache->pool_paddr, cache->pool_order);
     }
 
     (void)memset(cache, 0, sizeof(slab_cache_t));
@@ -146,7 +226,7 @@ void* slab_alloc(slab_cache_t *cache)
      * 使用 irqsave 版本：slab 分配可能在中断/系统调用路径被调用。 */
     irq_state = ticket_lock_acquire_irqsave(&cache->lock);
 
-    current = cache->slabs;
+    current = (slab_node_t *)cache->slabs;
     while (current != NULL)
     {
         for (uint32_t i = 0U; i < SLAB_MAX_OBJ; i++)
@@ -163,25 +243,33 @@ void* slab_alloc(slab_cache_t *cache)
     }
 
     /* 所有节点已满，需要分配新节点。
-     * 关键：禁止在持 cache->lock 时调用 kmalloc（kmalloc 内部另持全局锁，
-     * 持锁分配会违反"持锁禁止 kmalloc"且可能死锁）。
-     * 因此先释放 cache->lock，再 kmalloc。 */
+     * 关键：禁止在持 cache->lock 时分配（phys_mem 内部另持 buddy 锁，
+     * 持锁分配可能死锁）。因此先释放 cache->lock，再向 phys_mem 取页。
+     * 层级：slab 节点页直接来自 phys_mem（buddy），不经由 kmalloc。 */
     ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
-    node = (slab_node_t *)kmalloc(sizeof(slab_node_t));
-    if (node == NULL)
     {
-        return NULL;
+        paddr_t node_pa;
+        uint32_t node_order;
+        void *node_va = slab_alloc_phys(sizeof(slab_node_t), &node_order, &node_pa);
+        if (node_va == NULL)
+        {
+            return NULL;
+        }
+        node = (slab_node_t *)node_va;
+        node->node_paddr = node_pa;
+        node->node_order = node_order;
     }
 
-    (void)memset(node, 0, sizeof(slab_node_t));
+    (void)memset(node->used, 0, sizeof(node->used));
+    node->next = NULL;
 
     /* 重新获取锁后挂入链表。
      * 因释放过锁，期间其它 CPU 可能已分配新节点并腾出空闲槽，
      * 故挂入后再次扫描一遍：优先复用已有空闲槽，避免无谓扩张。 */
     irq_state = ticket_lock_acquire_irqsave(&cache->lock);
 
-    current = cache->slabs;
+    current = (slab_node_t *)cache->slabs;
     while (current != NULL)
     {
         for (uint32_t i = 0U; i < SLAB_MAX_OBJ; i++)
@@ -192,8 +280,8 @@ void* slab_alloc(slab_cache_t *cache)
                 cache->alloc_count++;
                 ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
-                /* 不再需要预分配的节点，释放 */
-                kfree(node);
+                /* 不再需要预分配的节点，归还 phys_mem */
+                phys_mem_free_pages(node->node_paddr, node->node_order);
                 return current->objects[i];
             }
         }
@@ -207,7 +295,7 @@ void* slab_alloc(slab_cache_t *cache)
     }
     else
     {
-        last = cache->slabs;
+        last = (slab_node_t *)cache->slabs;
         while (last->next != NULL)
         {
             last = last->next;
@@ -241,7 +329,7 @@ int32_t slab_free(slab_cache_t *cache, void *ptr)
     irq_state = ticket_lock_acquire_irqsave(&cache->lock);
 
     /* 查找对象并释放 */
-    current = cache->slabs;
+    current = (slab_node_t *)cache->slabs;
     while (current != NULL)
     {
         for (uint32_t i = 0U; i < SLAB_MAX_OBJ; i++)
