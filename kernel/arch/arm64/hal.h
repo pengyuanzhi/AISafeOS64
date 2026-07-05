@@ -508,4 +508,34 @@ static inline void hal_isb(void)
     __asm__ volatile("isb");
 }
 
+/* ========== 上下文切换辅助 ========== */
+
+/**
+ * @brief 保存当前线程的异常返回状态到上下文数组
+ * @param ctx 上下文数组（uint64_t[KTHREAD_CONTEXT_REGS]）
+ *
+ * @details 将当前 ELR_EL1/SPSR_EL1 写入 ctx[13]/ctx[14]，
+ *          供调度器在切换线程时保存异常返回现场。
+ *          调度器无需感知具体系统寄存器。
+ */
+void hal_save_context(uint64_t *ctx);
+
+/**
+ * @brief 恢复指定线程的异常返回状态
+ * @param ctx 上下文数组
+ *
+ * @details 从 ctx[13]/ctx[14] 恢复 ELR_EL1/SPSR_EL1，
+ *          供调度器在切入新线程时恢复异常返回现场。
+ */
+void hal_restore_context(uint64_t *ctx);
+
+/**
+ * @brief 切换到用户地址空间
+ * @param user_pgd 用户地址空间根表物理地址（0 = 切回内核空间）
+ *
+ * @details 调度器通过此接口完成用户/内核地址空间隔离，
+ *          无需感知底层页表寄存器与 TLB 维护细节。
+ */
+void hal_switch_address_space(uint64_t user_pgd);
+
 #endif /* HAL_H */

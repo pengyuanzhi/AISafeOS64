@@ -31,7 +31,6 @@
 #include <kernel/config.h>
 #include <kernel/klog.h>
 #include <kernel/smp.h>
-#include <kernel/mmu.h>
 #include <kernel/mm/slab.h>
 #include <stdint.h>
 #include <string.h>
@@ -42,10 +41,6 @@ extern void context_switch(uint64_t *prev_ctx, uint64_t *next_ctx);
 extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
                                       uint64_t arg, uint64_t stack_top);
 extern void cpu_switch_to_first_task(uint64_t *ctx);
-
-/* 汇编版 mmu_switch_to_user（通过 TTBR1 高地址执行 TTBR0 切换，
- * 避免切换后低地址内核代码取指失败） */
-extern void mmu_switch_to_user_asm(uint64_t user_pgd, uint64_t *ctx);
 
 /* 前向声明: 链接脚本定义的堆起止符号 */
 extern char __heap_start[];
@@ -828,8 +823,8 @@ void schedule(void)
     next->state = KTHREAD_STATE_RUNNING;
 
     /* 临界区到此为止：锁仅保护 pick_next + dequeue + enqueue +
-     * current_thread 设置。后续 ELR/SPSR/MMU/guard/context_switch
-     * 不操作就绪队列，移到锁外执行以缩短临界区。
+     * current_thread 设置。后续 HAL 上下文保存/地址空间切换/guard/
+     * context_switch 不操作就绪队列，移到锁外执行以缩短临界区。
      *
      * 注意：这里用 ticket_lock_release（而非 release_irqrestore）保持中断关闭。
      * 从释锁到 context_switch 之间若开启中断，定时器 IRQ 可能重入
@@ -838,27 +833,23 @@ void schedule(void)
      * 后再恢复（见函数末尾）。 */
     ticket_lock_release(&cpu_q->lock);
 
-    /* 保存当前 ELR/SPSR 到 prev context (context[13]/[14]) */
+    /* 保存当前异常返回现场到 prev 上下文 */
     if (prev != NULL)
     {
-        prev->context[13U] = hal_read_elr();
-        prev->context[14U] = hal_read_spsr();
+        hal_save_context(prev->context);
     }
 
-    /* 用户态地址空间隔离：仅用户线程需要切换 TTBR0。
-     * 内核线程（idle 等）TTBR0 保持空，无需切换。
-     * TTBR1（内核高地址）永远不变。 */
+    /* 用户态地址空间隔离：仅用户线程需要切换地址空间。
+     * 内核线程（idle 等）保持内核地址空间，无需切换。 */
     if (next->is_user != 0U)
     {
-        /* 用户线程：TTBR0 设为用户 PGD */
-        mmu_switch_to_user(next->user_pgd);
+        /* 用户线程：切换到其用户地址空间 */
+        hal_switch_address_space(next->user_pgd);
     }
-    /* 内核线程：不切换 TTBR0（保持空），避免不必要的 TLB 失效 */
+    /* 内核线程：不切换地址空间，避免不必要的 TLB 失效 */
 
-    /* 恢复 next 的 ELR/SPSR */
-    hal_write_elr(next->context[13U]);
-    hal_write_spsr(next->context[14U]);
-    hal_isb();
+    /* 恢复 next 的异常返回现场 */
+    hal_restore_context(next->context);
 
     /* 栈金丝雀检查：检测 prev 线程是否发生栈溢出 */
     if ((prev != NULL) && (prev->guard.enabled) &&
@@ -1025,10 +1016,10 @@ void NORETURN scheduler_start_secondary(void)
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
 
-    /* 从核用户态线程切换暂不处理（仅主核 scheduler_start 支持） */
+    /* 从核用户态地址空间切换暂不处理（仅主核 scheduler_start 支持） */
     /* if (first_thread->is_user != 0U)
        {
-           mmu_switch_to_user_asm(first_thread->user_pgd, first_thread->context);
+           hal_switch_address_space(first_thread->user_pgd);
        } */
 
     /* 切换到第一个任务（永不返回） */

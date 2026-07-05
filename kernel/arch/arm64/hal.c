@@ -16,6 +16,7 @@
 
 #include "hal.h"
 #include <stddef.h>
+#include <kernel/mmu.h>
 
 /* ========== PL011 UART 寄存器定义 ========== */
 
@@ -461,4 +462,57 @@ void hal_wfi(void)
 void hal_sev(void)
 {
     __asm__ volatile("sev" ::: "memory");
+}
+
+/* ========== 上下文切换辅助实现 ========== */
+
+/**
+ * @brief 保存当前线程的异常返回状态到上下文数组
+ *
+ * @details 将 ELR_EL1/SPSR_EL1 写入 ctx[13]/ctx[14]。
+ *          调度器调用此接口保存切出线程的异常返回现场，
+ *          无需直接操作具体系统寄存器。
+ *
+ * @param ctx 上下文数组
+ */
+void hal_save_context(uint64_t *ctx)
+{
+    ctx[13U] = hal_read_elr();
+    ctx[14U] = hal_read_spsr();
+}
+
+/**
+ * @brief 恢复指定线程的异常返回状态
+ *
+ * @details 从 ctx[13]/ctx[14] 恢复 ELR_EL1/SPSR_EL1 并执行 ISB。
+ *          调度器调用此接口恢复切入线程的异常返回现场。
+ *
+ * @param ctx 上下文数组
+ */
+void hal_restore_context(uint64_t *ctx)
+{
+    hal_write_elr(ctx[13U]);
+    hal_write_spsr(ctx[14U]);
+    hal_isb();
+}
+
+/**
+ * @brief 切换到用户地址空间
+ *
+ * @details 包装 MMU 的地址空间切换接口：传入非零值切换到对应用户
+ *          地址空间，传入 0 切回内核地址空间。调度器通过此接口
+ *          完成用户/内核地址空间隔离，无需感知页表寄存器与 TLB。
+ *
+ * @param user_pgd 用户地址空间根表物理地址（0 = 切回内核空间）
+ */
+void hal_switch_address_space(uint64_t user_pgd)
+{
+    if (user_pgd != 0ULL)
+    {
+        mmu_switch_to_user(user_pgd);
+    }
+    else
+    {
+        mmu_switch_to_kernel();
+    }
 }
