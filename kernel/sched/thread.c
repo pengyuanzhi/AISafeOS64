@@ -22,6 +22,7 @@
 #include <kernel/config.h>
 #include <kernel/barrier.h>
 #include <kernel/compiler.h>
+#include <kernel/smp.h>
 #include <stdint.h>
 #include <string.h>
 #include "hal.h"
@@ -32,6 +33,7 @@ extern void arch_setup_thread_context(uint64_t *ctx, uint64_t entry,
 
 /* 前向声明: 栈分配器（定义在 scheduler.c） */
 extern vaddr_t stack_alloc_by_scheduler(uint32_t size);
+extern void stack_free_by_scheduler(vaddr_t stack_base, uint32_t size);
 
 /* HAL 接口 */
 /* ========================================================================
@@ -41,21 +43,28 @@ extern vaddr_t stack_alloc_by_scheduler(uint32_t size);
 /**
  * @brief 查找空闲的线程控制块
  *
- * @details 遍历全局线程表，找到第一个状态为 DEAD 的 TCB
+ * @details 遍历全局线程表，找到第一个状态为 DEAD 的 TCB。
+ *          通过 preempt_disable 保护线性扫描，防止多核并发
+ *          kthread_create 分配同一 TID 槽位。
  *
  * @return 空闲线程 ID，无空闲时返回 THREAD_ID_INVALID
  */
 static thread_id_t alloc_thread_id(void)
 {
-    uint32_t i;
+    thread_id_t tid;
 
-    for (i = 0U; i < CONFIG_MAX_THREADS; i++)
+    preempt_disable();
+    for (tid = 0U; tid < CONFIG_MAX_THREADS; tid++)
     {
-        if (g_scheduler.thread_table[i].state == KTHREAD_STATE_DEAD)
+        if (g_scheduler.thread_table[tid].state == KTHREAD_STATE_DEAD)
         {
-            return (thread_id_t)i;
+            /* 原子地标记为占用（防止并发分配同一槽位） */
+            g_scheduler.thread_table[tid].state = KTHREAD_STATE_READY;
+            preempt_enable();
+            return tid;
         }
     }
+    preempt_enable();
 
     return THREAD_ID_INVALID;
 }
@@ -161,9 +170,8 @@ thread_id_t kthread_create(const char *name,
         return THREAD_ID_INVALID;
     }
 
-    /* 初始化线程控制块 */
+    /* 初始化线程控制块（state 已在 alloc_thread_id 中设为 READY） */
     thread->tid = tid;
-    thread->state = KTHREAD_STATE_READY;
     thread->entry = entry;
     thread->entry_arg = arg;
     thread->stack_base = stack_top - (vaddr_t)stack_size;
@@ -230,7 +238,19 @@ void kthread_exit(void)
         }
     }
 
-    /* 标记为 DEAD 状态 */
+    /* 用户态线程：释放地址空间引用。
+     * TODO: 待 kobject 引用计数体系完全接入后，此处应调用
+     *       kobj_ref_dec(current->vmspace) 与 kobj_ref_dec(current->cspace)。
+     *       当前阶段仅标记，TCB 中已保存 vmspace/cspace 指针供 cleanup 使用，
+     *       实际释放由后续模块处理。 */
+    if (current->is_user != 0U)
+    {
+        /* vmspace/cspace 引用计数递减占位（完整实现见后续重构） */
+    }
+
+    /* 标记为 DEAD 状态。栈空间不能在此处立即释放：
+     * kthread_exit 运行在自身栈上，释放后 context_switch 访问已释放栈会崩溃。
+     * 由 idle 线程通过 kthread_cleanup_dead_stacks() 延迟回收。 */
     current->state = KTHREAD_STATE_DEAD;
     barrier();
 

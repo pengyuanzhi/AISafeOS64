@@ -460,6 +460,10 @@ static void idle_task_entry(void *arg)
          * 定时器中断仅置标志，实际迁移在此处完成（开中断、可抢占）。 */
         smp_idle_balance(cpu_id);
 
+        /* 回收已退出线程的栈。DEAD 线程的栈无法在 kthread_exit 中释放
+         *（kthread_exit 运行在自身栈上），由 idle 在此延迟回收。 */
+        kthread_cleanup_dead_stacks();
+
         /* 异步刷新内核日志缓冲到控制台（非实时上下文，允许 UART 阻塞） */
         klog_flush();
 
