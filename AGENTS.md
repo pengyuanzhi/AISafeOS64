@@ -828,9 +828,13 @@ per-NUMA-node partial list（中速路径，细粒度锁）
 
 ### 禁止事项
 
-- ❌ 禁止在实时路径（调度/中断/IPC 快路径）放 UART 打印
-- ❌ 禁止硬编码 UART 地址（用 `QEMU_UART0_BASE` 宏）
-- ❌ 禁止在循环中打印（会导致输出泛滥）
+- ❌ **禁止在中断处理中调用任何 klog 函数**（klog_error/warn/info/debug/putc/flush）
+  中断处理只做最短路径工作，日志延迟到线程上下文（idle 线程 flush）输出。
+  唯一例外：klog_panic（panic 路径直接同步输出，绕过缓冲）。
+- ❌ 禁止在实时路径（调度/IPC 快路径）放同步 UART 打印
+- ❌ 禁止硬编码 UART 地址（用 hal_console_* 接口，HAL 层绑定硬件）
+- ❌ 禁止在循环中打印（会导致缓冲溢出和输出泛滥）
+- ❌ 禁止多个 CPU 同时直接写 UART（klog_flush 已通过全局锁串行化）
 
 ## 强制开发规则：硬件资源映射管理（Hardware Resource Map）
 
