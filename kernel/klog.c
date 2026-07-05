@@ -15,9 +15,10 @@
  *
  *          **为什么 per-CPU 缓冲不需要自旋锁**：
  *          每个 CPU 只写自己的缓冲（head），只读自己的缓冲（tail），
- *          不存在跨核竞争。写入端用关中断保护，防止同核线程被抢占后
- *          重入同一缓冲。由于中断中禁止调用 klog（AGENTS.md 规则），
- *          关中断窗口实际为零延迟影响——关中断只是"保险"而非常态路径。
+ *          不存在跨核竞争。写入端用关调度（preempt_disable）保护，
+ *          防止本核线程被抢占后另一个线程重入同一缓冲。
+ *          中断仍然可以响应（不关中断），保证实时性。
+ *          由于中断中禁止调用 klog（AGENTS.md 规则），不存在中断重入。
  *
  *          **中断中禁止 klog**：
  *          AGENTS.md 日志规范明确禁止在中断/调度快路径中调用日志函数。
@@ -46,13 +47,14 @@
  * v1.0 2026-07-04 初版（同步阻塞，硬编码 UART base）
  * v2.0 2026-07-05 异步环形缓冲 + 平台无关
  * v2.1 2026-07-05 去掉 per-CPU 自旋锁（改为仅关中断）+ flush 全局锁
- * v2.2 2026-07-05 明确中断禁用 klog + 设计决策文档化（当前版本）
+ * v3.0 2026-07-05 关调度替代关中断（preempt_disable/enable）（当前版本）
  */
 
 #include <kernel/klog.h>
 #include <kernel/config.h>
 #include <kernel/spinlock.h>
 #include <kernel/barrier.h>
+#include <kernel/smp.h>
 #include "hal.h"
 #include <stdbool.h>
 
@@ -120,13 +122,13 @@ static klog_buf_t *klog_get_buf(void)
 /**
  * @brief 向环形缓冲写入一个字节
  *
- * @details 调用者必须已关中断（防止同核中断重入破坏 head）。
+ * @details 调用者必须已关调度（防止同核线程被抢占后重入破坏 head）。
  *          缓冲满时丢弃最旧数据（推进 tail），保证写入者永不阻塞。
  *
  * @param buf 目标缓冲
  * @param c   要写入的字节
  */
-static void klog_buf_putc_irqoff(klog_buf_t *buf, char c)
+static void klog_buf_putc_preemptoff(klog_buf_t *buf, char c)
 {
     uint32_t next_head = (buf->head + 1U) % KLOG_BUF_SIZE;
 
@@ -144,12 +146,12 @@ static void klog_buf_putc_irqoff(klog_buf_t *buf, char c)
 /**
  * @brief 向环形缓冲写入字符串
  *
- * @details 逐字节调用 klog_buf_putc_irqoff。调用者必须已关中断。
+ * @details 逐字节调用 klog_buf_putc_preemptoff。调用者必须已关调度。
  *
  * @param buf 目标缓冲
  * @param str 以 NULL 结尾的字符串（可为 NULL，NULL 时静默返回）
  */
-static void klog_buf_puts_irqoff(klog_buf_t *buf, const char *str)
+static void klog_buf_puts_preemptoff(klog_buf_t *buf, const char *str)
 {
     if (str == NULL)
     {
@@ -158,7 +160,7 @@ static void klog_buf_puts_irqoff(klog_buf_t *buf, const char *str)
 
     while (*str != '\0')
     {
-        klog_buf_putc_irqoff(buf, *str);
+        klog_buf_putc_preemptoff(buf, *str);
         str++;
     }
 }
@@ -167,10 +169,11 @@ static void klog_buf_puts_irqoff(klog_buf_t *buf, const char *str)
  * @brief 向当前 CPU 缓冲写入带前缀的消息
  *
  * @details 实时安全写入入口：
- *          1. 关中断（防止同核中断重入破坏 head 指针）
+ *          1. 关调度（preempt_disable，防止本核线程被抢占后重入缓冲）
  *          2. 写入 per-CPU 缓冲（本核独占，无自旋锁）
- *          3. 恢复中断
+ *          3. 开调度（preempt_enable，归零时检查 need_resched）
  *
+ *          中断仍然可以响应（不关中断），保证实时性。
  *          整个操作确定性 < 1μs（无 UART 阻塞，无锁竞争）。
  *
  * @param prefix 级别前缀（如 "E: "），可为 NULL
@@ -184,17 +187,16 @@ static void klog_write(const char *prefix, const char *str)
     }
 
     klog_buf_t *buf = klog_get_buf();
-    uint32_t irq_state = hal_local_irq_saved_state();
 
-    hal_local_irq_disable();
+    preempt_disable();
 
     if (prefix != NULL)
     {
-        klog_buf_puts_irqoff(buf, prefix);
+        klog_buf_puts_preemptoff(buf, prefix);
     }
-    klog_buf_puts_irqoff(buf, str);
+    klog_buf_puts_preemptoff(buf, str);
 
-    hal_local_irq_restore(irq_state);
+    preempt_enable();
 }
 
 /* ========================================================================
@@ -317,7 +319,7 @@ void klog_debug(const char *str)
  * @brief 输出单个字符到日志缓冲
  *
  * @details 不受级别过滤，用于 hex/dec 辅助函数组装诊断行。
- *          通过关中断保护写入（per-CPU 无锁竞争）。
+ *          通过关调度（preempt_disable）保护写入（per-CPU 无锁竞争）。
  *
  * @param c 要输出的字符
  */
@@ -329,11 +331,10 @@ void klog_putc(char c)
     }
 
     klog_buf_t *buf = klog_get_buf();
-    uint32_t irq_state = hal_local_irq_saved_state();
 
-    hal_local_irq_disable();
-    klog_buf_putc_irqoff(buf, c);
-    hal_local_irq_restore(irq_state);
+    preempt_disable();
+    klog_buf_putc_preemptoff(buf, c);
+    preempt_enable();
 }
 
 /**

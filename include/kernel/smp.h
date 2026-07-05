@@ -142,6 +142,55 @@ percpu_t *smp_get_percpu(void);
  */
 percpu_t *smp_get_percpu_by_id(uint32_t cpu_id);
 
+/* ========================================================================
+ * 抢占控制 API
+ *
+ * @details preempt_count > 0 时禁止调度器抢占当前线程。
+ *          与关中断（hal_local_irq_disable）不同，关调度允许中断响应，
+ *          仅阻止 schedule() 被调用（定时器中断设置 need_resched 但
+ *          不立即切换，直到 preempt_count 归零）。
+ *
+ *          典型用法：
+ *          ```c
+ *          preempt_disable();
+ *          // ... 临界区（中断可响应，但不会被抢占）...
+ *          preempt_enable();
+ *          ```
+ *
+ *          注意：preempt_disable/prevent_enable 必须严格配对（可嵌套）。
+ *          preempt_count 归零时，如果有 pending 的 need_resched，
+ *          preempt_enable 会触发重调度。
+ * ======================================================================== */
+
+/**
+ * @brief 禁止抢占（递增 preempt_count）
+ *
+ * @details 调用后，当前线程不会被调度器抢占，但中断仍然可以响应。
+ *          用于保护 per-CPU 数据（如 klog 环形缓冲）的一致性。
+ *
+ * @note 必须与 preempt_enable 配对使用，支持嵌套。
+ * @note 对应需求: SC-004（调度控制）
+ */
+void preempt_disable(void);
+
+/**
+ * @brief 允许抢占（递减 preempt_count，归零时检查重调度）
+ *
+ * @details 如果 preempt_count 归零且有 pending 的 need_resched，
+ *          自动触发 schedule()。
+ *
+ * @note 必须与 preempt_disable 配对使用。
+ */
+void preempt_enable(void);
+
+/**
+ * @brief 查询当前是否禁止抢占
+ *
+ * @return true preempt_count > 0（禁止抢占）
+ * @return false preempt_count == 0（允许抢占）
+ */
+bool preempt_is_disabled(void);
+
 /**
  * @brief 获取在线 CPU 数量
  *

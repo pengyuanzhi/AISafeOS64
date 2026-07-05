@@ -371,6 +371,73 @@ static vaddr_t stack_alloc(uint32_t size)
  * idle 线程入口函数
  * ======================================================================== */
 
+/* ========================================================================
+ * 抢占控制实现
+ * ======================================================================== */
+
+/**
+ * @brief 禁止抢占（递增 preempt_count）
+ *
+ * @details 操作 percpu_t.preempt_count，本核独占无需锁。
+ *          preempt_count > 0 时，scheduler_tick/scheduler_irq_exit_check
+ *          不触发 schedule()，直到 preempt_count 归零。
+ */
+void preempt_disable(void)
+{
+    percpu_t *percpu = smp_get_percpu();
+    if (percpu != NULL)
+    {
+        percpu->preempt_count++;
+        barrier();
+    }
+}
+
+/**
+ * @brief 允许抢占（递减 preempt_count，归零时检查重调度）
+ *
+ * @details preempt_count 归零后，如果有 pending need_resched，触发 schedule()。
+ */
+void preempt_enable(void)
+{
+    percpu_t *percpu = smp_get_percpu();
+    if (percpu == NULL)
+    {
+        return;
+    }
+
+    if (percpu->preempt_count > 0U)
+    {
+        percpu->preempt_count--;
+        barrier();
+    }
+
+    /* preempt_count 归零且有 pending 调度请求 → 立即重调度 */
+    if ((percpu->preempt_count == 0U) &&
+        (scheduler_test_and_clear_need_resched() != 0U))
+    {
+        schedule();
+    }
+}
+
+/**
+ * @brief 查询当前是否禁止抢占
+ *
+ * @return true preempt_count > 0
+ */
+bool preempt_is_disabled(void)
+{
+    percpu_t *percpu = smp_get_percpu();
+    if (percpu == NULL)
+    {
+        return false;
+    }
+    return (percpu->preempt_count > 0U);
+}
+
+/* ========================================================================
+ * idle 线程
+ * ======================================================================== */
+
 /**
  * @brief idle 线程入口函数
  *
@@ -680,8 +747,14 @@ void scheduler_irq_exit_check(void)
 {
     /* IRQ 出口路径调用：中断仍关闭（由汇编向量保证）。
      * 若中断中标记了需要重调度，则在此处调用 schedule()。
-     * 此处位于 IRQ 处理边界，context_switch 的切栈不会破坏 IRQ 帧栈
-     * （帧栈已恢复到被中断线程的内核栈）。 */
+     *
+     * preempt_count > 0 时不触发调度（关调度区域保护）。
+     * need_resched 保留，preempt_enable 归零时重新检查。 */
+    if (preempt_is_disabled())
+    {
+        return;
+    }
+
     if (scheduler_test_and_clear_need_resched() != 0U)
     {
         schedule();
