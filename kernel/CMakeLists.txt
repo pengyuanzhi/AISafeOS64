@@ -101,7 +101,6 @@ set(KERNEL_MM_SOURCES
     mm/uaccess.c
     mm/rbtree.c
     mm/hot_data_cache.c
-    mm/buddy_system.c
     mm/pcpu_pool.c
 )
 
@@ -111,15 +110,6 @@ set(KERNEL_MM_SOURCES
 set(KERNEL_IRQ_SOURCES
     irq/interrupt.c
     irq/syscall_dispatch.c
-    ipi/ipi_coalesce.c
-)
-
-# ==============================================================================
-# 形式化验证源文件 (verify/)
-# ==============================================================================
-set(KERNEL_VERIFY_SOURCES
-    verify/formal_verify.c
-    verify/evidence.c
 )
 
 # ==============================================================================
@@ -127,7 +117,6 @@ set(KERNEL_VERIFY_SOURCES
 # ==============================================================================
 set(KERNEL_DRIVER_SOURCES
     driver/driver_core.c
-    driver/driver_module.c
     driver/drv_uart.c
     driver/drv_virtio_blk.c
     driver/drv_boot_blk.c
@@ -151,7 +140,6 @@ set(KERNEL_SOURCES
     ${KERNEL_CAP_SOURCES}
     ${KERNEL_MM_SOURCES}
     ${KERNEL_IRQ_SOURCES}
-    ${KERNEL_VERIFY_SOURCES}
     ${KERNEL_DRIVER_SOURCES}
     ${KERNEL_ELF_LOADER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c

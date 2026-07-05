@@ -97,7 +97,6 @@ static driver_stats_t s_stats;
 /* ========== 外部声明（driver_module.c 提供） ========== */
 
 /** @brief 模块加载器初始化 */
-extern void driver_module_init(void);
 
 /* ========== 内部辅助函数声明 ========== */
 
@@ -146,7 +145,6 @@ kernel_status_t driver_subsys_init(void)
     kernel_memzero(&s_stats, sizeof(s_stats));
 
     /* 初始化模块加载器 */
-    driver_module_init();
 
     return KERNEL_OK;
 }

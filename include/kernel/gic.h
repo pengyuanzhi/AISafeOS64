@@ -240,9 +240,6 @@ kernel_status_t gic_send_sgi(uint32_t sgi_id, uint8_t cpu_mask);
  *
  * @note 对应需求: IN-002
  */
-kernel_status_t gic_register_handler(uint32_t irq,
-                                       irq_handler_t handler,
-                                       void *arg);
 
 /**
  * @brief 设置中断触发模式

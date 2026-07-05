@@ -654,30 +654,6 @@ kernel_status_t gic_send_sgi(uint32_t sgi_id, uint8_t cpu_mask)
  *
  * @note 对应需求: IN-002
  */
-kernel_status_t gic_register_handler(uint32_t irq,
-                                      irq_handler_t handler,
-                                      void *arg)
-{
-    /* 参数验证 */
-    if (irq > GIC_MAX_SPI)
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    if (handler == NULL)
-    {
-        return -(int32_t)EINVAL;
-    }
-
-    /*
-     * GIC 驱动不维护处理函数表，处理函数注册
-     * 由 interrupt.c 中的 interrupt_register() 管理。
-     * 此处仅使能中断。
-     */
-    (void)arg; /* 避免未使用参数警告 */
-
-    return KERNEL_OK;
-}
 
 /**
  * @brief 设置中断路由到目标 CPU

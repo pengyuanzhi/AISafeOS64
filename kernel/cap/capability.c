@@ -35,7 +35,6 @@
 #include <kernel/cspace.h>
 #include <kernel/errno.h>
 #include <kernel/barrier.h>
-#include <kernel/formal_verify.h>
 #include <hal.h>
 #include <stdint.h>
 #include <string.h>
@@ -415,7 +414,6 @@ static kernel_status_t cap_insert_locked(cspace_t *cs,
 kernel_status_t capability_subsys_init(void)
 {
     /* 注册能力系统形式化验证不变式 */
-    (void)fv_register_cap_invariants();
 
     return KERNEL_OK;
 }
@@ -1713,74 +1711,6 @@ kernel_status_t cap_integrity_check(cap_slot_t cspace_root,
  *
  * @note 对应需求: SE-007, SE-008
  */
-kernel_status_t fv_register_cap_invariants(void)
-{
-    /* 1. 权限单调递减不变式 */
-    (void)fv_register_condition(
-        "cap_derive: 子能力权限必须为父能力权限的严格子集",
-        FV_COND_INVARIANT,
-        "cap_derive",
-        "capability",
-        FV_SEVERITY_FATAL);
-
-    /* 2. 撤销完整性不变式 */
-    (void)fv_register_condition(
-        "cap_revoke: 级联撤销必须覆盖所有派生子能力",
-        FV_COND_INVARIANT,
-        "cap_revoke",
-        "capability",
-        FV_SEVERITY_FATAL);
-
-    /* 3. CSpace 引用完整性 */
-    (void)fv_register_condition(
-        "cspace: 所有 VALID 状态能力的 parent_slot 指向的父能力必须也为 VALID",
-        FV_COND_INVARIANT,
-        "cap_validate",
-        "capability",
-        FV_SEVERITY_FATAL);
-
-    /* 4. 权限类型合法性 */
-    (void)fv_register_condition(
-        "cap_insert: 权限必须为对象类型的合法子集",
-        FV_COND_PRECONDITION,
-        "cap_insert_locked",
-        "capability",
-        FV_SEVERITY_ERROR);
-
-    /* 5. 派生深度限制 */
-    (void)fv_register_condition(
-        "cap_derive: 派生深度不得超过 MAX_DERIVE_DEPTH",
-        FV_COND_MAX_BOUNDARY,
-        "cap_derive",
-        "capability",
-        FV_SEVERITY_ERROR);
-
-    /* 6. 无悬挂引用 */
-    (void)fv_register_condition(
-        "cap_delete: 删除后子能力的 parent_slot 必须为 CAP_SLOT_INVALID",
-        FV_COND_POSTCONDITION,
-        "cap_delete",
-        "capability",
-        FV_SEVERITY_FATAL);
-
-    /* 7. 移动原子性 */
-    (void)fv_register_condition(
-        "cap_move: 移动后源能力必须为 FREE，目标能力必须为 VALID",
-        FV_COND_ATOMIC,
-        "cap_move",
-        "capability",
-        FV_SEVERITY_FATAL);
-
-    /* 8. Badge 不可提升 */
-    (void)fv_register_condition(
-        "cap_derive: Badge 值必须为源 Badge 的子集或自定义值",
-        FV_COND_INVARIANT,
-        "cap_derive",
-        "capability",
-        FV_SEVERITY_WARNING);
-
-    return KERNEL_OK;
-}
 
 /* ========================================================================
  * 新对象类型创建 API（FD, INODE, MEMORY_REGION）
