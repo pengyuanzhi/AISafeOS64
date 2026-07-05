@@ -497,7 +497,7 @@ int32_t kthread_sleep(uint32_t ms)
 
     kthread_sleep_ticks(ticks);
 
-    return 0;
+    return KERNEL_OK;
 }
 
 void timer_wakeup_thread(struct KThread *thread)

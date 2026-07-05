@@ -167,7 +167,36 @@ kernel_status_t edf_set_params(thread_id_t tid, const edf_params_t *params)
         return -(int32_t)ESRCH;
     }
 
+    /* 更新所属 CPU 队列的利用率（千分比 U = 1000 * wcet / period）。
+     * period 为 0 的偶发任务按相对截止时间计算。
+     * 先扣除旧利用率，再叠加新利用率，保证 total_utilization 一致。 */
+    {
+        edf_ready_queue_t *queue = edf_get_queue();
+        tick_t old_div = dest->period;
+        if (old_div == 0ULL)
+        {
+            old_div = dest->relative_deadline;
+        }
+        if (dest->util_counted && (old_div > 0ULL))
+        {
+            queue->total_utilization -= (1000ULL * (uint64_t)dest->wcet) / old_div;
+        }
+
+        tick_t new_div = params->period;
+        if (new_div == 0ULL)
+        {
+            new_div = params->relative_deadline;
+        }
+        uint64_t new_util = 0ULL;
+        if (new_div > 0ULL)
+        {
+            new_util = (1000ULL * (uint64_t)params->wcet) / new_div;
+        }
+        queue->total_utilization += new_util;
+    }
+
     (void)memcpy(dest, params, sizeof(edf_params_t));
+    dest->util_counted = true;
 
     /* 设置初始绝对截止时间 */
     if (dest->absolute_deadline == EDF_DEADLINE_INVALID)
@@ -178,7 +207,7 @@ kernel_status_t edf_set_params(thread_id_t tid, const edf_params_t *params)
     }
 
     /* 更新线程调度策略为 EDF */
-    thread->policy = (KThreadPolicy_t)2U; /* SCHED_EDF */
+    thread->policy = KTHREAD_POLICY_EDF;
 
     return KERNEL_OK;
 }
@@ -314,7 +343,7 @@ void edf_tick(void)
     }
 
     /* 仅处理 EDF 策略线程 */
-    if (current->policy != (KThreadPolicy_t)2U)
+    if (current->policy != KTHREAD_POLICY_EDF)
     {
         return;
     }
@@ -357,22 +386,20 @@ void edf_tick(void)
 bool edf_check_schedulability(void)
 {
     uint32_t cpu;
-    uint64_t total_util = 0ULL;
     edf_ready_queue_t *queue;
 
+    /* Liu & Layland 条件：每颗 CPU 的利用率 U <= 1.0（千分比 <= 1000）。
+     * 多核下按每 CPU 队列分别检查，不能跨核求和，否则总和多核均超阈值。 */
     for (cpu = 0U; cpu < CONFIG_MAX_CPUS; cpu++)
     {
         queue = &s_edf_queues[cpu];
-        total_util += queue->total_utilization;
+        if (queue->total_utilization > 1000ULL)
+        {
+            return false;
+        }
     }
 
-    /* Liu & Layland 条件：U <= 1.0（这里用千分比，<= 1000） */
-    if (total_util <= 1000ULL)
-    {
-        return true;
-    }
-
-    return false;
+    return true;
 }
 
 /* ========================================================================

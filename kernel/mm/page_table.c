@@ -139,7 +139,7 @@ static uint64_t compute_pte_attr(page_perm_t perm, bool is_user)
         bool has_exec = ((perm & PAGE_PERM_EXEC) != 0U);
 
         /* 检查是否使用全局映射（不绑 ASID，EL0+EL1 共享） */
-        bool use_global = ((perm & 0x80U) != 0U);  /* bit 7 = global 标志 */
+        bool use_global = ((perm & PAGE_PERM_GLOBAL) != 0U);
 
         if (use_global)
         {
@@ -531,7 +531,10 @@ kernel_status_t page_table_unmap(page_table_t *pgd, vaddr_t vaddr)
     *entry3 = 0ULL;
     barrier();
 
-    /* 刷新 TLB 确保变更生效 */
+    /* 刷新 TLB 确保变更生效。
+     * 注：当前使用全核全 ASID 刷新（tlbi vmalle1is），开销较大。
+     * 待 HAL 层增加 tlbi vae1is（按 VA 失效）接口后，
+     * 可改为按地址单页失效以降低开销（P2-1，性能优化）。 */
     tlb_flush_all();
 
     return KERNEL_OK;
@@ -713,7 +716,9 @@ kernel_status_t page_table_protect(page_table_t *pgd,
     *entry3 = PTE_MAKE(orig_paddr, new_attr);
     barrier();
 
-    /* 刷新 TLB 使新权限生效 */
+    /* 刷新 TLB 使新权限生效。
+     * 注：当前使用全核全 ASID 刷新，开销较大。
+     * 待 HAL 层增加按 VA 失效（tlbi vae1is）接口后优化（P2-1）。 */
     tlb_flush_all();
 
     return KERNEL_OK;

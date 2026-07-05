@@ -207,6 +207,7 @@ typedef enum
     PAGE_PERM_WRITE = (1U << 1),    /**< @brief 可写 */
     PAGE_PERM_EXEC = (1U << 2),     /**< @brief 可执行 */
     PAGE_PERM_DEVICE = (1U << 4),   /**< @brief Device/MMIO 映射（非缓存） */
+    PAGE_PERM_GLOBAL = (1U << 7),   /**< @brief 全局映射（EL0+EL1 共享，不绑 ASID） */
     PAGE_PERM_RW = PAGE_PERM_READ | PAGE_PERM_WRITE,
     PAGE_PERM_RX = PAGE_PERM_READ | PAGE_PERM_EXEC,
     PAGE_PERM_RWX = PAGE_PERM_READ | PAGE_PERM_WRITE | PAGE_PERM_EXEC,

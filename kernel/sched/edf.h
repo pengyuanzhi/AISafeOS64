@@ -66,6 +66,7 @@ typedef struct
     tick_t  next_release;      /**< @brief 下次释放时间（周期性） */
     uint32_t overrun_count;    /**< @brief 截止时间超限次数 */
     bool    is_periodic;       /**< @brief 是否周期性任务 */
+    bool    util_counted;      /**< @brief 利用率是否已计入队列 total_utilization */
 } edf_params_t;
 
 /* ========================================================================

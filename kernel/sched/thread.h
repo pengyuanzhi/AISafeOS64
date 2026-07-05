@@ -82,11 +82,13 @@ typedef enum
  *
  * @details - FIFO : 先进先出，不使用时间片，一直运行直到阻塞或更高优先级就绪
  *          - RR   : 轮转调度，同优先级线程之间按时间片轮转
+ *          - EDF  : 最早截止时间优先，用于实时任务（仅 CPU0）
  */
 typedef enum
 {
     KTHREAD_POLICY_FIFO = 0U, /**< @brief 先进先出策略 */
-    KTHREAD_POLICY_RR   = 1U  /**< @brief 轮转调度策略 */
+    KTHREAD_POLICY_RR   = 1U, /**< @brief 轮转调度策略 */
+    KTHREAD_POLICY_EDF  = 2U  /**< @brief 最早截止时间优先策略（实时） */
 } KThreadPolicy_t;
 
 /* ========================================================================
