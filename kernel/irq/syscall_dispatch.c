@@ -973,13 +973,204 @@ static void dispatch_interrupt(syscall_frame_t *frame)
 }
 
 /* ========================================================================
+ * 进程管理系统调用分发
+ * ======================================================================== */
+
+/**
+ * @brief 进程管理系统调用分发（0x0500-0x05FF）
+ */
+static void dispatch_process(syscall_frame_t *frame)
+{
+    extern kernel_status_t process_create(uint32_t parent_pid, uint32_t *out_pid);
+    extern kernel_status_t process_exit(uint32_t pid, int32_t status);
+    extern kernel_status_t process_wait(uint32_t pid, int32_t *out_status);
+    extern uint32_t process_getpid(void);
+
+    uint32_t nr = (uint32_t)frame->x8;
+
+    switch (nr)
+    {
+        case SYS_PROCESS_CREATE:
+        {
+            uint32_t parent_pid = (uint32_t)frame->x0;
+            uint32_t pid = 0U;
+            kernel_status_t ret = process_create(parent_pid, &pid);
+            if (ret == KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)pid;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ret);
+            }
+            break;
+        }
+
+        case SYS_PROCESS_EXIT:
+        {
+            uint32_t pid = (uint32_t)frame->x0;
+            int32_t status = (int32_t)frame->x1;
+            kernel_status_t ret = process_exit(pid, status);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_PROCESS_WAIT:
+        {
+            uint32_t pid = (uint32_t)frame->x0;
+            int32_t status = 0;
+            kernel_status_t ret = process_wait(pid, &status);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? (uint64_t)status : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_PROCESS_GETPID:
+        {
+            frame->x0 = (uint64_t)process_getpid();
+            break;
+        }
+
+        default:
+        {
+            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+    }
+}
+
+/* ========================================================================
+ * 信号系统调用分发
+ * ======================================================================== */
+
+/**
+ * @brief 信号系统调用分发（0x0600-0x06FF）
+ */
+static void dispatch_signal(syscall_frame_t *frame)
+{
+    extern kernel_status_t signal_kill(thread_id_t target_tid, uint32_t sig);
+    extern kernel_status_t signal_action(uint32_t sig, uint64_t handler);
+    extern kernel_status_t signal_procmask(uint64_t mask);
+
+    uint32_t nr = (uint32_t)frame->x8;
+
+    switch (nr)
+    {
+        case SYS_SIGNAL_ACTION:
+        {
+            uint32_t sig = (uint32_t)frame->x0;
+            uint64_t handler = frame->x1;
+            kernel_status_t ret = signal_action(sig, handler);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_SIGNAL_KILL:
+        {
+            thread_id_t tid = (thread_id_t)frame->x0;
+            uint32_t sig = (uint32_t)frame->x1;
+            kernel_status_t ret = signal_kill(tid, sig);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_SIGNAL_PROCMASK:
+        {
+            uint64_t mask = frame->x0;
+            kernel_status_t ret = signal_procmask(mask);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        default:
+        {
+            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+    }
+}
+
+/* ========================================================================
+ * 定时器系统调用分发
+ * ======================================================================== */
+
+/**
+ * @brief 定时器系统调用分发（0x0700-0x07FF）
+ */
+static void dispatch_timer(syscall_frame_t *frame)
+{
+    extern kernel_status_t user_timer_create(uint32_t owner_tid, uint32_t notify_ep, uint32_t *out_id);
+    extern kernel_status_t user_timer_settime(uint32_t timer_id, uint32_t ms, uint32_t interval_ms);
+    extern kernel_status_t user_timer_delete(uint32_t timer_id);
+    extern uint64_t user_clock_gettime(void);
+    extern kernel_status_t user_nanosleep(uint64_t ns);
+
+    uint32_t nr = (uint32_t)frame->x8;
+
+    switch (nr)
+    {
+        case SYS_TIMER_CREATE:
+        {
+            uint32_t notify_ep = (uint32_t)frame->x0;
+            uint32_t timer_id = 0U;
+            thread_id_t tid = kthread_get_current_tid();
+            kernel_status_t ret = user_timer_create(tid, notify_ep, &timer_id);
+            if (ret == KERNEL_OK)
+            {
+                frame->x0 = (uint64_t)timer_id;
+            }
+            else
+            {
+                frame->x0 = (uint64_t)(-(int64_t)ret);
+            }
+            break;
+        }
+
+        case SYS_TIMER_SETTIME:
+        {
+            uint32_t timer_id = (uint32_t)frame->x0;
+            uint32_t ms = (uint32_t)frame->x1;
+            uint32_t interval_ms = (uint32_t)frame->x2;
+            kernel_status_t ret = user_timer_settime(timer_id, ms, interval_ms);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_TIMER_DELETE:
+        {
+            uint32_t timer_id = (uint32_t)frame->x0;
+            kernel_status_t ret = user_timer_delete(timer_id);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_NANOSLEEP:
+        {
+            uint64_t ns = frame->x0;
+            kernel_status_t ret = user_nanosleep(ns);
+            frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_CLOCK_GETTIME:
+        {
+            frame->x0 = user_clock_gettime();
+            break;
+        }
+
+        default:
+        {
+            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+    }
+}
+
+/* ========================================================================
  * 调试/信息系统调用分发
  * ======================================================================== */
 
 /**
- * @brief 调试/信息系统调用分发
- *
- * @param frame 系统调用栈帧
+ * @brief 调试/信息系统调用分发（0x0800-0x08FF）
  */
 static void dispatch_debug(syscall_frame_t *frame)
 {
@@ -1114,7 +1305,28 @@ void syscall_handler(syscall_frame_t *frame)
 
         case 0x05U:
         {
-            /* 调试/信息 0x0500-0x05FF */
+            /* 进程管理 0x0500-0x05FF */
+            dispatch_process(frame);
+            break;
+        }
+
+        case 0x06U:
+        {
+            /* 信号 0x0600-0x06FF */
+            dispatch_signal(frame);
+            break;
+        }
+
+        case 0x07U:
+        {
+            /* 定时器 0x0700-0x07FF */
+            dispatch_timer(frame);
+            break;
+        }
+
+        case 0x08U:
+        {
+            /* 调试/信息 0x0800-0x08FF */
             dispatch_debug(frame);
             break;
         }

@@ -99,9 +99,27 @@ typedef struct
 #define SYS_INTERRUPT_UNMASK       0x0404U   /**< @brief 恢复屏蔽的中断 */
 #define SYS_INTERRUPT_GET_STATS    0x0405U   /**< @brief 查询中断统计 */
 
-/* --- 调试/信息（0x0500 - 0x05FF） --- */
-#define SYS_DEBUG_PRINT            0x0500U   /**< @brief 调试打印 */
-#define SYS_SYSTEM_INFO            0x0501U   /**< @brief 获取系统信息 */
+/* --- 进程管理（0x0500 - 0x05FF） --- */
+#define SYS_PROCESS_CREATE         0x0500U   /**< @brief 创建进程 */
+#define SYS_PROCESS_EXIT           0x0501U   /**< @brief 进程退出 */
+#define SYS_PROCESS_WAIT           0x0502U   /**< @brief 等待子进程 */
+#define SYS_PROCESS_GETPID         0x0503U   /**< @brief 获取当前 PID */
+
+/* --- 信号（0x0600 - 0x06FF） --- */
+#define SYS_SIGNAL_ACTION          0x0600U   /**< @brief 注册信号处理函数 */
+#define SYS_SIGNAL_KILL            0x0601U   /**< @brief 发送信号 */
+#define SYS_SIGNAL_PROCMASK        0x0602U   /**< @brief 设置信号屏蔽字 */
+
+/* --- 定时器（0x0700 - 0x07FF） --- */
+#define SYS_TIMER_CREATE           0x0700U   /**< @brief 创建定时器 */
+#define SYS_TIMER_SETTIME          0x0701U   /**< @brief 设置定时时间 */
+#define SYS_TIMER_DELETE           0x0702U   /**< @brief 删除定时器 */
+#define SYS_NANOSLEEP              0x0703U   /**< @brief 纳秒级睡眠 */
+#define SYS_CLOCK_GETTIME          0x0704U   /**< @brief 获取当前时间 */
+
+/* --- 调试/信息（0x0800 - 0x08FF） --- */
+#define SYS_DEBUG_PRINT            0x0800U   /**< @brief 调试打印 */
+#define SYS_SYSTEM_INFO            0x0801U   /**< @brief 获取系统信息 */
 
 /* ========================================================================
  * 系统调用表配置

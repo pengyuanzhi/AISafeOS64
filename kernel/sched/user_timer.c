@@ -47,9 +47,8 @@ static TicketLock_t s_timer_lock;
 static bool s_initialized = false;
 
 /**
- * @brief 系统 tick 计数（从 timer.c 引用）
+ * @brief 系统 tick 计数（通过 timer_get_ticks 获取）
  */
-extern tick_t s_system_ticks;
 
 /* ========================================================================
  * 内部辅助
@@ -193,7 +192,7 @@ kernel_status_t user_timer_settime(uint32_t timer_id, uint32_t ms,
         list_del_init(&timer->node);
     }
 
-    timer->expire_tick = s_system_ticks + ticks;
+    timer->expire_tick = timer_get_ticks() + ticks;
     timer->interval = (interval_ms > 0U)
         ? (tick_t)((uint64_t)interval_ms * (uint64_t)CONFIG_TICK_RATE_HZ / 1000U)
         : 0U;
@@ -289,7 +288,7 @@ void user_timer_tick(void)
         first = s_active_list.next;
         timer = list_entry(first, user_timer_t, node);
 
-        if (timer->expire_tick > s_system_ticks)
+        if (timer->expire_tick > timer_get_ticks())
         {
             break;
         }
