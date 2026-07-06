@@ -175,6 +175,7 @@ thread_id_t kthread_create(const char *name,
 
     /* 初始化线程控制块（state 已在 alloc_thread_id 中设为 READY） */
     thread->tid = tid;
+    thread->pid = 0U;
     thread->entry = entry;
     thread->entry_arg = arg;
     thread->stack_base = stack_top - (vaddr_t)stack_size;

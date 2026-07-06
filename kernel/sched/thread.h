@@ -120,6 +120,7 @@ typedef struct KThread
 {
     uint64_t context[KTHREAD_CONTEXT_REGS]; /**< @brief 上下文保存区 */
     thread_id_t tid;       /**< @brief 线程 ID */
+    uint32_t pid;          /**< @brief 所属进程 ID（0=内核进程） */
     KThreadState_t state;  /**< @brief 线程当前状态 */
     kthread_entry_t entry; /**< @brief 线程入口函数 */
     void *entry_arg;       /**< @brief 入口函数参数 */

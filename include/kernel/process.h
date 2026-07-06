@@ -20,7 +20,32 @@
 #include <kernel/types.h>
 #include <kernel/errno.h>
 #include <kernel/syscall.h>
+#include <stdbool.h>
 #include <stdint.h>
+
+struct list_head;
+
+/* ========================================================================
+ * 进程描述符
+ * ======================================================================== */
+
+/**
+ * @brief 进程描述符
+ *
+ * @details 进程 = 地址空间 + 线程组 + 资源限额。
+ *          一个进程包含多个线程，共享 vmspace 和 cspace。
+ */
+typedef struct process
+{
+    uint32_t          pid;            /**< @brief 进程 ID */
+    uint32_t          parent_pid;     /**< @brief 父进程 ID */
+    void             *vmspace;        /**< @brief 地址空间（vm_space_t*） */
+    void             *cspace;         /**< @brief 能力空间 */
+    struct list_head *thread_list;    /**< @brief 线程组链表头指针 */
+    uint32_t          thread_count;   /**< @brief 线程数 */
+    int32_t           exit_status;    /**< @brief 退出状态 */
+    bool              in_use;         /**< @brief 是否活跃 */
+} process_t;
 
 /* ========================================================================
  * 进程 ID 类型

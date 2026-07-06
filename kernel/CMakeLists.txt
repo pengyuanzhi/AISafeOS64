@@ -29,6 +29,7 @@ include_directories(
 # ==============================================================================
 set(KERNEL_CORE_SOURCES
     klog.c
+    process/process.c
 )
 
 # ==============================================================================
@@ -63,6 +64,7 @@ set(KERNEL_SCHED_SOURCES
     sched/smp.c
     sched/stack_guard.c
     sched/sharded_lock.c
+    sched/user_timer.c
 )
 
 # ==============================================================================
