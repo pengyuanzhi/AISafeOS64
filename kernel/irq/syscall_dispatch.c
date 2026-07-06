@@ -504,6 +504,14 @@ static void dispatch_ipc(syscall_frame_t *frame)
             kobj_id_t ep_id = (kobj_id_t)frame->x0;
             const void *reply_buf = (const void *)(uintptr_t)frame->x1;
             uint32_t reply_size = (uint32_t)frame->x2;
+
+            /* 用户指针验证 */
+            if ((reply_size > 0U) && (!access_ok(reply_buf, reply_size)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
             ret = ipc_msg_reply(ep_id, 0, reply_buf, reply_size);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
             break;
@@ -536,6 +544,14 @@ static void dispatch_ipc(syscall_frame_t *frame)
             kobj_id_t notif_id = (kobj_id_t)frame->x0;
             uint64_t *signals_ptr = (uint64_t *)(uintptr_t)frame->x1;
             uint64_t triggered = 0ULL;
+
+            /* 用户指针验证 */
+            if ((signals_ptr != NULL) && (!access_ok(signals_ptr, sizeof(uint64_t))))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
             ret = ipc_notification_wait(notif_id, 0xFFFFFFFFFFFFFFFFULL, &triggered);
             if ((ret == KERNEL_OK) && (signals_ptr != NULL))
             {
