@@ -962,6 +962,12 @@ void NORETURN scheduler_start(void)
     /* 设置为当前运行线程 */
     scheduler_load_current(first_thread);
 
+    /* 用户态线程：首次切换时需要设置地址空间 */
+    if (first_thread->is_user != 0U)
+    {
+        hal_switch_address_space(first_thread->user_pgd);
+    }
+
     klog_info("[k] Start sched\n");
 
     /* 切换到第一个任务（永不返回） */

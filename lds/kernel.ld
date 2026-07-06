@@ -81,6 +81,8 @@ SECTIONS
      */
     .rodata : AT(__kernel_phys_load + SIZEOF(.text.boot) + SIZEOF(.text)) ALIGN(4096) {
         *(.rodata .rodata.*)
+
+        /* 嵌入 hello_start ELF（用户态冒烟测试） */
         . = ALIGN(4096);
     }
 

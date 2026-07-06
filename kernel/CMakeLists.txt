@@ -40,6 +40,7 @@ set(KERNEL_ARCH_SOURCES
     arch/arm64/boot.S
     arch/arm64/exception.S
     arch/arm64/context.S
+    arch/arm64/init_elf.S
     arch/arm64/hal.c
     arch/arm64/entry.c
     arch/arm64/mmu.c

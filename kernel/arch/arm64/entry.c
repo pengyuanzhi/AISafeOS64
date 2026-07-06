@@ -580,24 +580,40 @@ void kernel_main(void)
     /* ---- 加载 init 进程（第一个用户态进程）---- */
     {
         extern kernel_status_t process_subsys_init(void);
-        extern kernel_status_t process_create(uint32_t parent_pid, uint32_t *out_pid);
-        uint32_t init_pid;
+        extern kernel_status_t elf_load_and_run(const uint8_t *elf_data,
+                                                 uint32_t elf_size,
+                                                 const char *thread_name);
+
+        /* 嵌入 hello_start ELF（最小用户态冒烟测试）
+         * 后续替换为从磁盘加载 init.elf */
+        extern const uint8_t _init_elf_start[];
+        extern const uint8_t _init_elf_end[];
+        uint32_t init_size = (uint32_t)((uintptr_t)_init_elf_end - (uintptr_t)_init_elf_start);
 
         (void)process_subsys_init();
         klog_info("[k] process subsystem inited\n");
 
-        /* 创建 init 进程（PID=1，父进程=0=内核） */
-        if (process_create(0U, &init_pid) == KERNEL_OK)
+        /* 加载 hello_start ELF 到用户空间并创建 EL0 线程 */
+        if (init_size > 0U)
         {
-            klog_info("[k] init process created, pid=");
-            klog_dec(init_pid);
+            klog_info("[k] Loading init ELF, size=");
+            klog_dec(init_size);
             klog_putc('\n');
+
+            if (elf_load_and_run(_init_elf_start, init_size, "init") != KERNEL_OK)
+            {
+                klog_error("[k] FATAL: init ELF load failed\n");
+            }
         }
         else
         {
-            klog_warn("[k] WARN: init process create failed\n");
+            klog_warn("[k] WARN: init ELF not found\n");
         }
     }
+
+    /* ---- 启动调度器（永不返回）----
+     * scheduler_start 会从就绪队列取第一个线程（idle 或 init）切入。
+     * init 线程优先级 > idle，会被优先调度执行。 */
 
     /* ---- 启动调度器（永不返回）---- */
     scheduler_start();
