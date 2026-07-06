@@ -118,8 +118,6 @@ set(KERNEL_IRQ_SOURCES
 # ==============================================================================
 set(KERNEL_DRIVER_SOURCES
     driver/driver_core.c
-    driver/drv_uart.c
-    driver/drv_virtio_blk.c
     driver/drv_boot_blk.c
 )
 

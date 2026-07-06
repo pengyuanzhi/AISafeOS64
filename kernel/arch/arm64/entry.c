@@ -2645,18 +2645,8 @@ void kernel_main(void)
     {
         klog_warn("[k] WARN: driver subsys fail\n");
     }
-
-    /* ---- 注册内建驱动 ---- */
+    /* ---- 注册平台设备 ---- */
     {
-        extern kernel_status_t drv_uart_register(void);
-        extern kernel_status_t drv_virtio_blk_register(void);
-
-        (void)drv_uart_register();
-        /* virtio-blk 驱动注册禁用：已由引导读取器(boot_blk)接管设备，
-         * 后续将由用户态驱动 ELF 接管。避免 probe 重新初始化设备冲突。 */
-        /* (void)drv_virtio_blk_register(); */
-
-        /* 注册 QEMU 平台设备 */
         /* PL011 UART @ 0x09000000, IRQ 33 */
         (void)device_register("pl011", DRIVER_TYPE_UART,
                               (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
