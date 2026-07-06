@@ -577,6 +577,28 @@ void kernel_main(void)
 
     klog_info("[k] All inited\n");
 
+    /* ---- 加载 init 进程（第一个用户态进程）---- */
+    {
+        extern kernel_status_t process_subsys_init(void);
+        extern kernel_status_t process_create(uint32_t parent_pid, uint32_t *out_pid);
+        uint32_t init_pid;
+
+        (void)process_subsys_init();
+        klog_info("[k] process subsystem inited\n");
+
+        /* 创建 init 进程（PID=1，父进程=0=内核） */
+        if (process_create(0U, &init_pid) == KERNEL_OK)
+        {
+            klog_info("[k] init process created, pid=");
+            klog_dec(init_pid);
+            klog_putc('\n');
+        }
+        else
+        {
+            klog_warn("[k] WARN: init process create failed\n");
+        }
+    }
+
     /* ---- 启动调度器（永不返回）---- */
     scheduler_start();
 
