@@ -13,6 +13,9 @@
  * @note MISRA-C:2012 合规
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include <kernel/elf.h>

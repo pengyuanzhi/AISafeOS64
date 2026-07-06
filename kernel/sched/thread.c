@@ -13,6 +13,9 @@
  * @warning entry 函数不应直接返回，应调用 kthread_exit() 退出
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include "thread.h"

@@ -19,6 +19,9 @@
  * @note 对应需求: KR-005（同步消息传递）
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include <kernel/ipc_endpoint.h>

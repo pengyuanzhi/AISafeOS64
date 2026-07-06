@@ -18,6 +18,9 @@
  * @note 对应需求: TM-001~004
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include <kernel/timer.h>

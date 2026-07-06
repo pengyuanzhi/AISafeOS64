@@ -21,6 +21,9 @@
  * @note 对应需求: KR-009~012, MM-001~007
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include <kernel/vmspace.h>

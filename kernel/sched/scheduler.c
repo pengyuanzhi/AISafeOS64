@@ -19,6 +19,9 @@
  * @note 对应需求: SC-001(O(1) 优先级位图调度), SC-002(上下文切换)
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include "scheduler.h"

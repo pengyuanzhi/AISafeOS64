@@ -19,6 +19,9 @@
  * @note 对应需求: KR-007（Pulse 轻量级消息）、KR-023（通道-连接模型）
  *
  * @copyright Copyright (c) 2026 AISafe64 Team
+ *
+ * @revision history
+ * v1.0 2026-07-05 初始版本
  */
 
 #include <kernel/ipc_channel.h>
