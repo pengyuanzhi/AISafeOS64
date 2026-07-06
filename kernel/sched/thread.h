@@ -142,6 +142,9 @@ typedef struct KThread
     vaddr_t user_sp;       /**< @brief 用户态栈指针（EL0 线程使用） */
     uint64_t user_pgd;     /**< @brief 用户态 PGD 物理地址（EL0 线程使用） */
     void *cspace;          /**< @brief 线程关联的 CSpace（cspace_t*，能力空间） */
+    uint64_t signal_pending;  /**< @brief 信号挂起掩码（bit i = 信号 i+1） */
+    uint64_t signal_mask;     /**< @brief 信号阻塞掩码 */
+    uint64_t signal_handlers[32]; /**< @brief 信号处理函数地址表 */
     stack_guard_config_t guard; /**< @brief 栈金丝雀保护配置 */
     char name[KTHREAD_NAME_MAX]; /**< @brief 线程名称 */
 } KThread_t;

@@ -30,6 +30,7 @@ include_directories(
 set(KERNEL_CORE_SOURCES
     klog.c
     process/process.c
+    process/signal.c
 )
 
 # ==============================================================================
