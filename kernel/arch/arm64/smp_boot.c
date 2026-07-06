@@ -281,15 +281,6 @@ kernel_status_t smp_cpu_stop(uint32_t cpu_id)
  * 每 CPU 数据访问
  * ======================================================================== */
 
-uint32_t smp_get_cpu_id(void)
-{
-    uint64_t mpidr;
-
-    __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
-
-    return (uint32_t)(mpidr & 0xFFU);
-}
-
 percpu_t *smp_get_percpu(void)
 {
     uint32_t cpu_id = hal_get_cpu_id();

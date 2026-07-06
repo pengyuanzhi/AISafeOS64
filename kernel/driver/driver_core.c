@@ -25,6 +25,7 @@
 #include <kernel/config.h>
 #include <kernel/list.h>
 #include <kernel/spinlock.h>
+#include <kernel/errno.h>
 #include <hal.h>
 #include <stdint.h>
 #include <stddef.h>

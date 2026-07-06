@@ -124,7 +124,6 @@ kernel_status_t smp_cpu_stop(uint32_t cpu_id);
  *
  * @return CPU 编号（0 ~ SMP_MAX_CPUS-1）
  */
-uint32_t smp_get_cpu_id(void);
 
 /**
  * @brief 获取当前 CPU 的每 CPU 数据

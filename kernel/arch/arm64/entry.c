@@ -179,13 +179,13 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     desc = get_ec_desc(ec);
     klog_error("\n[ex] EC=");
     klog_hex64((uint64_t)ec);
-    klog_info(from_el0 != 0U ? " EL0 " : " EL1 ");
-    klog_info(desc);
+    klog_error(from_el0 != 0U ? " EL0 " : " EL1 ");
+    klog_error(desc);
     klog_error("\n[ex] ESR=");
     klog_hex64(esr);
-    klog_info(" FAR=");
+    klog_error(" FAR=");
     klog_hex64(far);
-    klog_info(" ELR=");
+    klog_error(" ELR=");
     klog_hex64(elr);
     klog_putc('\n');
 
@@ -241,7 +241,7 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
         klog_error("[exception] EL1 fault → KERNEL PANIC\n");
         klog_error("[exception] SPSR=0x");
         klog_hex64(spsr);
-        klog_info("\n");
+        klog_error("\n");
 
         /* 死循环（panic） */
         for (;;)
@@ -320,9 +320,9 @@ void el1_serror_handler(uint64_t esr, uint64_t far, uint64_t elr)
 {
     klog_error("\n[ex] SError ESR=");
     klog_hex64(esr);
-    klog_info(" FAR=");
+    klog_error(" FAR=");
     klog_hex64(far);
-    klog_info(" ELR=");
+    klog_error(" ELR=");
     klog_hex64(elr);
     klog_putc('\n');
 

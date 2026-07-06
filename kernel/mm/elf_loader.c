@@ -24,6 +24,7 @@
 #include <kernel/types.h>
 #include <kernel/page_table.h>
 #include <kernel/virt_phys.h>
+#include <kernel/errno.h>
 #include <kernel/vmspace.h>
 #include <kernel/phys_mem.h>
 #include <kernel/mmu.h>
