@@ -74,7 +74,7 @@ static int32_t alloc_notify_index(void)
     if (s_free_notify_count == 0U)
     {
         ticket_lock_release(&s_notify_subsys_lock);
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_free_notify_count--;

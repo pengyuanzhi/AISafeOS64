@@ -294,14 +294,14 @@ kernel_status_t sharded_mq_dequeue(sharded_mq_t *mq, sharded_mq_msg_t *msg)
         if (shard_idx == mq->write_shard_idx)
         {
             /* 所有分片都为空 */
-            return -EAGAIN;
+            return -(int32_t)EAGAIN;
         }
     }
 
     if (shard->msg_count == 0U)
     {
         /* 仍然为空 */
-        return -EAGAIN;
+        return -(int32_t)EAGAIN;
     }
 
     /* 加锁 */
@@ -324,7 +324,7 @@ kernel_status_t sharded_mq_dequeue(sharded_mq_t *mq, sharded_mq_msg_t *msg)
     {
         /* 仍然为空 */
         ticket_lock_release(&shard->lock);
-        return -EAGAIN;
+        return -(int32_t)EAGAIN;
     }
 
     /* 计算读取位置 */

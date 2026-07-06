@@ -363,13 +363,6 @@ void hal_sev(void);
  */
 #define QEMU_UART0_BASE 0xFFFF000009000000UL
 
-/* ========== 定时器接口 ========== */
-
-/**
- * @brief 读取物理定时器计数值
- * @return CNTPCT_EL0 当前值
- */
-uint64_t hal_timer_get_count(void);
 
 /**
  * @brief 读取物理定时器频率
@@ -394,67 +387,6 @@ void hal_timer_set_compare(uint64_t val);
  * @param val 要写入 CNTP_CTL_EL0 的值
  */
 void hal_timer_set_control(uint64_t val);
-
-/* ========== 内存屏障接口 ========== */
-
-/**
- * @brief 数据内存屏障 (Inner Shareable)
- * @details 确保所有之前的内存访问在所有 inner shareable 域可见
- */
-void hal_dmb_ish(void);
-
-/**
- * @brief 数据内存屏障 (Inner Shareable, Store)
- * @details 仅确保之前的 store 操作在后续操作之前可见
- */
-void hal_dmb_ishst(void);
-
-/**
- * @brief 数据内存屏障 (Inner Shareable, Load)
- * @details 仅确保之前的 load 操作在后续操作之前可见
- */
-void hal_dmb_ishld(void);
-
-/* ========== 页表寄存器接口 ========== */
-
-/**
- * @brief 读取 TTBR0_EL1 寄存器
- * @return TTBR0_EL1 当前值
- */
-uint64_t hal_read_ttbr0(void);
-
-/**
- * @brief 读取 TTBR1_EL1 寄存器
- * @return TTBR1_EL1 当前值
- */
-uint64_t hal_read_ttbr1(void);
-
-/**
- * @brief 写入 TTBR0_EL1 寄存器
- * @param val 要写入的值
- */
-void hal_write_ttbr0(uint64_t val);
-
-/**
- * @brief 写入 TTBR1_EL1 寄存器
- * @param val 要写入的值
- */
-void hal_write_ttbr1(uint64_t val);
-
-/**
- * @brief 刷新指定 ASID 的 TLB
- * @param asid 地址空间标识
- */
-void hal_tlb_invalidate_asid(uint64_t asid);
-
-/* ========== 低功耗等待接口 ========== */
-
-/**
- * @brief 等待事件（低功耗 WFE）
- * @details 暂停 CPU 执行直到事件信号到达或中断发生
- */
-void hal_wfe(void);
-
 /* ========== 异常返回寄存器接口 ========== */
 
 /**

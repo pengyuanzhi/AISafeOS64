@@ -185,7 +185,7 @@ static int32_t select_msg_cache(uint32_t size)
     }
     else
     {
-        return -1; /* 不支持的大小 */
+        return -(int32_t)EINVAL; /* 不支持的大小 */
     }
 }
 
@@ -311,7 +311,7 @@ static int32_t alloc_endpoint_index(void)
     if (s_free_ep_count == 0U)
     {
         ticket_lock_release(&s_ep_subsys_lock);
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_free_ep_count--;
@@ -472,7 +472,7 @@ kernel_status_t ipc_endpoint_subsys_init(void)
     ret = ipc_msg_slab_init();
     if (ret != KERNEL_OK)
     {
-        return -ENOMEM;
+        return -(int32_t)ENOMEM;
     }
 
     /* 初始化空闲栈 */

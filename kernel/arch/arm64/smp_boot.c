@@ -292,7 +292,7 @@ uint32_t smp_get_cpu_id(void)
 
 percpu_t *smp_get_percpu(void)
 {
-    uint32_t cpu_id = smp_get_cpu_id();
+    uint32_t cpu_id = hal_get_cpu_id();
 
     if (cpu_id < CONFIG_MAX_CPUS)
     {

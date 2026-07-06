@@ -72,7 +72,7 @@ int32_t copy_from_user(void *dst, const void *src, uint64_t n)
 {
     if ((dst == NULL) || (src == NULL))
     {
-        return -EFAULT;
+        return -(int32_t)EFAULT;
     }
 
     if (n == 0U)
@@ -83,7 +83,7 @@ int32_t copy_from_user(void *dst, const void *src, uint64_t n)
     /* 验证用户源地址 */
     if (!access_ok(src, n))
     {
-        return -EFAULT;
+        return -(int32_t)EFAULT;
     }
 
     /* 安全复制（已验证边界） */
@@ -96,7 +96,7 @@ int32_t copy_to_user(void *dst, const void *src, uint64_t n)
 {
     if ((dst == NULL) || (src == NULL))
     {
-        return -EFAULT;
+        return -(int32_t)EFAULT;
     }
 
     if (n == 0U)
@@ -107,7 +107,7 @@ int32_t copy_to_user(void *dst, const void *src, uint64_t n)
     /* 验证用户目标地址 */
     if (!access_ok(dst, n))
     {
-        return -EFAULT;
+        return -(int32_t)EFAULT;
     }
 
     /* 安全复制（已验证边界） */
@@ -122,7 +122,7 @@ int32_t strncpy_from_user(char *dst, const char *src, uint32_t maxlen)
 
     if ((dst == NULL) || (src == NULL) || (maxlen == 0U))
     {
-        return -EFAULT;
+        return -(int32_t)EFAULT;
     }
 
     /* 逐字节复制并检查每个字节的可访问性 */
@@ -131,7 +131,7 @@ int32_t strncpy_from_user(char *dst, const char *src, uint32_t maxlen)
         /* 验证当前字节地址 */
         if (!access_ok(&src[i], 1U))
         {
-            return -EFAULT;
+            return -(int32_t)EFAULT;
         }
 
         dst[i] = src[i];

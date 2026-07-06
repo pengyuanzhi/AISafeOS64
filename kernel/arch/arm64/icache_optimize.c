@@ -170,12 +170,12 @@ kernel_status_t icache_warmup_register_func(icache_warmup_func_t func)
 {
     if (func == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     if (s_warmup_func_count >= ICACHE_WARMUP_FUNCS)
     {
-        return -ENOMEM;
+        return -(int32_t)ENOMEM;
     }
 
     s_warmup_funcs[s_warmup_func_count] = func;
@@ -291,12 +291,12 @@ kernel_status_t icache_optimize_get_stats(icache_stats_t *stats)
 {
     if (!s_icache_optimize_initialized)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     if (stats == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     ticket_lock_acquire(&s_icache_stats_lock);

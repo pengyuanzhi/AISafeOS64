@@ -89,7 +89,7 @@ static int32_t alloc_channel_index(void)
     if (s_free_ch_count == 0U)
     {
         ticket_lock_release(&s_ch_subsys_lock);
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_free_ch_count--;
@@ -123,7 +123,7 @@ static int32_t alloc_connection_index(void)
     if (s_free_conn_count == 0U)
     {
         ticket_lock_release(&s_ch_subsys_lock);
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_free_conn_count--;

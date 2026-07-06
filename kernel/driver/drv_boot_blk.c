@@ -14,6 +14,7 @@
 #include <arch/arm64/hal.h>
 #include <kernel/virt_phys.h>
 #include <stdint.h>
+#include <kernel/errno.h>
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -199,7 +200,7 @@ static int32_t boot_init_device(uint64_t mmio_base)
     qnum_max = mmio_read32(mmio_base, VIRTIO_MMIO_QUEUE_NUM_MAX);
     if (qnum_max == 0U)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     mmio_write32(mmio_base, VIRTIO_MMIO_QUEUE_NUM, BOOT_QUEUE_SIZE);
@@ -244,12 +245,12 @@ int32_t boot_blk_init(void)
     mmio_base = boot_find_device();
     if (mmio_base == 0ULL)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     if (boot_init_device(mmio_base) != 0)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_boot_mmio_base = mmio_base;
@@ -265,7 +266,7 @@ int32_t boot_blk_read_sector(uint64_t sector, void *buf)
 
     if ((s_boot_mmio_base == 0ULL) || (buf == NULL))
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
     mmio_base = s_boot_mmio_base;
 
@@ -312,7 +313,7 @@ int32_t boot_blk_read_sector(uint64_t sector, void *buf)
 
     if (timeout == 0U)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     /* DMA 一致性：invalidate data_buf 和 resp 的 cache，
@@ -323,7 +324,7 @@ int32_t boot_blk_read_sector(uint64_t sector, void *buf)
 
     if (s_resp_status != VIRTIO_BLK_S_OK)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     /* 拷贝数据 */
@@ -348,14 +349,14 @@ int32_t boot_blk_read(uint64_t offset, void *buf, uint32_t size)
 
     if ((offset % 512ULL != 0ULL) || (size % 512U != 0U))
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     for (s = 0U; s < nsectors; s++)
     {
         if (boot_blk_read_sector(sector + (uint64_t)s, dst + s * 512U) != 0)
         {
-            return -1;
+            return -(int32_t)EINVAL;
         }
     }
     return 0;

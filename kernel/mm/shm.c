@@ -76,7 +76,7 @@ static int32_t alloc_shm_index(void)
     if (s_free_shm_count == 0U)
     {
         ticket_lock_release(&s_shm_subsys_lock);
-        return -1;
+        return -(int32_t)EINVAL;
     }
 
     s_free_shm_count--;

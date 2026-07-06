@@ -235,12 +235,12 @@ kernel_status_t hot_data_cache_put(hot_data_type_t type, void *ptr)
 
     if (!s_hot_data_cache_initialized)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     if (ptr == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     ticket_lock_acquire(&s_hot_data_cache_lock);
@@ -361,12 +361,12 @@ kernel_status_t hot_data_cache_get_stats(uint32_t *hit_count,
 {
     if (!s_hot_data_cache_initialized)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     if ((hit_count == NULL) || (miss_count == NULL))
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     ticket_lock_acquire(&s_hot_data_cache_lock);

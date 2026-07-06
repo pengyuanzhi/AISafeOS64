@@ -67,7 +67,7 @@ int32_t ipc_batch_send(channel_t *channel, void *buffer,
 
     if (channel == NULL || buffer == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     /* 计算总大小 */
@@ -76,7 +76,7 @@ int32_t ipc_batch_send(channel_t *channel, void *buffer,
     /* 检查缓冲区大小 */
     if (total_size > SLAB_OBJECT_SIZE)
     {
-        return -ENOSPC;
+        return -(int32_t)ENOSPC;
     }
 
     /* 获取通道锁 */
@@ -121,7 +121,7 @@ int32_t ipc_batch_send_to(endpoint_t *endpoint, void *buffer,
 {
     if (endpoint == NULL || buffer == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     return ipc_batch_send(endpoint->channel, buffer,
@@ -156,7 +156,7 @@ int32_t ipc_batch_recv(channel_t *channel, void *buffer,
 
     if (channel == NULL || buffer == NULL || received == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     /* 获取通道锁 */
@@ -211,7 +211,7 @@ int32_t ipc_batch_recv_from(endpoint_t *endpoint, void *buffer,
 {
     if (endpoint == NULL || buffer == NULL || received == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     return ipc_batch_recv(endpoint->channel, buffer,
@@ -247,7 +247,7 @@ int32_t ipc_batch_transfer(channel_t *channel, void *send_buffer,
 
     if (channel == NULL || send_buffer == NULL || recv_buffer == NULL)
     {
-        return -EINVAL;
+        return -(int32_t)EINVAL;
     }
 
     *sent = 0;

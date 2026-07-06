@@ -766,7 +766,7 @@ static int32_t vma_compare(const void *key, const struct rb_node *node)
 
     if (vaddr < vma->start)
     {
-        return -1;
+        return -(int32_t)EINVAL;
     }
     else if (vaddr >= vma->end)
     {

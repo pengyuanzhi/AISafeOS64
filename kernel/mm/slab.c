@@ -350,7 +350,7 @@ int32_t slab_free(slab_cache_t *cache, void *ptr)
 
     ticket_lock_release_irqrestore(&cache->lock, irq_state);
 
-    return -ENOSYS; /* 对象未找到 */
+    return -(int32_t)ENOSYS; /* 对象未找到 */
 }
 
 /**

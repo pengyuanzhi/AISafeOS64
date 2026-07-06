@@ -185,7 +185,7 @@ static int32_t select_stack_cache(uint32_t size)
     }
     else
     {
-        return -1; /* 不支持的大小 */
+        return -(int32_t)EINVAL; /* 不支持的大小 */
     }
 }
 
@@ -500,7 +500,7 @@ kernel_status_t scheduler_init(void)
     ret = thread_stack_slab_init();
     if (ret != KERNEL_OK)
     {
-        return -ENOMEM;
+        return -(int32_t)ENOMEM;
     }
 
     /* 初始化所有 CPU 的就绪队列 */
@@ -561,7 +561,7 @@ kernel_status_t scheduler_init(void)
                              CONFIG_STACK_SIZE_DEFAULT);
         if (tid == THREAD_ID_INVALID)
         {
-            return -ENOMEM;
+            return -(int32_t)ENOMEM;
         }
 
         idle_thread = &g_scheduler.thread_table[tid];

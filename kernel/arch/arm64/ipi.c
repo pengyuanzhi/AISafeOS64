@@ -233,7 +233,7 @@ kernel_status_t ipi_broadcast(uint32_t ipi_type, bool exclude_self)
 {
     uint32_t cpu_id;
     uint8_t target_mask = 0U;
-    uint32_t self = smp_get_cpu_id();
+    uint32_t self = hal_get_cpu_id();
 
     if (ipi_type >= IPI_TYPE_COUNT)
     {
@@ -322,7 +322,7 @@ kernel_status_t ipi_flush_pending(uint32_t cpu_id)
 
 void ipi_flush_pending_self(void)
 {
-    uint32_t cpu_id = smp_get_cpu_id();
+    uint32_t cpu_id = hal_get_cpu_id();
     (void)ipi_flush_pending(cpu_id);
 }
 
@@ -407,7 +407,7 @@ kernel_status_t ipi_get_latency_stats(uint32_t cpu_id, ipi_latency_stats_t *stat
 
 void ipi_handler(uint32_t ipi_type)
 {
-    uint32_t cpu_id = smp_get_cpu_id();
+    uint32_t cpu_id = hal_get_cpu_id();
     uint64_t recv_ts;
     uint64_t send_ts;
     uint64_t latency_ticks;

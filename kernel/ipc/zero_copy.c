@@ -325,7 +325,7 @@ kernel_status_t zero_copy_receive(zero_copy_manager_t *manager,
     /* 查找指定源线程的消息 */
     if (!zero_copy_find_msg(manager, src_id, &region, &msg_idx))
     {
-        return -EAGAIN;
+        return -(int32_t)EAGAIN;
     }
 
     spin_lock(&region->lock);
@@ -337,7 +337,7 @@ kernel_status_t zero_copy_receive(zero_copy_manager_t *manager,
     if (msg->header.state != ZERO_COPY_MSG_IN_USE)
     {
         spin_unlock(&region->lock);
-        return -EAGAIN;
+        return -(int32_t)EAGAIN;
     }
 
     *data = msg->data;
