@@ -31,6 +31,7 @@
 #include <kernel/errno.h>
 #include <kernel/uaccess.h>
 #include <kernel/klog.h>
+#include <kernel/ramfs.h>
 #include <stdint.h>
 
 /* 子系统头文件 */
@@ -1061,6 +1062,7 @@ static void dispatch_process(syscall_frame_t *frame)
 /**
  * @brief 信号系统调用分发（0x0600-0x06FF）
  */
+static void dispatch_filesys(syscall_frame_t *frame);
 static void dispatch_signal(syscall_frame_t *frame)
 {
     extern kernel_status_t signal_kill(thread_id_t target_tid, uint32_t sig);
@@ -1094,6 +1096,111 @@ static void dispatch_signal(syscall_frame_t *frame)
             uint64_t mask = frame->x0;
             kernel_status_t ret = signal_procmask(mask);
             frame->x0 = (uint64_t)((ret == KERNEL_OK) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        default:
+        {
+            /* 文件系统 syscall 0x0680-0x0685 */
+            if ((nr >= 0x0680U) && (nr <= 0x0685U))
+            {
+                dispatch_filesys(frame);
+                break;
+            }
+            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+    }
+}
+
+/* ========================================================================
+ * 文件系统系统调用分发（0x0680-0x0685，RAMFS 直通）
+ * ======================================================================== */
+
+/**
+ * @brief 文件系统系统调用分发
+ *
+ * @details 直接调用内核 RAMFS，不需要用户态 FS 服务。
+ *          musl 的 fs_ipc.c 在 s_fs_endpoint == -1 时回退到此路径。
+ *
+ * @param frame 系统调用栈帧
+ */
+static void dispatch_filesys(syscall_frame_t *frame)
+{
+    uint32_t nr = (uint32_t)frame->x8;
+
+    switch (nr)
+    {
+        case SYS_OPEN:
+        {
+            const char *path = (const char *)(uintptr_t)frame->x0;
+            uint32_t flags = (uint32_t)frame->x1;
+            int32_t fd = ramfs_open(path, flags);
+            frame->x0 = (uint64_t)((fd >= 0) ? (uint64_t)fd : (uint64_t)(-(int64_t)EINVAL));
+            break;
+        }
+
+        case SYS_CLOSE:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            int32_t ret = ramfs_close(fd);
+            frame->x0 = (uint64_t)((ret >= 0) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_READ:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            void *buf = (void *)(uintptr_t)frame->x1;
+            uint32_t count = (uint32_t)frame->x2;
+
+            if ((count > 0U) && (!access_ok(buf, count)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            frame->x0 = (uint64_t)(int64_t)ramfs_read(fd, buf, count);
+            break;
+        }
+
+        case SYS_WRITE:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            const void *buf = (const void *)(uintptr_t)frame->x1;
+            uint32_t count = (uint32_t)frame->x2;
+
+            if ((count > 0U) && (!access_ok(buf, count)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            frame->x0 = (uint64_t)(int64_t)ramfs_write(fd, buf, count);
+            break;
+        }
+
+        case SYS_LSEEK:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            int32_t offset = (int32_t)frame->x1;
+            uint32_t whence = (uint32_t)frame->x2;
+            frame->x0 = (uint64_t)(int64_t)ramfs_lseek(fd, offset, whence);
+            break;
+        }
+
+        case SYS_FSTAT:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            void *statbuf = (void *)(uintptr_t)frame->x1;
+
+            if (!access_ok(statbuf, 64U))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            frame->x0 = (uint64_t)((ramfs_fstat(fd, statbuf) == 0) ? 0ULL : (uint64_t)(-(int64_t)EINVAL));
             break;
         }
 

@@ -110,6 +110,14 @@ typedef struct
 #define SYS_SIGNAL_KILL            0x0601U   /**< @brief 发送信号 */
 #define SYS_SIGNAL_PROCMASK        0x0602U   /**< @brief 设置信号屏蔽字 */
 
+/* --- 文件系统（0x0680 - 0x06FF） --- */
+#define SYS_OPEN                   0x0680U   /**< @brief 打开文件（RAMFS） */
+#define SYS_CLOSE                  0x0681U   /**< @brief 关闭文件 */
+#define SYS_READ                   0x0682U   /**< @brief 读文件 */
+#define SYS_WRITE                  0x0683U   /**< @brief 写文件 */
+#define SYS_LSEEK                  0x0684U   /**< @brief 文件定位 */
+#define SYS_FSTAT                  0x0685U   /**< @brief 获取文件状态 */
+
 /* --- 定时器（0x0700 - 0x07FF） --- */
 #define SYS_TIMER_CREATE           0x0700U   /**< @brief 创建定时器 */
 #define SYS_TIMER_SETTIME          0x0701U   /**< @brief 设置定时时间 */
