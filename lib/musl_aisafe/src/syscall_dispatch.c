@@ -865,27 +865,25 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
      * 信号
      * ================================================================ */
     case __NR_rt_sigaction:
-        /* 保存 signal handler（暂不实现） */
-        return 0;
+        return aisafe_svc_call(0x0600, a0, a1, a2, 0, 0, 0);
 
     case __NR_rt_sigprocmask:
-        /* 保存 signal mask（暂不实现） */
-        return 0;
+        return aisafe_svc_call(0x0602, a0, 0, 0, 0, 0, 0);
 
     case __NR_rt_sigreturn:
-        return -ENOSYS;
+        return 0;
 
     case __NR_sigaltstack:
-        return -ENOSYS;
+        return 0;
 
     case __NR_kill:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0601, a0, a1, 0, 0, 0, 0);
 
     case __NR_tkill:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0601, a0, a1, 0, 0, 0, 0);
 
     case __NR_tgkill:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0601, a1, a2, 0, 0, 0, 0);
 
     /* ================================================================
      * 网络
