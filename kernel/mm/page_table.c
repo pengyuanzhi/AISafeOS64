@@ -306,6 +306,7 @@ void page_table_free(page_table_t *table)
  *          到达 L3 后，根据 perm 和 is_user 参数设置 PTE 属性，
  *          写入物理地址和属性组合。
  *
+    hal_console_puts("PT\n");
  * @param pgd     顶层页表（L0）指针（不得为 NULL）
  * @param vaddr   虚拟地址（建议 4KB 对齐）
  * @param paddr   物理地址（建议 4KB 对齐）
