@@ -1177,6 +1177,11 @@ static void dispatch_filesys(syscall_frame_t *frame)
             }
 
             frame->x0 = (uint64_t)(int64_t)ramfs_write(fd, buf, count);
+            /* fd 1/2 是 stdout/stderr → flush 到 UART */
+            if ((fd == 1) || (fd == 2))
+            {
+                klog_flush();
+            }
             break;
         }
 

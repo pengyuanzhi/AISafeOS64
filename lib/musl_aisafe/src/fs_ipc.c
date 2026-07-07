@@ -260,7 +260,7 @@ int fs_client_init(void)
     /* s_fs_endpoint = service_discover(SERVICE_FS_MANAGER); */
 
     /* 临时：使用固定端点（需要根据实际情况调整） */
-    s_fs_endpoint = 1;
+    s_fs_endpoint = -1; // 使用 RAMFS 直通（后续切换到 FS 服务 IPC）
 
     return 0;
 }
@@ -287,11 +287,23 @@ int fs_open(const char *path, int flags, mode_t mode)
         return -1;
     }
 
+    /* 如果 FS 服务端点未初始化，回退到内核 RAMFS 直通 */
+    if (s_fs_endpoint < 0)
+    {
+        /* RAMFS_O_* 映射 */
+        uint32_t ramfs_flags = 0U;
+        if ((flags & 0x1U) != 0U) { ramfs_flags |= 0x1U; } /* WRONLY */
+        if ((flags & 0x2U) != 0U) { ramfs_flags |= 0x2U; } /* RDWR */
+        if ((flags & 0x40U) != 0U) { ramfs_flags |= 0x40U; } /* CREAT */
+        ret = aisafe_svc_call(0x0680, (long)path, (long)ramfs_flags, 0, 0, 0, 0);
+        return (int)ret;
+    }
+
     /* 分配文件描述符 */
     fd = fs_alloc_fd();
     if (fd < 0)
     {
-        return -1;  /* EMFILE */
+        return -1;
     }
 
     /* 构造请求消息 */
@@ -360,10 +372,17 @@ int fs_close(int fd)
     fs_msg_reply_t reply;
     long ret;
 
+    /* 如果 FS 服务端点未初始化，回退到内核 RAMFS 直通 */
+    if (s_fs_endpoint < 0)
+    {
+        ret = aisafe_svc_call(0x0681, (long)fd, 0, 0, 0, 0, 0);
+        return (int)ret;
+    }
+
     /* 验证文件描述符 */
     if (fs_validate_fd(fd) != 0)
     {
-        return -1;  /* EBADF */
+        return -1;
     }
 
     /* 构造请求消息 */
@@ -425,6 +444,13 @@ long fs_read(int fd, void *buf, size_t count)
     fs_msg_read_t req;
     fs_msg_reply_t reply;
     long ret;
+
+    /* 如果 FS 服务端点未初始化，回退到内核 RAMFS 直通 */
+    if (s_fs_endpoint < 0)
+    {
+        ret = aisafe_svc_call(0x0682, (long)fd, (long)buf, (long)count, 0, 0, 0);
+        return ret;
+    }
 
     /* 参数验证 */
     if (fs_validate_fd(fd) != 0)
@@ -500,6 +526,13 @@ long fs_write(int fd, const void *buf, size_t count)
     fs_msg_write_t req;
     fs_msg_reply_t reply;
     long ret;
+
+    /* 如果 FS 服务端点未初始化，回退到内核 RAMFS 直通 */
+    if (s_fs_endpoint < 0)
+    {
+        ret = aisafe_svc_call(0x0683, (long)fd, (long)buf, (long)count, 0, 0, 0);
+        return ret;
+    }
 
     /* 参数验证 */
     if (fs_validate_fd(fd) != 0)
