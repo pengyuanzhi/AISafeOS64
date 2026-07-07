@@ -175,6 +175,19 @@ struct statx
 
 /* 调试/信息 (0x0500 - 0x05FF) */
 #define AISAFE_SYS_DEBUG_PRINT          0x0500
+#define AISAFE_SYS_PROCESS_CREATE     0x0500
+#define AISAFE_SYS_PROCESS_EXIT       0x0501
+#define AISAFE_SYS_PROCESS_WAIT       0x0502
+#define AISAFE_SYS_PROCESS_GETPID     0x0503
+#define AISAFE_SYS_SIGNAL_ACTION      0x0600
+#define AISAFE_SYS_SIGNAL_KILL        0x0601
+#define AISAFE_SYS_SIGNAL_PROCMASK    0x0602
+#define AISAFE_SYS_TIMER_CREATE       0x0700
+#define AISAFE_SYS_TIMER_SETTIME      0x0701
+#define AISAFE_SYS_TIMER_DELETE       0x0702
+#define AISAFE_SYS_NANOSLEEP          0x0703
+#define AISAFE_SYS_CLOCK_GETTIME      0x0704
+#define AISAFE_SYS_DEBUG_PRINT_NEW    0x0800
 #define AISAFE_SYS_SYSTEM_INFO          0x0501
 
 /* ========================================================================
@@ -390,25 +403,31 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
         return aisafe_svc0(AISAFE_SYS_THREAD_YIELD);
 
     case __NR_clone:
-        /* clone 暂不支持，由用户态 fork 实现 */
-        return -ENOSYS;
+    {
+        uint32_t new_tid = 0;
+        long ret = aisafe_svc_call(0x0500, a0, a1, 0, 0, 0, 0);
+        (void)new_tid;
+        return ret;
+    }
 
     case __NR_execve:
-        /* execve 暂不支持，由用户态 exec 实现 */
+        (void)a0; (void)a1; (void)a2;
         return -ENOSYS;
 
     case __NR_fork:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0500, 0, 0, 0, 0, 0, 0);
 
     case __NR_vfork:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0500, 0, 0, 0, 0, 0, 0);
 
     case __NR_wait4:
-        /* wait4 暂不支持 */
-        return -ENOSYS;
+    {
+        long ret = aisafe_svc_call(0x0502, a0, a1, a2, 0, 0, 0);
+        return ret;
+    }
 
     case __NR_waitid:
-        return -ENOSYS;
+        return aisafe_svc_call(0x0502, a0, 0, 0, 0, 0, 0);
 
     /* ================================================================
      * 内存管理
