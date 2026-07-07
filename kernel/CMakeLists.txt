@@ -146,7 +146,6 @@ set(KERNEL_SOURCES
     ${KERNEL_DRIVER_SOURCES}
     ${KERNEL_ELF_LOADER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
-    ${CMAKE_SOURCE_DIR}/include/kernel/process_impl.c
 )
 
 # 分离 ASM 文件
