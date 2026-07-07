@@ -693,7 +693,7 @@ static void dispatch_memory(syscall_frame_t *frame)
                     cur_paddr = paddr + offset;
                 }
 
-                map_ret = page_table_map(user_pgd, vaddr + offset,
+                map_ret = page_table_map_block(user_pgd, vaddr + offset,
                                          cur_paddr,
                                          (paddr != 0ULL)
                                              ? perm
