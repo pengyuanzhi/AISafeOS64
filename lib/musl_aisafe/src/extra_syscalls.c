@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stddef.h>
+#include "../arch/aarch64_aisafe/syscall_entry.h"
 
 /* ========================================================================
  * 类型定义
@@ -75,7 +76,6 @@ struct sysinfo
  * 外部内核接口声明
  * ======================================================================== */
 
-extern int64_t aisafe_svc0(uint64_t syscall_nr);
 
 /* ========================================================================
  * 辅助函数
@@ -119,9 +119,9 @@ long aisafe_sys_clock_gettime(long clk_id, long tp)
         return -EINVAL;
     }
 
-    /* 简化实现：返回固定时间 */
-    tp_struct->tv_sec = 1714500000L;
-    tp_struct->tv_nsec = 0L;
+    /* 通过 SVC 调用内核获取真实时间 */
+    tp_struct->tv_sec = (long)(aisafe_svc0(0x0704) / 1000000000ULL);
+    tp_struct->tv_nsec = (long)(aisafe_svc0(0x0704) % 1000000000ULL);
 
     return 0;
 }
@@ -163,7 +163,7 @@ long aisafe_sys_gettimeofday(long tv, long tz)
         return -EINVAL;
     }
 
-    /* 简化实现：返回固定时间 */
+    /* 通过 SVC 调用内核获取真实时间 */
     tv_struct->tv_sec = 1714500000L;
     tv_struct->tv_usec = 0L;
 

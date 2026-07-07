@@ -927,7 +927,21 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
      * 线程/同步
      * ================================================================ */
     case __NR_futex:
+    {
+        /* 简化 futex：FUTEX_WAIT(0) → nanosleep，FUTEX_WAKE(1) → 唤醒 */
+        int futex_op = (int)(a1 & 0x7F);
+        if (futex_op == 0)
+        {
+            /* FUTEX_WAIT：简化为立即返回（无竞争检测） */
+            return 0;
+        }
+        if (futex_op == 1)
+        {
+            /* FUTEX_WAKE：无操作（单线程环境足够） */
+            return (long)a2;
+        }
         return -ENOSYS;
+    }
 
     case __NR_set_tid_address:
         /* 忽略 — Linux 用于设置 clear_child_tid */
@@ -943,7 +957,19 @@ long aisafe_syscall_dispatch(long nr, long a0, long a1, long a2,
      * 其他
      * ================================================================ */
     case __NR_getrandom:
-        return -ENOSYS;
+    {
+        /* 简化实现：用硬件计数器填充随机字节 */
+        char *buf = (char *)a0;
+        unsigned long len = (unsigned long)a1;
+        unsigned long i;
+        unsigned long seed = aisafe_svc0(0x0704);
+        for (i = 0; i < len; i++)
+        {
+            seed = seed * 1103515245UL + 12345UL;
+            buf[i] = (char)((seed >> 16) & 0xFF);
+        }
+        return (long)len;
+    }
 
     case __NR_pipe2:
         return aisafe_sys_pipe2(a0, a1);
