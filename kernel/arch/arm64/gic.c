@@ -35,6 +35,7 @@
 #include <kernel/barrier.h>
 #include <kernel/errno.h>
 #include <stdint.h>
+#include <kernel/platform.h>
 #include "hal.h"
 
 /* ========================================================================
@@ -151,7 +152,7 @@
  *          0xFFFF000008000000。实际项目应通过设备树或平台配置获取。
  */
 #ifndef GICD_BASE_ADDR
-#define GICD_BASE_ADDR        ((uintptr_t)0xFFFF000008000000ULL)
+#define GICD_BASE_ADDR        ((uintptr_t)PLATFORM_GICD_VA)
 #endif
 
 /**
@@ -162,7 +163,7 @@
  *          经高地址线性映射后为 0xFFFF000008010000。
  */
 #ifndef GICC_BASE_ADDR
-#define GICC_BASE_ADDR        ((uintptr_t)0xFFFF000008010000ULL)
+#define GICC_BASE_ADDR        ((uintptr_t)PLATFORM_GICC_VA)
 #endif
 
 /* ========================================================================

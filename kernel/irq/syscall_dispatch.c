@@ -32,6 +32,7 @@
 #include <kernel/uaccess.h>
 #include <kernel/klog.h>
 #include <kernel/ramfs.h>
+#include <kernel/platform.h>
 #include <stdint.h>
 
 /* 子系统头文件 */
@@ -133,17 +134,17 @@ static page_table_t *get_current_user_pgd(void)
 static bool is_valid_mmio_addr(uint64_t paddr)
 {
     /* UART: 0x09000000-0x09000FFF */
-    if ((paddr >= 0x09000000ULL) && (paddr < 0x09001000ULL))
+    if ((paddr >= PLATFORM_UART_PHYS) && (paddr < 0x09001000ULL))
     {
         return true;
     }
     /* GIC: 0x08000000-0x08010FFF */
-    if ((paddr >= 0x08000000ULL) && (paddr < 0x08011000ULL))
+    if ((paddr >= PLATFORM_GICD_PHYS) && (paddr < 0x08011000ULL))
     {
         return true;
     }
     /* virtio-mmio: 0x0A000000-0x0A003FFF */
-    if ((paddr >= 0x0A000000ULL) && (paddr < 0x0A004000ULL))
+    if ((paddr >= PLATFORM_VIRTIO_PHYS) && (paddr < 0x0A004000ULL))
     {
         return true;
     }

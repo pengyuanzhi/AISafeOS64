@@ -354,14 +354,11 @@ void hal_wfi(void);
  */
 void hal_sev(void);
 
-/* ========== QEMU UART 基地址 ========== */
+/* ========== 平台硬件地址（platform.h 单一真源） ========== */
+#include <kernel/platform.h>
 
-/** @brief QEMU virt 平台 PL011 UART0 基地址（TTBR1 高地址线性映射）
- *
- * @details 物理地址 0x09000000 经线性映射偏移 KERNEL_VA_OFFSET
- *          (0xFFFF000000000000) 映射到高地址 0xFFFF000009000000。
- */
-#define QEMU_UART0_BASE 0xFFFF000009000000UL
+/** @brief UART 基地址（兼容旧代码引用，来自 platform.h） */
+#define QEMU_UART0_BASE PLATFORM_UART_VA
 
 
 /**
