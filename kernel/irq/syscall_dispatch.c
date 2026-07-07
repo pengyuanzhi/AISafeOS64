@@ -1224,6 +1224,8 @@ static void dispatch_debug(syscall_frame_t *frame)
                     }
                     klog_putc(c);
                 }
+                /* 用户态打印后立即 flush 到 UART */
+                klog_flush();
                 frame->x0 = 0U;
             }
             else

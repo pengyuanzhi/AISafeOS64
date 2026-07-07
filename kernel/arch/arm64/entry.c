@@ -612,10 +612,10 @@ void kernel_main(void)
     }
 
     /* ---- 启动调度器（永不返回）----
-     * scheduler_start 会从就绪队列取第一个线程（idle 或 init）切入。
-     * init 线程优先级 > idle，会被优先调度执行。 */
-
-    /* ---- 启动调度器（永不返回）---- */
+     * scheduler_start 会从就绪队列取第一个线程切入。
+     * init 线程优先级 > idle，会被优先调度执行。
+     * scheduler_start 永不返回，启动阶段日志需在此之前 flush。 */
+    klog_flush();
     scheduler_start();
 
     /* 永不到达 */
