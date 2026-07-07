@@ -389,6 +389,7 @@ kernel_status_t elf_load_and_run(const uint8_t *elf_data, uint32_t elf_size,
     /* 配置为用户态线程 */
     thread = &g_scheduler.thread_table[tid];
     thread->is_user = 1U;
+    thread->pid = (uint32_t)(uintptr_t)user_space;  /* 唯一标识此进程 */
     thread->user_sp = (vaddr_t)user_sp;
     thread->user_pgd = user_pgd_pa;  /* 存物理地址（mmu_switch_to_user 用） */
 
