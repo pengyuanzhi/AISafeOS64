@@ -118,6 +118,18 @@ typedef struct
 #define SYS_LSEEK                  0x0684U   /**< @brief 文件定位 */
 #define SYS_FSTAT                  0x0685U   /**< @brief 获取文件状态 */
 
+/* --- 网络 Socket（0x0690 - 0x069F） --- */
+#define SYS_SOCKET                 0x0690U   /**< @brief 创建 socket */
+#define SYS_BIND                  0x0691U   /**< @brief 绑定地址 */
+#define SYS_LISTEN                0x0692U   /**< @brief 监听连接 */
+#define SYS_ACCEPT                0x0693U   /**< @brief 接受连接 */
+#define SYS_CONNECT               0x0694U   /**< @brief 连接服务器 */
+#define SYS_SENDTO                0x0695U   /**< @brief 发送数据 */
+#define SYS_RECVFROM              0x0696U   /**< @brief 接收数据 */
+#define SYS_SHUTDOWN              0x0697U   /**< @brief 关闭连接 */
+#define SYS_GETSOCKNAME           0x0698U   /**< @brief 获取本地地址 */
+#define SYS_GETPEERNAME           0x0699U   /**< @brief 获取远端地址 */
+
 /* --- 定时器（0x0700 - 0x07FF） --- */
 #define SYS_TIMER_CREATE           0x0700U   /**< @brief 创建定时器 */
 #define SYS_TIMER_SETTIME          0x0701U   /**< @brief 设置定时时间 */

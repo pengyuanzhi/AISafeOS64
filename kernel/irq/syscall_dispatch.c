@@ -34,6 +34,7 @@
 #include <kernel/ramfs.h>
 #include <kernel/virt_phys.h>
 #include <kernel/platform.h>
+#include <kernel/socket.h>
 #include <stdint.h>
 
 /* 子系统头文件 */
@@ -1068,6 +1069,7 @@ static void dispatch_process(syscall_frame_t *frame)
 /**
  * @brief 信号系统调用分发（0x0600-0x06FF）
  */
+static void dispatch_socket(syscall_frame_t *frame);
 static void dispatch_filesys(syscall_frame_t *frame);
 static void dispatch_signal(syscall_frame_t *frame)
 {
@@ -1113,6 +1115,12 @@ static void dispatch_signal(syscall_frame_t *frame)
                 dispatch_filesys(frame);
                 break;
             }
+            /* socket syscall 0x0690-0x069F */
+            if ((nr >= 0x0690U) && (nr <= 0x069FU))
+            {
+                dispatch_socket(frame);
+                break;
+            }
             frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
             break;
         }
@@ -1131,6 +1139,7 @@ static void dispatch_signal(syscall_frame_t *frame)
  *
  * @param frame 系统调用栈帧
  */
+static void dispatch_socket(syscall_frame_t *frame);
 static void dispatch_filesys(syscall_frame_t *frame)
 {
     uint32_t nr = (uint32_t)frame->x8;
@@ -1226,6 +1235,117 @@ static void dispatch_filesys(syscall_frame_t *frame)
 /* ========================================================================
  * 定时器系统调用分发
  * ======================================================================== */
+
+/* ========================================================================
+ * Socket 系统调用分发（0x0690-0x069F）
+ * ======================================================================== */
+
+/**
+ * @brief Socket 系统调用分发
+ *
+ * @details 内核回环模式 socket，不依赖用户态 net 服务。
+ *
+ * @param frame 系统调用栈帧
+ */
+static void dispatch_socket(syscall_frame_t *frame)
+{
+    uint32_t nr = (uint32_t)frame->x8;
+
+    switch (nr)
+    {
+        case SYS_SOCKET:
+        {
+            uint32_t domain = (uint32_t)frame->x0;
+            uint32_t type = (uint32_t)frame->x1;
+            uint32_t protocol = (uint32_t)frame->x2;
+            int32_t fd = sys_socket(domain, type, protocol);
+            frame->x0 = (uint64_t)((fd >= 0) ? (uint64_t)fd : (uint64_t)(-(int64_t)EINVAL));
+            break;
+        }
+
+        case SYS_BIND:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            uint32_t port = (uint32_t)frame->x1;
+            int32_t ret = sys_bind(fd, port);
+            frame->x0 = (uint64_t)((ret >= 0) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_LISTEN:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            uint32_t backlog = (uint32_t)frame->x1;
+            int32_t ret = sys_listen(fd, backlog);
+            frame->x0 = (uint64_t)((ret >= 0) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_ACCEPT:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            int32_t new_fd = sys_accept(fd);
+            frame->x0 = (uint64_t)((new_fd >= 0) ? (uint64_t)new_fd : (uint64_t)(-(int64_t)EINVAL));
+            break;
+        }
+
+        case SYS_CONNECT:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            uint32_t port = (uint32_t)frame->x1;
+            int32_t ret = sys_connect(fd, port);
+            frame->x0 = (uint64_t)((ret >= 0) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        case SYS_SENDTO:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            const void *buf = (const void *)(uintptr_t)frame->x1;
+            uint32_t len = (uint32_t)frame->x2;
+            int32_t peer_fd = (int32_t)frame->x3;
+
+            if ((len > 0U) && (!access_ok(buf, len)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            frame->x0 = (uint64_t)(int64_t)sys_sendto(fd, buf, len, peer_fd);
+            break;
+        }
+
+        case SYS_RECVFROM:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            void *buf = (void *)(uintptr_t)frame->x1;
+            uint32_t len = (uint32_t)frame->x2;
+
+            if ((len > 0U) && (!access_ok(buf, len)))
+            {
+                frame->x0 = (uint64_t)(-(int64_t)EFAULT);
+                break;
+            }
+
+            frame->x0 = (uint64_t)(int64_t)sys_recvfrom(fd, buf, len);
+            break;
+        }
+
+        case SYS_SHUTDOWN:
+        {
+            int32_t fd = (int32_t)frame->x0;
+            int32_t ret = sys_shutdown(fd);
+            frame->x0 = (uint64_t)((ret >= 0) ? 0ULL : (uint64_t)(-(int64_t)ret));
+            break;
+        }
+
+        default:
+        {
+            frame->x0 = (uint64_t)(-(int64_t)ENOSYS);
+            break;
+        }
+    }
+}
 
 /**
  * @brief 定时器系统调用分发（0x0700-0x07FF）

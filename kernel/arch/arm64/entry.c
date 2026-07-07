@@ -555,12 +555,14 @@ void kernel_main(void)
     {
         extern kernel_status_t process_subsys_init(void);
         extern void ramfs_init(void);
+        extern void socket_subsys_init(void);
         extern kernel_status_t elf_load_and_run(const uint8_t *elf_data,
                                                  uint32_t elf_size,
                                                  const char *thread_name);
 
         /* 初始化内核 RAMFS（用户态文件操作直通） */
         ramfs_init();
+        socket_subsys_init();
         klog_info("[k] RAMFS inited\n");
 
         /* 嵌入 hello_start ELF（最小用户态冒烟测试）
