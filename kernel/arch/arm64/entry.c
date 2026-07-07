@@ -524,41 +524,9 @@ void kernel_main(void)
     /* ---- 第八步：初始化 SMP 多核 ---- */
     klog_info("[k] SMP init\n");
 
-    /* ---- 驱动框架初始化 ---- */
-    klog_info("[k] Driver framework init\n");
-    ret = driver_subsys_init();
-    if (ret != KERNEL_OK)
-    {
-        klog_warn("[k] WARN: driver subsys fail\n");
-    }
-    /* ---- 注册平台设备 ---- */
-    {
-        /* PL011 UART @ 0x09000000, IRQ 33 */
-        (void)device_register("pl011", DRIVER_TYPE_UART,
-                              (paddr_t)QEMU_UART0_BASE, 0x1000ULL, 33U, NULL);
-
-        /* VirtIO Block 由引导读取器管理，不再注册到驱动框架 */
-        /* (void)device_register("virtio,blk", ...); */
-
-        /* 执行设备探测 */
-        ret = device_probe_all();
-
-        /* 打印驱动统计 */
-        {
-            driver_stats_t stats;
-            driver_get_stats(&stats);
-            klog_info("[k] drivers: ");
-            uart_print_uint((uint64_t)stats.total_drivers);
-            klog_info(", devices: ");
-            uart_print_uint((uint64_t)stats.total_devices);
-            klog_info(", probed: ");
-            uart_print_uint((uint64_t)stats.probe_count);
-            klog_putc('\n');
-        }
-        (void)ret;
-    }
-
-    /* ---- VirtIO MMIO 设备扫描（由引导读取器 boot_blk 接管）---- */
+    /* ---- 设备发现（设备树解析，阶段 B3）----
+     * 当前硬件地址硬编码在 HAL 层（hal.h QEMU_UART0_BASE），
+     * 后续引入 libfdt 从设备树动态获取。 */
 
     ret = smp_init();
     if (ret != KERNEL_OK)

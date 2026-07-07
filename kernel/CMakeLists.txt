@@ -119,12 +119,6 @@ set(KERNEL_IRQ_SOURCES
 )
 
 # ==============================================================================
-# 驱动框架源文件 (driver/)
-# ==============================================================================
-set(KERNEL_DRIVER_SOURCES
-    driver/driver_core.c
-    driver/drv_boot_blk.c
-)
 
 # ==============================================================================
 # ELF 加载器源文件 (mm/)
@@ -144,7 +138,6 @@ set(KERNEL_SOURCES
     ${KERNEL_CAP_SOURCES}
     ${KERNEL_MM_SOURCES}
     ${KERNEL_IRQ_SOURCES}
-    ${KERNEL_DRIVER_SOURCES}
     ${KERNEL_ELF_LOADER_SOURCES}
     ${CMAKE_SOURCE_DIR}/lib/kernel_string.c
 )
