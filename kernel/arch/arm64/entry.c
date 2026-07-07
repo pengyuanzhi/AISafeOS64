@@ -231,6 +231,7 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
 
         /* EL0 异常：终止用户线程 */
         klog_error("[exception] EL0 fault → terminating user thread\n");
+        klog_flush();
         kthread_exit();
         /* kthread_exit 不返回，但保险起见设置 elr */
         *elr_ptr = elr + 4U;
@@ -238,10 +239,15 @@ void exception_sync_handler(uint64_t esr, uint64_t far,
     else
     {
         /* EL1 异常：内核 panic */
-        klog_error("[exception] EL1 fault → KERNEL PANIC\n");
-        klog_error("[exception] SPSR=0x");
-        klog_hex64(spsr);
-        klog_error("\n");
+        klog_panic("\n[ex] KERNEL PANIC EL1\n");
+        klog_panic("[ex] EC=");
+        {
+            char h[4] = {'0', 'x', '0', '0'};
+            h[2] = (char)((ec < 16) ? ('0' + ec) : ('A' + ec - 10));
+            h[3] = '\n';
+            h[2] = (ec < 10) ? (char)('0' + ec) : (char)('A' + ec - 10);
+            klog_panic(h);
+        }
 
         /* 死循环（panic） */
         for (;;)

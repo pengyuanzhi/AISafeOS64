@@ -32,6 +32,7 @@
 #include <kernel/uaccess.h>
 #include <kernel/klog.h>
 #include <kernel/ramfs.h>
+#include <kernel/virt_phys.h>
 #include <kernel/platform.h>
 #include <stdint.h>
 
@@ -116,7 +117,7 @@ static page_table_t *get_current_user_pgd(void)
     {
         return NULL;
     }
-    return (page_table_t *)(uintptr_t)current->user_pgd;
+    return (page_table_t *)phys_to_virt((paddr_t)current->user_pgd);
 }
 
 /**
@@ -693,7 +694,11 @@ static void dispatch_memory(syscall_frame_t *frame)
                 }
 
                 map_ret = page_table_map(user_pgd, vaddr + offset,
-                                         cur_paddr, perm, true);
+                                         cur_paddr,
+                                         (paddr != 0ULL)
+                                             ? perm
+                                             : perm,
+                                         true);
                 if (map_ret != KERNEL_OK)
                 {
                     frame->x0 = (uint64_t)(-(int64_t)ENOMEM);
