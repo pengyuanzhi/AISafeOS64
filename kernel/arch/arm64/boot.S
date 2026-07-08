@@ -87,19 +87,38 @@ kernel_entry:
  */
 .Lel2_entry:
 .Ldrop_from_el2:
-    /* 禁用 EL2 阶段翻译（HCR_EL2） */
+    /* ---- EL2 Hypervisor 初始化 ---- */
+    /* HCR_EL2 = 0：禁用所有 trap 和 stage-2 翻译 */
     msr     hcr_el2, xzr
 
-    /* 配置 SCTLR_EL1：禁用 MMU（后续 boot.S 启用） */
+    /* VTCR_EL2：配置 stage-2 页表格式（48位 IPA，4KB 粒度）
+     * T0SZ=16, TG0=4KB, SH0=Inner, ORGN0/IRGN0=WB, PS=40bit */
+    ldr     x20, =0x80803525
+    msr     vtcr_el2, x20
+
+    /* CNTHCTL_EL2 = 0：允许 EL1 访问物理定时器 */
+    msr     cnthctl_el2, xzr
+
+    /* CPTR_EL2 = 0：允许 FP/NEON（不 trap） */
+    msr     cptr_el2, xzr
+
+    /* VPIDR_EL2 = 0：Guest 使用真实 MIDR */
+    msr     vpidr_el2, xzr
+
+    /* VMPIDR_EL2 = 真实 MPIDR */
+    mrs     x20, mpidr_el1
+    msr     vmpidr_el2, x20
+    isb
+
+    /* ---- 配置 SCTLR_EL1：禁用 MMU ---- */
     mov     x20, #(1 << 12)          /* I 位：使能指令缓存 */
     orr     x20, x20, #(1 << 2)      /* C 位：使能数据缓存 */
     msr     sctlr_el1, x20
 
-    /* 设置 EL1 返回状态 */
+    /* ---- 降级到 EL1 ---- */
     mov     x20, #0x3C5              /* EL1h, DAIF 全部掩码 */
     msr     spsr_el2, x20
 
-    /* 设置返回地址 */
     adr     x20, .Lel1_entry
     msr     elr_el2, x20
 
