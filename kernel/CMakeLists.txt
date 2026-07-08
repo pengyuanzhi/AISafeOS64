@@ -50,6 +50,8 @@ set(KERNEL_ARCH_SOURCES
     arch/arm64/ipi.c
     arch/arm64/hypervisor.c
     arch/arm64/stage2.c
+    arch/arm64/el2_handler.S
+    arch/arm64/vcpu.c
     arch/arm64/secure_boot.c
     arch/arm64/smp_boot.c
     arch/arm64/icache_optimize.c
